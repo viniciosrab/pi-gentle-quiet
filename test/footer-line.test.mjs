@@ -179,3 +179,33 @@ test("older saved true/false values still work", async () => {
 	const all = plain((await footer({ config: { statusLine: { tokens: true } }, statuses: {} })).component.render(160)[0]);
 	assert.match(all, /↑1\.2k ↓300 R50k/);
 });
+
+// A provider like claude-bridge: no price per token, no OAuth reported to Pi.
+const unpriced = (extra = {}) => ({
+	model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true },
+	subscription: false,
+	entries: [{ type: "message", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } }],
+	...extra,
+});
+
+test("a zero cost without a known subscription is hidden, like Pi's own footer", async () => {
+	const line = plain((await footer({ session: unpriced(), statuses: {} })).component.render(160)[0]);
+	assert.doesNotMatch(line, /\$/);
+	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% $/);
+});
+
+test("a provider marked as subscription shows sub instead of $0.000", async () => {
+	const config = { statusLine: { subscriptionProviders: ["claude-bridge"] } };
+	const line = plain((await footer({ session: unpriced(), statuses: {}, config })).component.render(160)[0]);
+	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% · sub $/);
+	assert.doesNotMatch(line, /\$0/);
+});
+
+test("the menu marks the current provider as subscription and back, and saves it", async () => {
+	const { select, seen } = picker(/^Subscription \(claude-bridge\)/, /^Subscription \(claude-bridge\)/);
+	const { commands, ctx } = await footer({ session: unpriced(), statuses: {}, load: { select } });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[0].items.includes("Subscription (claude-bridge): off"));
+	assert.ok(seen[1].items.includes("Subscription (claude-bridge): on"));
+	assert.deepEqual(readConfig().statusLine.subscriptionProviders, []);
+});

@@ -56,7 +56,8 @@ const DEFAULTS = {
 	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
 	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true },
+	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -108,6 +109,8 @@ function merge(user = {}) {
 const TOKEN_MODES = ["cache", "all", "off"];
 // Older versions saved tokens as true/false.
 function tokensMode(statusLine) {
+	if (!Array.isArray(statusLine.subscriptionProviders)) statusLine.subscriptionProviders = [];
+	statusLine.subscriptionProviders = statusLine.subscriptionProviders.filter((id) => typeof id === "string");
 	const value = statusLine.tokens;
 	statusLine.tokens = value === true ? "all" : value === false ? "off" : TOKEN_MODES.includes(value) ? value : DEFAULTS.statusLine.tokens;
 	return statusLine;
@@ -495,6 +498,11 @@ async function configure(ctx) {
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
+			...(ctx.model?.provider ? [[`Subscription (${ctx.model.provider}): ${onOff(config.statusLine.subscriptionProviders.includes(ctx.model.provider))}`, () => {
+				const provider = ctx.model.provider;
+				const list = config.statusLine.subscriptionProviders;
+				config.statusLine.subscriptionProviders = list.includes(provider) ? list.filter((id) => id !== provider) : [...list, provider];
+			}]] : []),
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
@@ -962,12 +970,14 @@ function statusLineRows(t, footerData, width) {
 	const percent = typeof usage?.percent === "number" ? usage.percent : null;
 	let subscription = false;
 	try {
-		subscription = Boolean(model && ctx?.modelRegistry?.isUsingOAuth?.(model));
+		subscription = Boolean(model && (ctx?.modelRegistry?.isUsingOAuth?.(model) || config.statusLine.subscriptionProviders.includes(model.provider)));
 	} catch {
 		subscription = false;
 	}
 	const totals = sessionTotals(ctx);
-	const costText = `$${totals.cost >= 1 ? totals.cost.toFixed(2) : totals.cost.toFixed(3)}${subscription ? " sub" : ""}`;
+	// Like Pi's footer: no cost for an unpriced, unknown plan; "sub" alone when a plan costs nothing per call.
+	const amount = `$${totals.cost >= 1 ? totals.cost.toFixed(2) : totals.cost.toFixed(3)}`;
+	const costText = !config.statusLine.cost ? "" : totals.cost > 0 ? join(amount, subscription && "sub") : subscription ? "sub" : "";
 
 	const counts = changes?.files
 		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
@@ -1027,14 +1037,14 @@ function statusLineRows(t, footerData, width) {
 			stage.model && modelText(stage.effort),
 			stage.inline && statusText,
 		].filter(Boolean).join(sep);
-		const right = [stage.tokens && tokens(stage.cache), contextText, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
+		const right = [stage.tokens && tokens(stage.cache), contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
 		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
 		if (gap < (left ? 2 : 0)) continue;
 		const line = ` ${left}${" ".repeat(gap)}${right} `;
 		if (stage.inline || !statuses.length) return [line];
 		return [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")];
 	}
-	const right = [contextText, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
+	const right = [contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
 	const line = truncateToWidth(` ${right}`, width, "…");
 	return statuses.length ? [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")] : [line];
 }

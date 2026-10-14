@@ -44,10 +44,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.5.0
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.5.1
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.5.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.5.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -90,6 +90,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Subagent results | minimal (restart to apply) |
 | Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
 | Status line tokens | `cache` (`R W CH%`); `all` adds `↑ ↓`; `off` |
+| Subscription (current provider) | off; on shows `sub` for a plan Pi cannot detect, such as claude-bridge |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
@@ -104,6 +105,9 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
 - Pi draws a message type with the first extension that registered it. Local extensions load
   before packages; as a package, list `git:github.com/viniciosrab/pi-gentle-quiet` before
   `npm:gentle-pi` in `packages` so subagent results use the quiet row.
+- A zero cost is hidden unless the provider is a known subscription, like Pi's own footer. Providers that
+  bill through a plan without telling Pi (claude-bridge reports every call at $0) can be marked in
+  `/gentle-quiet` → **Subscription (<provider>)** to show `sub`.
 - The status line reads changes with `git` (against `HEAD`, untracked files included) after each turn and
   tool call. It does not show subscription usage or the active Gentle profile.
 - Switching **Subagent results** back to the original card applies after a restart.
