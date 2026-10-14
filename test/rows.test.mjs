@@ -64,3 +64,13 @@ test("turning the input prompt icon off restores Pi's editor and keeps it off", 
 	await emit("before_agent_start");
 	assert.equal(editor(), undefined, "not reinstalled while the option is off");
 });
+
+test("Tool rows: original leaves gentle-pi and memory rows as their packages draw them", async () => {
+	const { select } = picker(/^Tool rows/);
+	const { tool, commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	const base = { renderCall() {}, renderResult() {} };
+	assert.equal(tool("todo", base), base);
+	assert.equal(tool("subagent_run", base), base);
+	assert.equal(tool("mem_search", base), base);
+});

@@ -47,13 +47,16 @@ const DEFAULTS = {
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: Nerd Font brain outline (nf-md-brain), drawn in the theme color like any text.
 	icons: { memory: "\u{F09D1}", todo: "≡", agents: "◈", other: "›" },
-	tools: { margin: true }, // Pi's one-column margin for gentle and memory tool rows
+	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
+	// margin: Pi's one-column margin for those rows.
+	tools: { restyle: true, margin: true },
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
 	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
-	statusLine: { enabled: true, changes: true, tokens: true, cost: true },
+	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -97,9 +100,17 @@ function merge(user = {}) {
 		quiet: { ...DEFAULTS.quiet, ...user.quiet },
 		blocks: { ...DEFAULTS.blocks, ...user.blocks },
 		subagents: { ...DEFAULTS.subagents, ...user.subagents },
-		statusLine: { ...DEFAULTS.statusLine, ...user.statusLine },
+		statusLine: tokensMode({ ...DEFAULTS.statusLine, ...user.statusLine }),
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
 	};
+}
+
+const TOKEN_MODES = ["cache", "all", "off"];
+// Older versions saved tokens as true/false.
+function tokensMode(statusLine) {
+	const value = statusLine.tokens;
+	statusLine.tokens = value === true ? "all" : value === false ? "off" : TOKEN_MODES.includes(value) ? value : DEFAULTS.statusLine.tokens;
+	return statusLine;
 }
 
 function loadConfig() {
@@ -472,6 +483,7 @@ async function configure(ctx) {
 			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }],
 			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }],
 			...ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }]),
+			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
 			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
 			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
@@ -481,7 +493,7 @@ async function configure(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
-			[`Status line tokens: ${onOff(config.statusLine.tokens)}`, () => { config.statusLine.tokens = !config.statusLine.tokens; }],
+			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
@@ -970,16 +982,21 @@ function statusLineRows(t, footerData, width) {
 		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "syntaxFunction", effort)}`)
 		: "";
 	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
+	// "cache" mode keeps the hit rate when the terminal narrows; "all" keeps ↑ ↓ instead.
 	const tokens = (withCache) => {
-		if (!config.statusLine.tokens) return "";
+		const mode = config.statusLine.tokens;
+		if (mode === "off") return "";
+		const cached = totals.cacheRead || totals.cacheWrite;
 		const parts = [];
-		if (totals.input) parts.push(`↑${formatTokens(totals.input)}`);
-		if (totals.output) parts.push(`↓${formatTokens(totals.output)}`);
+		if (mode === "all") {
+			if (totals.input) parts.push(`↑${formatTokens(totals.input)}`);
+			if (totals.output) parts.push(`↓${formatTokens(totals.output)}`);
+		}
 		if (withCache) {
 			if (totals.cacheRead) parts.push(`R${formatTokens(totals.cacheRead)}`);
 			if (totals.cacheWrite) parts.push(`W${formatTokens(totals.cacheWrite)}`);
-			if ((totals.cacheRead || totals.cacheWrite) && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		}
+		if ((withCache || mode === "cache") && cached && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
 	};
 	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
@@ -1181,6 +1198,7 @@ export default async function (pi) {
 		pi.registerToolRenderer((toolName, next) => {
 			const renderers = next();
 			if (!renderers) return renderers;
+			if (!config.tools.restyle && (toolName.startsWith("mem_") || SELF_TOOLS.test(toolName))) return renderers;
 			if (toolName.startsWith("mem_") && chrome?.humanToolName && chrome?.renderResultText) {
 				return memoryRenderers(chrome, toolName, renderers);
 			}

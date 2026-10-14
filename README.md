@@ -29,7 +29,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 
 | Area | Before | After |
 |---|---|---|
-| Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `· Perm: Normal` on the left, `↑1.2k ↓300 R50k W2.0k CH98.0% · ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub` on the right; counters give way first, and statuses move to a second row only when they still do not fit |
+| Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `· Perm: Normal` on the left, `R50k W2.0k CH98.0% · ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub` on the right; counters give way first, and statuses move to a second row only when they still do not fit |
 | Footer statuses | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
 | Memory calls | `🧠 search "x" …` | `󰧑 search "x"` drawn like Pi's own tool rows |
 | gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
@@ -44,10 +44,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.4.1
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.5.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.4.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.5.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -83,12 +83,13 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Permission in footer / label / hidden when normal | on / `Perm` / shown |
 | YOLO banner | hidden |
 | Icons: memory / todo / agents / other gentle tools | `󰧑` / `≡` / `◈` / `›` |
-| Tool row margin | on |
+| Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
 | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
-| Status line / changes / tokens / cost | `gentle` (`pi` gives the footer back to Pi) / on / on / on |
+| Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
+| Status line tokens | `cache` (`R W CH%`); `all` adds `↑ ↓`; `off` |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.

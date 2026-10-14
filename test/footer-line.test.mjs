@@ -58,7 +58,7 @@ test("replaces Pi's footer: Perm right after the model and effort, counters on t
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
+	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
 });
 
 test("on narrow terminals the counters give way before Perm leaves the first line", async () => {
@@ -77,7 +77,7 @@ test("token counters come from every usage Pi records, like Pi's footer", async 
 		{ type: "message", message: { role: "toolResult", usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.2 } } } },
 		{ type: "usage", usage: { input: 0, output: 950, cacheRead: 0, cacheWrite: 0, cost: { total: 0.3 } } },
 	];
-	const line = plain((await footer({ session: { entries }, statuses: {} })).component.render(160)[0]);
+	const line = plain((await footer({ session: { entries }, statuses: {}, config: { statusLine: { tokens: "all" } } })).component.render(160)[0]);
 	assert.match(line, / ↑1\.0k ↓1\.0k · ctx /, "no cache counters when there was no caching");
 	assert.match(line, /\$0\.600 sub $/);
 });
@@ -101,7 +101,7 @@ test("the context gauge turns warning at 80% and error at 95%", async () => {
 });
 
 test("API-key models show plain cost; models without reasoning show no effort", async () => {
-	const line = plain((await footer({ session: { subscription: false, model: { id: "gpt-x", reasoning: false } }, statuses: {} })).component.render(160)[0]);
+	const line = plain((await footer({ session: { subscription: false, model: { id: "gpt-x", reasoning: false } }, statuses: {}, config: { statusLine: { tokens: "all" } } })).component.render(160)[0]);
 	assert.match(line, / gpt-x +↑1\.2k .* ctx .* \$1\.75 $/);
 });
 
@@ -136,7 +136,7 @@ test("with the status line off, the footer is left to Pi", async () => {
 });
 
 test("narrow terminals drop the cache details, then the tokens, before context and cost", async () => {
-	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
+	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {}, config: { statusLine: { tokens: "all" } } });
 	const at = (width) => plain(component.render(width)[0]);
 	assert.match(at(110), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
 	assert.match(at(100), /medium +↑1\.2k ↓300 · ctx/, "cache goes first, effort stays");
@@ -149,4 +149,33 @@ test("Status line tokens can be turned off", async () => {
 	const line = plain((await footer({ config: { statusLine: { tokens: false } }, statuses: {} })).component.render(160)[0]);
 	assert.doesNotMatch(line, /↑|↓|CH/);
 	assert.match(line, /ctx ▰/);
+});
+
+test("by default the counters show only the cache: R, W and the hit rate", async () => {
+	const line = plain((await footer({ statuses: {} })).component.render(160)[0]);
+	assert.match(line, / R50k W2\.0k CH98\.0% · ctx /);
+	assert.doesNotMatch(line, /↑|↓/);
+});
+
+test("in cache mode a narrow terminal keeps the hit rate after R and W go", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
+	assert.match(plain(component.render(88)[0]), /medium +CH98\.0% · ctx/);
+	assert.doesNotMatch(plain(component.render(88)[0]), /R50k/);
+});
+
+test("Status line tokens cycles cache → all → off and is saved", async () => {
+	const { select, seen } = picker(/^Status line tokens/, /^Status line tokens/, /^Status line tokens/);
+	const { commands, ctx, footer: current } = await footer({ load: { select }, statuses: {} });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[0].items.includes("Status line tokens: cache"));
+	assert.ok(seen[1].items.includes("Status line tokens: all"));
+	assert.ok(seen[2].items.includes("Status line tokens: off"));
+	assert.equal(readConfig().statusLine.tokens, "cache");
+	const line = plain(current()({ requestRender() {} }, theme, footerData({})).render(160)[0]);
+	assert.match(line, / R50k W2\.0k CH98\.0% · ctx /);
+});
+
+test("older saved true/false values still work", async () => {
+	const all = plain((await footer({ config: { statusLine: { tokens: true } }, statuses: {} })).component.render(160)[0]);
+	assert.match(all, /↑1\.2k ↓300 R50k/);
 });
