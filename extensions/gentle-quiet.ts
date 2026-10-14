@@ -627,7 +627,7 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 		case "edit": {
 			const { added, removed } = diffCounts(result?.details?.diff);
 			const counts = added || removed ? `${fg(t, "toolDiffAdded", `+${added}`)} ${fg(t, "toolDiffRemoved", `-${removed}`)}` : "edited";
-			return { summary: join(fg(t, "success", "✓"), counts, seconds(context.durationMs) && fg(t, "dim", `· ${seconds(context.durationMs)}`)), preview: String(result?.details?.diff ?? "").split("\n").filter((line) => /^[+-]\s*\d/.test(line)), diff: true };
+			return { summary: join(fg(t, "success", "✓"), counts, seconds(context.durationMs) && fg(t, "dim", `· ${seconds(context.durationMs)}`)), preview: String(result?.details?.diff ?? "").split("\n").filter((line) => /^[+-]\s*\d/.test(line)), diff: true, minPreview: 2 };
 		}
 		case "write": {
 			const written = String(args.content ?? "").split("\n").length;

@@ -35,6 +35,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
+| `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed |
 | Prompt | Pi's editor | Pi's editor with a `❯` in front of the input and of sent messages |
 
@@ -94,6 +95,7 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
   affected item falls back to its original look; Pi keeps working.
 - Mouse clicks on the Todos/Agents header can land one row off; use the keyboard shortcuts.
 - Quiet rows expand with `ctrl+o`, not with a click. Toggling quiet tools applies to new calls.
+- Pi's live diff preview while an `edit` is being applied is not shown; the summary appears when it ends.
 - Pi draws a message type with the first extension that registered it. Local extensions load
   before packages; as a package, list `git:github.com/viniciosrab/pi-gentle-quiet` before
   `npm:gentle-pi` in `packages` so subagent results use the quiet row.
