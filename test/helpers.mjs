@@ -36,12 +36,14 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 	const commands = {};
 	const toolResolvers = [];
 	const messageRenderers = {};
+	const entryRenderers = {};
 	const markdown = [];
 	await extension({
 		on: (event, handler) => ((handlers[event] ??= []).push(handler)),
 		registerCommand: (name, command) => (commands[name] = command),
 		registerToolRenderer: (resolver) => toolResolvers.push(resolver),
 		registerMessageRenderer: (type, renderer) => (messageRenderers[type] = renderer),
+		registerEntryRenderer: (type, renderer) => (entryRenderers[type] = renderer),
 		registerMarkdownTransformer: (transformer) => markdown.push(transformer),
 		getThinkingLevel: () => thinking,
 	});
@@ -84,7 +86,7 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 	/** The renderers Pi would use for a tool whose own renderers are `base`. */
 	const tool = (name, base = {}) => toolResolvers.reduceRight((next, resolver) => () => resolver(name, next), () => base)();
 
-	return { ctx, ui, status, widgets, notices, commands, tool, messageRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
+	return { ctx, ui, status, widgets, notices, commands, tool, messageRenderers, entryRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
 }
 
 /** Renders a component (or a tool row) to plain lines at `width`. */

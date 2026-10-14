@@ -1041,6 +1041,36 @@ function agentResultRenderer(message, options = {}, t) {
 	};
 }
 
+// Stale results: a subagent finished while the orchestrator was busy, so
+// gentle-agents keeps it out of the conversation and leaves a transcript entry.
+const AGENTS_STALE_RESULT_TYPE = "gentle-agents.stale-result";
+
+function staleResultRenderer(entry, options = {}, t) {
+	const data = entry?.data ?? {};
+	const agent = clean(String(data.agent ?? "subagent")) || "subagent";
+	const status = clean(String(data.status ?? "finished").replace(/_/g, " "));
+	const seconds = Number.isFinite(data.ageSeconds) ? Math.max(0, Math.round(data.ageSeconds)) : 0;
+	const age = seconds < 90 ? `${seconds}s` : seconds < 3600 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
+	const taskId = clean(String(data.taskId ?? ""));
+	const label = clean(String(data.label ?? ""));
+	const head = join(fg(t, "toolTitle", bold(t, join(config.icons.agents, agent))), fg(t, "dim", "·"), fg(t, "warning", "stale"));
+	const summary = `${fg(t, "dim", "└")} ${fg(t, "dim", `${status} ${age} ago while the orchestrator was busy`)}`;
+	const detail = `Not replayed here; read it with subagent_result ${taskId}${label ? ` (${label})` : ""}.`;
+	return {
+		render(width) {
+			if (options.expanded) {
+				return [` ${head}`, ` ${summary}`, truncateToWidth(`   ${fg(t, "toolOutput", detail)}`, width, "…")].map((line) => truncateToWidth(line, width, "…"));
+			}
+			const hint = expandHint(t);
+			const left = ` ${head}`;
+			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
+			const top = gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…");
+			return [top, truncateToWidth(` ${summary}`, width, "…")];
+		},
+		invalidate() {},
+	};
+}
+
 export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
@@ -1075,6 +1105,9 @@ export default async function (pi) {
 	// before packages, and a package must be listed before gentle-pi to take over.
 	if (config.subagents.minimal && typeof pi.registerMessageRenderer === "function") {
 		pi.registerMessageRenderer(AGENTS_RESULT_TYPE, agentResultRenderer);
+	}
+	if (config.subagents.minimal && typeof pi.registerEntryRenderer === "function") {
+		pi.registerEntryRenderer(AGENTS_STALE_RESULT_TYPE, staleResultRenderer);
 	}
 
 	pi.registerMarkdownTransformer?.((markdown, context) => {

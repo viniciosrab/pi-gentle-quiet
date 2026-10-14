@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, painted, theme, picker, readConfig } from "./helpers.mjs";
+import { load, lines, painted, theme, picker, readConfig, writeConfig } from "./helpers.mjs";
 
 const RESULT = "gentle-agents.result";
 // Shape gentle-agents sends: a completion header paragraph, then the child's answer.
@@ -59,4 +59,30 @@ test("subagent results can be switched back to the original card (after restart)
 	await commands["gentle-quiet"].handler("", ctx);
 	assert.ok(seen[0].items.some((item) => /^Subagent results: minimal \(restart to apply\)$/.test(item)));
 	assert.equal(readConfig().subagents.minimal, false);
+});
+
+const STALE = "gentle-agents.stale-result";
+const stale = { customType: STALE, data: { taskId: "t7", agent: "gentle-ai-explore", label: "map files", status: "completed", ageSeconds: 130 } };
+
+test("a stale subagent result is a quiet row with when it finished", async () => {
+	writeConfig({});
+	const { entryRenderers } = await load();
+	const renderer = entryRenderers[STALE];
+	assert.ok(renderer, "stale result renderer registered");
+	const out = lines(renderer(stale, { expanded: false }, theme), 80).map((line) => line.trimEnd());
+	assert.equal(out.length, 2);
+	assert.match(out[0], /^ ◈ gentle-ai-explore · stale +ctrl\+o to expand$/);
+	assert.equal(out[1], " └ completed 2m ago while the orchestrator was busy");
+	assert.ok(painted(renderer(stale, { expanded: false }, theme).render(80)[0], "warning", "stale"));
+});
+
+test("expanding a stale result says how to read it", async () => {
+	writeConfig({});
+	const { entryRenderers } = await load();
+	const out = lines(entryRenderers[STALE](stale, { expanded: true }, theme), 80).map((line) => line.trimEnd());
+	assert.deepEqual(out, [
+		" ◈ gentle-ai-explore · stale",
+		" └ completed 2m ago while the orchestrator was busy",
+		"   Not replayed here; read it with subagent_result t7 (map files).",
+	]);
 });
