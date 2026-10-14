@@ -47,7 +47,8 @@ const DEFAULTS = {
 	tools: { margin: true }, // Pi's one-column margin for gentle and memory tool rows
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
-	quiet: { enabled: true, preview: 0, codemode: "failures" },
+	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
+	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -467,6 +468,7 @@ async function configure(ctx) {
 			...ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }]),
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
 			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
+			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
 			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
 			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
@@ -681,9 +683,29 @@ function expandHint(t) {
 }
 
 /** Summary row with the expand hint right-aligned; the hint is dropped when it does not fit. */
-function quietResultComponent({ summary, hint, rest }) {
+const HINT_MODES = ["last", "all", "never"];
+// Calls in the order they first rendered; the hint follows the newest finished one.
+// Pi's ctrl+o expands every call at once, so one visible hint is enough.
+const callOrder = new Map();
+let latestFinished = -1;
+
+function orderOf(toolCallId, finished) {
+	let order = toolCallId === undefined ? undefined : callOrder.get(toolCallId);
+	if (order === undefined) {
+		order = callOrder.size;
+		if (toolCallId !== undefined) callOrder.set(toolCallId, order);
+		else callOrder.set(Symbol("call"), order);
+	}
+	if (finished) latestFinished = Math.max(latestFinished, order);
+	return order;
+}
+
+const hintVisible = (order) => config.quiet.hint === "all" || (config.quiet.hint === "last" && order === latestFinished);
+
+function quietResultComponent({ summary, hint: available, rest }, order) {
 	return {
 		render(width) {
+			const hint = available && hintVisible(order) ? available : "";
 			const lines = [];
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
@@ -742,7 +764,8 @@ function quietRenderers(toolName, renderers) {
 					// fall back to the summary below
 				}
 			}
-			return quietResultComponent(quietResultText(toolName, result, options, context, t));
+			const order = orderOf(context.toolCallId, !options.isPartial);
+			return quietResultComponent(quietResultText(toolName, result, options, context, t), order);
 		},
 	};
 }
@@ -841,6 +864,8 @@ export default async function (pi) {
 
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
+		callOrder.clear(); // a new or resumed session redraws its calls from the start
+		latestFinished = -1;
 		patch(ctx);
 		applyEditor(ctx);
 	});

@@ -42,10 +42,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.2.1
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.2.2
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.2.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.2.2` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -83,6 +83,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Icons: memory / todo / agents / other gentle tools | `󰧑` / `≡` / `◈` / `›` |
 | Tool row margin | on |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
+| Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
