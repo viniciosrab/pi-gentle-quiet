@@ -58,7 +58,8 @@ const DEFAULTS = {
 	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
 	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, subscriptionProviders: [] },
+	// mcp: "MCP online/installed" among the statuses.
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -497,6 +498,7 @@ async function configure(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
+			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
 			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }],
@@ -1074,7 +1076,11 @@ function statusLineRows(t, footerData, width) {
 		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: true },
 		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: false },
 	];
-	const statusText = statuses.map((text) => fg(t, "dim", text)).join(sep);
+	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
+	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
+	const mcpPainted = mcp ? fg(t, mcp.online < mcp.total ? "warning" : "dim", mcpPlain) : "";
+	const statusText = [...statuses.map((text) => fg(t, "dim", text)), mcpPainted].filter(Boolean).join(sep);
+	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	for (const stage of stages) {
 		const left = [
 			stage.location && location(stage.counts),
@@ -1085,15 +1091,88 @@ function statusLineRows(t, footerData, width) {
 		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
 		if (gap < (left ? 2 : 0)) continue;
 		const line = ` ${left}${" ".repeat(gap)}${right} `;
-		if (stage.inline || !statuses.length) return [line];
-		return [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")];
+		if (stage.inline || !secondRow.length) return [line];
+		return [line, truncateToWidth(` ${secondRow.join("  ")}`, width, "…")];
 	}
 	const right = [contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
 	const line = truncateToWidth(` ${right}`, width, "…");
-	return statuses.length ? [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")] : [line];
+	return secondRow.length ? [line, truncateToWidth(` ${secondRow.join("  ")}`, width, "…")] : [line];
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
+let piApi; // the extension API, for the MCP tool and server lists
+
+// ---------------------------------------------------------------------------
+// MCP servers: online / installed
+// ---------------------------------------------------------------------------
+
+// Pi's tool namespace for a server (mcpNamespace in Pi's MCP support).
+const mcpNamespace = (server) => `mcp__${String(server).replace(/-/g, "_")}`;
+const MCP_TTL_MS = 1000;
+let mcpCache = { at: 0, cwd: undefined, value: undefined };
+
+function readMcpFile(file) {
+	try {
+		const servers = JSON.parse(readFileSync(file, "utf8"))?.mcpServers;
+		return servers && typeof servers === "object" && !Array.isArray(servers) ? servers : {};
+	} catch {
+		return {}; // missing or malformed: the same as no servers
+	}
+}
+
+/** Installed = enabled servers from the global file, the trusted project file and extensions. */
+function installedMcpServers(ctx) {
+	const found = new Map();
+	const add = (name, config) => {
+		if (config?.enabled === false) found.delete(name);
+		else if (config && typeof config === "object") found.set(name, config);
+	};
+	for (const [name, config] of Object.entries(readMcpFile(path.join(AGENT_DIR, "mcp.json")))) add(name, config);
+	let trusted = false;
+	try {
+		trusted = Boolean(ctx?.isProjectTrusted?.());
+	} catch {
+		trusted = false;
+	}
+	const cwd = ctx?.sessionManager?.getCwd?.();
+	if (trusted && cwd) for (const [name, config] of Object.entries(readMcpFile(path.join(cwd, ".pi", "mcp.json")))) add(name, config);
+	try {
+		for (const server of piApi?.getMcpServers?.() ?? []) if (!found.has(server.name)) add(server.name, server.config ?? {});
+	} catch {
+		// servers registered by extensions are optional
+	}
+	return [...found.keys()];
+}
+
+/** { online, total } or undefined when no MCP servers are installed; cached briefly because the footer renders often. */
+function mcpCounts(ctx) {
+	const cwd = ctx?.sessionManager?.getCwd?.();
+	if (Date.now() - mcpCache.at < MCP_TTL_MS && mcpCache.cwd === cwd) return mcpCache.value;
+	const installed = installedMcpServers(ctx);
+	let value;
+	if (installed.length) {
+		// Pi hides a server's tools when it disconnects, so a server is online while it has a visible tool.
+		const live = new Set();
+		try {
+			for (const tool of piApi?.getAllTools?.() ?? []) {
+				if (tool?.exposure !== "hidden" && typeof tool?.namespace?.name === "string") live.add(tool.namespace.name);
+			}
+		} catch {
+			// no tool list: treat every server as offline rather than guess
+		}
+		value = { online: installed.filter((name) => live.has(mcpNamespace(name))).length, total: installed.length };
+	}
+	mcpCache = { at: Date.now(), cwd, value };
+	return value;
+}
+
+/** Re-reads the counts now and redraws the footer when they changed (servers connect after startup). */
+function refreshMcp(ctx) {
+	const before = JSON.stringify(mcpCache.value);
+	mcpCache.at = 0;
+	mcpCounts(ctx);
+	if (JSON.stringify(mcpCache.value) !== before) footerTui?.requestRender?.();
+}
 
 function footerFactory(tui, t, footerData) {
 	footerTui = tui;
@@ -1200,12 +1279,16 @@ export default async function (pi) {
 	const chrome = await loadEngramChrome();
 
 	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
+	piApi = pi;
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
 		liveCtx = ctx;
 		totalsCache.count = -1;
+		mcpCache = { at: 0, cwd: undefined, value: undefined };
 		applyFooter(ctx, true);
 		refreshChanges();
+		// MCP servers connect after startup (Pi waits up to ~10s): look again as they come up.
+		for (const delay of [1500, 4000, 11000]) setTimeout(() => refreshMcp(ctx), delay).unref?.();
 		callOrder.clear(); // a new or resumed session redraws its calls from the start
 		latestFinished = -1;
 		patch(ctx);
@@ -1218,6 +1301,7 @@ export default async function (pi) {
 			applyEditor(ctx);
 			// Files change through tools and turns; a short delay batches bursts of calls.
 			if (event !== "before_agent_start") refreshChanges(500);
+			refreshMcp(ctx);
 		});
 	}
 	// Pi resets extension UI after shutdown; forget the editor so the next start reinstalls it.

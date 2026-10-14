@@ -46,6 +46,9 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 		registerEntryRenderer: (type, renderer) => (entryRenderers[type] = renderer),
 		registerMarkdownTransformer: (transformer) => markdown.push(transformer),
 		getThinkingLevel: () => thinking,
+		// MCP: tools Pi has registered (mcp__<server>__<tool>) and servers extensions registered.
+		getAllTools: () => (session.tools ?? []).map((tool) => (typeof tool === "string" ? { name: tool, exposure: "codemode", namespace: { name: tool.split("__").slice(0, 2).join("__") } } : tool)),
+		getMcpServers: () => session.extensionServers ?? [],
 	});
 
 	const status = {};
@@ -69,6 +72,7 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 		ui,
 		mode,
 		hasUI: true,
+		isProjectTrusted: () => session.projectTrusted ?? false,
 		model: session.model,
 		getContextUsage: () => session.usage,
 		modelRegistry: {
