@@ -29,7 +29,8 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 
 | Area | Before | After |
 |---|---|---|
-| Footer | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
+| Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub`, plus the extension statuses row |
+| Footer statuses | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
 | Memory calls | `🧠 search "x" …` | `󰧑 search "x"` drawn like Pi's own tool rows |
 | gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
@@ -42,10 +43,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.2.2
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.3.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.2.2` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.3.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -86,6 +87,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
+| Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
@@ -100,6 +102,8 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
 - Pi draws a message type with the first extension that registered it. Local extensions load
   before packages; as a package, list `git:github.com/viniciosrab/pi-gentle-quiet` before
   `npm:gentle-pi` in `packages` so subagent results use the quiet row.
+- The status line reads changes with `git` (against `HEAD`, untracked files included) after each turn and
+  tool call. It does not show subscription usage or the active Gentle profile.
 - Switching **Subagent results** back to the original card applies after a restart.
 
 ## Development

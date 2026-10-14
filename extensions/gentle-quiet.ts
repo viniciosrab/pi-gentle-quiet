@@ -6,6 +6,8 @@
 //   tools   "🧠 search “x” …", "✿todo · write", "❀ agent run"
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
+//   footer  Pi's footer -> " ~/app main ±2 +3 -1 · model · effort      ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub"
+//           plus the extension statuses row (Gentle Shell's bar, without the brand and usage)
 //   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
@@ -21,7 +23,8 @@
 
 import { CustomEditor, getAgentDir, keyHint } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -49,6 +52,8 @@ const DEFAULTS = {
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
 	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
+	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
+	statusLine: { enabled: true, changes: true, cost: true },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -92,6 +97,7 @@ function merge(user = {}) {
 		quiet: { ...DEFAULTS.quiet, ...user.quiet },
 		blocks: { ...DEFAULTS.blocks, ...user.blocks },
 		subagents: { ...DEFAULTS.subagents, ...user.subagents },
+		statusLine: { ...DEFAULTS.statusLine, ...user.statusLine },
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
 	};
 }
@@ -473,6 +479,9 @@ async function configure(ctx) {
 			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
+			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
+			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
+			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
@@ -491,6 +500,7 @@ async function configure(ctx) {
 		}
 		redraw();
 		applyEditor(ctx);
+		applyFooter(ctx);
 	}
 }
 
@@ -819,6 +829,179 @@ function gentleRenderers(renderers, group) {
 }
 
 // ---------------------------------------------------------------------------
+// Status line (Pi's footer)
+// ---------------------------------------------------------------------------
+
+const GAUGE_CELLS = 8;
+let liveCtx; // latest context, so the footer reads the current session and model
+let footerTui; // the TUI that renders our footer, to redraw after a git refresh
+let footerInstalled = false;
+const changesByCwd = new Map(); // cwd -> { files, added, deleted }
+let changesTimer;
+const costCache = { count: -1, total: 0 };
+
+const run = (cwd, args) =>
+	new Promise((resolve) => {
+		execFile("git", ["-C", cwd, ...args], { timeout: 3000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => resolve(error ? undefined : stdout));
+	});
+
+/** Uncommitted changes against HEAD, untracked files included, like Gentle Shell's Changes. */
+async function readChanges(cwd) {
+	const tracked = await run(cwd, ["diff", "HEAD", "--numstat"]);
+	if (tracked === undefined) return undefined; // not a repository, or no commit yet
+	let files = 0;
+	let added = 0;
+	let deleted = 0;
+	for (const line of tracked.split("\n")) {
+		const [a, d] = line.split("\t");
+		if (a === undefined || d === undefined) continue;
+		files++;
+		added += Number(a) || 0; // "-" for binary files
+		deleted += Number(d) || 0;
+	}
+	const untracked = (await run(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])) ?? "";
+	for (const file of untracked.split("\0").filter(Boolean)) {
+		files++;
+		try {
+			const full = path.join(cwd, file);
+			if (statSync(full).size > 1024 * 1024) continue;
+			const text = readFileSync(full, "utf8");
+			added += text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+		} catch {
+			// unreadable: count the file, not its lines
+		}
+	}
+	return { files, added, deleted };
+}
+
+function refreshChanges(delay = 0) {
+	clearTimeout(changesTimer);
+	changesTimer = setTimeout(async () => {
+		const cwd = liveCtx?.sessionManager?.getCwd?.();
+		if (!cwd || !config.statusLine.enabled || !config.statusLine.changes) return;
+		const next = await readChanges(cwd);
+		const previous = changesByCwd.get(cwd);
+		changesByCwd.set(cwd, next);
+		if (JSON.stringify(previous) !== JSON.stringify(next)) footerTui?.requestRender?.();
+	}, delay);
+	changesTimer.unref?.();
+}
+
+function sessionCost(ctx) {
+	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+	if (entries.length === costCache.count) return costCache.total;
+	let total = 0;
+	for (const entry of entries) {
+		if (entry?.type === "message" && entry.message?.role === "assistant") total += entry.message.usage?.cost?.total ?? 0;
+	}
+	costCache.count = entries.length;
+	costCache.total = total;
+	return total;
+}
+
+function gauge(percent, t) {
+	const value = Math.max(0, Math.min(100, percent ?? 0));
+	const filled = Math.round((value / 100) * GAUGE_CELLS);
+	const tone = percent === null || percent === undefined ? "dim" : percent >= 95 ? "error" : percent >= 80 ? "warning" : "accent";
+	return `${filled ? fg(t, tone, "▰".repeat(filled)) : ""}${fg(t, "border", "▱".repeat(GAUGE_CELLS - filled))}`;
+}
+
+function statusLineRows(t, footerData, width) {
+	const ctx = liveCtx;
+	const sep = ` ${fg(t, "dim", "·")} `;
+	const cwd = shortPath(ctx?.sessionManager?.getCwd?.() ?? "");
+	const branch = footerData?.getGitBranch?.();
+	const changes = config.statusLine.changes ? changesByCwd.get(ctx?.sessionManager?.getCwd?.()) : undefined;
+	const model = ctx?.model;
+	let effort;
+	try {
+		effort = model?.reasoning ? ctx?.thinkingLevel ?? piThinking?.() : undefined;
+	} catch {
+		effort = undefined;
+	}
+	const usage = ctx?.getContextUsage?.();
+	const percent = typeof usage?.percent === "number" ? usage.percent : null;
+	let subscription = false;
+	try {
+		subscription = Boolean(model && ctx?.modelRegistry?.isUsingOAuth?.(model));
+	} catch {
+		subscription = false;
+	}
+	const total = sessionCost(ctx);
+	const costText = `$${total >= 1 ? total.toFixed(2) : total.toFixed(3)}${subscription ? " sub" : ""}`;
+
+	const counts = changes?.files
+		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
+		: "";
+	const location = (withCounts) => join(
+		cwd && fg(t, "muted", cwd),
+		branch && fg(t, "text", branch),
+		changes?.files ? fg(t, "warning", `±${changes.files}`) : "",
+		withCounts && counts,
+	);
+	const modelText = (withEffort) => model?.id
+		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "syntaxFunction", effort)}`)
+		: "";
+	const right = [`${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
+	// Details give way in this order before the context and cost are touched.
+	const stages = [
+		[location(true), modelText(true)],
+		[location(true), modelText(false)],
+		[location(false), modelText(false)],
+		[location(false)],
+		[],
+	];
+	let line;
+	for (const parts of stages) {
+		const left = parts.filter(Boolean).join(sep);
+		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
+		if (gap >= (left ? 2 : 0)) {
+			line = ` ${left}${" ".repeat(gap)}${right} `;
+			break;
+		}
+	}
+	line ??= truncateToWidth(` ${right}`, width, "…");
+
+	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
+		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
+	return statuses.length ? [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")] : [line];
+}
+
+let piThinking; // pi.getThinkingLevel, bound at load
+
+function footerFactory(tui, t, footerData) {
+	footerTui = tui;
+	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
+	refreshChanges();
+	return {
+		render: (width) => statusLineRows(t, footerData, width),
+		invalidate() {},
+		dispose() {
+			if (typeof unsubscribe === "function") unsubscribe();
+			if (footerTui === tui) footerTui = undefined;
+		},
+	};
+}
+
+// Pi resets the footer with the rest of the extension UI on session changes, so
+// session_start installs it again; /gentle-quiet installs or removes it on demand.
+function applyFooter(ctx, force = false) {
+	const ui = ctx?.ui;
+	if (ctx?.mode !== "tui" || typeof ui?.setFooter !== "function") return;
+	if (config.statusLine.enabled && (force || !footerInstalled)) {
+		ui.setFooter(footerFactory);
+		footerInstalled = true;
+	} else if (!config.statusLine.enabled && footerInstalled) {
+		ui.setFooter(undefined);
+		footerInstalled = false;
+	} else if (footerInstalled) {
+		footerTui?.requestRender?.();
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Subagent results (gentle-agents.result messages)
 // ---------------------------------------------------------------------------
 
@@ -862,8 +1045,13 @@ export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
 
+	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
+		liveCtx = ctx;
+		costCache.count = -1;
+		applyFooter(ctx, true);
+		refreshChanges();
 		callOrder.clear(); // a new or resumed session redraws its calls from the start
 		latestFinished = -1;
 		patch(ctx);
@@ -871,8 +1059,11 @@ export default async function (pi) {
 	});
 	for (const event of ["before_agent_start", "tool_execution_end", "turn_end"]) {
 		pi.on(event, (_event, ctx) => {
+			liveCtx = ctx ?? liveCtx;
 			patch(ctx);
 			applyEditor(ctx);
+			// Files change through tools and turns; a short delay batches bursts of calls.
+			if (event !== "before_agent_start") refreshChanges(500);
 		});
 	}
 	// Pi resets extension UI after shutdown; forget the editor so the next start reinstalls it.

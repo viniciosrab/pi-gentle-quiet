@@ -30,7 +30,7 @@ export const theme = {
  * Loads the extension against a fake Pi API and returns what it registered,
  * plus a UI that records status and widget writes after the extension's patch.
  */
-export async function load({ mode = "rpc", select, input } = {}) {
+export async function load({ mode = "rpc", select, input, session = {}, thinking = "medium" } = {}) {
 	const { default: extension } = await import("../extensions/gentle-quiet.ts");
 	const handlers = {};
 	const commands = {};
@@ -43,12 +43,14 @@ export async function load({ mode = "rpc", select, input } = {}) {
 		registerToolRenderer: (resolver) => toolResolvers.push(resolver),
 		registerMessageRenderer: (type, renderer) => (messageRenderers[type] = renderer),
 		registerMarkdownTransformer: (transformer) => markdown.push(transformer),
+		getThinkingLevel: () => thinking,
 	});
 
 	const status = {};
 	const widgets = {};
 	const notices = [];
 	let editorFactory;
+	let footerFactory;
 	const ui = {
 		theme,
 		setStatus: (key, text) => (status[key] = text),
@@ -58,8 +60,22 @@ export async function load({ mode = "rpc", select, input } = {}) {
 		input: input ?? (async () => undefined),
 		getEditorComponent: () => editorFactory,
 		setEditorComponent: (factory) => (editorFactory = factory),
+		setFooter: (factory) => (footerFactory = factory),
 	};
-	const ctx = { ui, mode, hasUI: true };
+	// Session data the status line reads; tests override what they need.
+	const ctx = {
+		ui,
+		mode,
+		hasUI: true,
+		model: session.model,
+		getContextUsage: () => session.usage,
+		modelRegistry: { isUsingOAuth: () => session.subscription ?? false },
+		sessionManager: {
+			getCwd: () => session.cwd ?? "/tmp",
+			getEntries: () => session.entries ?? [],
+			getSessionName: () => session.name,
+		},
+	};
 	const emit = async (event) => {
 		for (const handler of handlers[event] ?? []) await handler({}, ctx);
 	};
@@ -68,7 +84,7 @@ export async function load({ mode = "rpc", select, input } = {}) {
 	/** The renderers Pi would use for a tool whose own renderers are `base`. */
 	const tool = (name, base = {}) => toolResolvers.reduceRight((next, resolver) => () => resolver(name, next), () => base)();
 
-	return { ctx, ui, status, widgets, notices, commands, tool, messageRenderers, markdown, emit, editor: () => editorFactory };
+	return { ctx, ui, status, widgets, notices, commands, tool, messageRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
 }
 
 /** Renders a component (or a tool row) to plain lines at `width`. */
