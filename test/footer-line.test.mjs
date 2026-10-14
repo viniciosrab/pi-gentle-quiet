@@ -24,10 +24,11 @@ function repo() {
 const session = (overrides = {}) => ({
 	model: { id: "claude-opus-5-5", reasoning: true },
 	usage: { percent: 28 },
+	// Totals: ↑1.2k ↓300 R50k W2.0k; cache hit of the latest response 10000/10200 = 98.0%.
 	entries: [
-		{ type: "message", message: { role: "assistant", usage: { cost: { total: 1.5 } } } },
+		{ type: "message", message: { role: "assistant", usage: { input: 1000, output: 200, cacheRead: 40000, cacheWrite: 2000, cost: { total: 1.5 } } } },
 		{ type: "message", message: { role: "user" } },
-		{ type: "message", message: { role: "assistant", usage: { cost: { total: 0.25 } } } },
+		{ type: "message", message: { role: "assistant", usage: { input: 200, output: 100, cacheRead: 10000, cacheWrite: 0, cost: { total: 0.25 } } } },
 	],
 	subscription: true,
 	...overrides,
@@ -52,19 +53,38 @@ async function footer(options = {}) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
 
-test("replaces Pi's footer with location, model, context and cost", async () => {
+test("replaces Pi's footer: location, model, tokens, context, cost and statuses on one line", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	assert.ok(component, "footer installed");
-	const [line, statuses] = component.render(120).map(plain);
-	assert.match(line, /^ \/srv\/app main · claude-opus-5-5 · medium +ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
-	assert.equal(statuses, " ⧗ 1 job  Perm: Normal");
+	const rows = component.render(170).map(plain);
+	assert.equal(rows.length, 1, "statuses share the line when they fit");
+	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium +↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub · ⧗ 1 job · Perm: Normal $/);
+});
+
+test("when the statuses do not fit, they move to a second row first", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" } });
+	const rows = component.render(120).map(plain);
+	assert.equal(rows.length, 2);
+	assert.match(rows[0], /claude-opus-5-5 · medium +↑1\.2k .* \$1\.75 sub $/);
+	assert.equal(rows[1], " ⧗ 1 job  Perm: Normal");
+});
+
+test("token counters come from every usage Pi records, like Pi's footer", async () => {
+	const entries = [
+		{ type: "message", message: { role: "assistant", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } } },
+		{ type: "message", message: { role: "toolResult", usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.2 } } } },
+		{ type: "usage", usage: { input: 0, output: 950, cacheRead: 0, cacheWrite: 0, cost: { total: 0.3 } } },
+	];
+	const line = plain((await footer({ session: { entries }, statuses: {} })).component.render(160)[0]);
+	assert.match(line, / ↑1\.0k ↓1\.0k · ctx /, "no cache counters when there was no caching");
+	assert.match(line, /\$0\.600 sub $/);
 });
 
 test("shows the working tree changes from git: files and added/removed lines", async () => {
 	const dir = repo();
 	const { component } = await footer({ session: { cwd: dir } });
 	await settle();
-	const line = component.render(140)[0];
+	const line = component.render(200)[0];
 	assert.match(plain(line), / main ±2 \+3 -1 · /);
 	assert.ok(painted(line, "warning", "±2"));
 	assert.ok(painted(line, "toolDiffAdded", "+3"));
@@ -79,8 +99,8 @@ test("the context gauge turns warning at 80% and error at 95%", async () => {
 });
 
 test("API-key models show plain cost; models without reasoning show no effort", async () => {
-	const line = plain((await footer({ session: { subscription: false, model: { id: "gpt-x", reasoning: false } } })).component.render(120)[0]);
-	assert.match(line, / gpt-x +ctx .* \$1\.75 $/);
+	const line = plain((await footer({ session: { subscription: false, model: { id: "gpt-x", reasoning: false } }, statuses: {} })).component.render(160)[0]);
+	assert.match(line, / gpt-x +↑1\.2k .* ctx .* \$1\.75 $/);
 });
 
 test("narrow terminals drop details before the context and cost", async () => {
@@ -94,7 +114,7 @@ test("Status line options: changes and cost can be hidden", async () => {
 	const dir = repo();
 	const { component } = await footer({ session: { cwd: dir }, config: { statusLine: { changes: false, cost: false } } });
 	await settle();
-	const line = plain(component.render(140)[0]);
+	const line = plain(component.render(200)[0]);
 	assert.doesNotMatch(line, /±|\$/);
 	assert.match(line, / main · claude/);
 });
@@ -111,4 +131,20 @@ test("Status line: pi restores Pi's own footer right away and is saved", async (
 test("with the status line off, the footer is left to Pi", async () => {
 	const { footer: current } = await footer({ config: { statusLine: { enabled: false } } });
 	assert.equal(current(), undefined);
+});
+
+test("narrow terminals drop the cache details, then the tokens, before context and cost", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
+	const at = (width) => plain(component.render(width)[0]);
+	assert.match(at(100), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
+	assert.match(at(90), /↑1\.2k ↓300 · ctx/);
+	assert.doesNotMatch(at(90), /R50k/);
+	assert.doesNotMatch(at(70), /↑/);
+	assert.match(at(70), /ctx .* \$1\.75 sub $/);
+});
+
+test("Status line tokens can be turned off", async () => {
+	const line = plain((await footer({ config: { statusLine: { tokens: false } }, statuses: {} })).component.render(160)[0]);
+	assert.doesNotMatch(line, /↑|↓|CH/);
+	assert.match(line, /ctx ▰/);
 });

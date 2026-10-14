@@ -53,7 +53,7 @@ const DEFAULTS = {
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
 	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
-	statusLine: { enabled: true, changes: true, cost: true },
+	statusLine: { enabled: true, changes: true, tokens: true, cost: true },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -481,6 +481,7 @@ async function configure(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
+			[`Status line tokens: ${onOff(config.statusLine.tokens)}`, () => { config.statusLine.tokens = !config.statusLine.tokens; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
@@ -838,7 +839,7 @@ let footerTui; // the TUI that renders our footer, to redraw after a git refresh
 let footerInstalled = false;
 const changesByCwd = new Map(); // cwd -> { files, added, deleted }
 let changesTimer;
-const costCache = { count: -1, total: 0 };
+const totalsCache = { count: -1, entries: undefined, totals: undefined };
 
 const run = (cwd, args) =>
 	new Promise((resolve) => {
@@ -887,23 +888,49 @@ function refreshChanges(delay = 0) {
 	changesTimer.unref?.();
 }
 
-function sessionCost(ctx) {
-	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
-	if (entries.length === costCache.count) return costCache.total;
-	let total = 0;
-	for (const entry of entries) {
-		if (entry?.type === "message" && entry.message?.role === "assistant") total += entry.message.usage?.cost?.total ?? 0;
-	}
-	costCache.count = entries.length;
-	costCache.total = total;
-	return total;
-}
-
 function gauge(percent, t) {
 	const value = Math.max(0, Math.min(100, percent ?? 0));
 	const filled = Math.round((value / 100) * GAUGE_CELLS);
 	const tone = percent === null || percent === undefined ? "dim" : percent >= 95 ? "error" : percent >= 80 ? "warning" : "accent";
 	return `${filled ? fg(t, tone, "▰".repeat(filled)) : ""}${fg(t, "border", "▱".repeat(GAUGE_CELLS - filled))}`;
+}
+
+/** Session usage totals counted the way Pi's own footer counts them. */
+function sessionTotals(ctx) {
+	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+	if (entries.length === totalsCache.count && totalsCache.entries === entries.at(-1)) return totalsCache.totals;
+	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined };
+	const add = (usage) => {
+		if (!usage) return;
+		totals.input += usage.input || 0;
+		totals.output += usage.output || 0;
+		totals.cacheRead += usage.cacheRead || 0;
+		totals.cacheWrite += usage.cacheWrite || 0;
+		totals.cost += usage.cost?.total || 0;
+	};
+	for (const entry of entries) {
+		const message = entry?.message;
+		if (entry?.type === "usage") add(entry.usage);
+		else if (entry?.type === "message" && message?.role === "assistant" && message.usage) {
+			add(message.usage);
+			const prompt = (message.usage.input || 0) + (message.usage.cacheRead || 0) + (message.usage.cacheWrite || 0);
+			totals.cacheHit = prompt > 0 ? ((message.usage.cacheRead || 0) / prompt) * 100 : undefined;
+		} else if (entry?.type === "message" && message?.role === "toolResult") add(message.usage);
+		else if (entry?.type === "branch_summary" || entry?.type === "compaction") add(entry.usage);
+	}
+	totalsCache.count = entries.length;
+	totalsCache.entries = entries.at(-1);
+	totalsCache.totals = totals;
+	return totals;
+}
+
+// Pi's token format: 950, 1.2k, 50k, 2.0M, 33M.
+function formatTokens(count) {
+	if (count < 1000) return String(count);
+	if (count < 1e4) return `${(count / 1000).toFixed(1)}k`;
+	if (count < 1e6) return `${Math.round(count / 1000)}k`;
+	if (count < 1e7) return `${(count / 1e6).toFixed(1)}M`;
+	return `${Math.round(count / 1e6)}M`;
 }
 
 function statusLineRows(t, footerData, width) {
@@ -927,8 +954,8 @@ function statusLineRows(t, footerData, width) {
 	} catch {
 		subscription = false;
 	}
-	const total = sessionCost(ctx);
-	const costText = `$${total >= 1 ? total.toFixed(2) : total.toFixed(3)}${subscription ? " sub" : ""}`;
+	const totals = sessionTotals(ctx);
+	const costText = `$${totals.cost >= 1 ? totals.cost.toFixed(2) : totals.cost.toFixed(3)}${subscription ? " sub" : ""}`;
 
 	const counts = changes?.files
 		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
@@ -942,30 +969,56 @@ function statusLineRows(t, footerData, width) {
 	const modelText = (withEffort) => model?.id
 		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "syntaxFunction", effort)}`)
 		: "";
-	const right = [`${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
-	// Details give way in this order before the context and cost are touched.
-	const stages = [
-		[location(true), modelText(true)],
-		[location(true), modelText(false)],
-		[location(false), modelText(false)],
-		[location(false)],
-		[],
-	];
-	let line;
-	for (const parts of stages) {
-		const left = parts.filter(Boolean).join(sep);
-		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
-		if (gap >= (left ? 2 : 0)) {
-			line = ` ${left}${" ".repeat(gap)}${right} `;
-			break;
+	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
+	const tokens = (withCache) => {
+		if (!config.statusLine.tokens) return "";
+		const parts = [];
+		if (totals.input) parts.push(`↑${formatTokens(totals.input)}`);
+		if (totals.output) parts.push(`↓${formatTokens(totals.output)}`);
+		if (withCache) {
+			if (totals.cacheRead) parts.push(`R${formatTokens(totals.cacheRead)}`);
+			if (totals.cacheWrite) parts.push(`W${formatTokens(totals.cacheWrite)}`);
+			if ((totals.cacheRead || totals.cacheWrite) && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		}
-	}
-	line ??= truncateToWidth(` ${right}`, width, "…");
+		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
+	};
+	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
 
 	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
 		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
+
+	// Details give way in this order: statuses move to their own row, then
+	// effort, change counts, cache counters, tokens, model and location go;
+	// the context and cost stay to the end.
+	const stages = [
+		{ inline: true, effort: true, counts: true, cache: true, tokens: true, model: true, location: true },
+		{ inline: false, effort: true, counts: true, cache: true, tokens: true, model: true, location: true },
+		{ inline: false, effort: false, counts: true, cache: true, tokens: true, model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: true, tokens: true, model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: true, model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: false },
+	];
+	for (const stage of stages) {
+		if (stage.inline && !statuses.length) continue; // same as the next stage
+		const left = [stage.location && location(stage.counts), stage.model && modelText(stage.effort)].filter(Boolean).join(sep);
+		const right = [
+			stage.tokens && tokens(stage.cache),
+			contextText,
+			config.statusLine.cost && fg(t, "text", costText),
+			...(stage.inline ? statuses : []),
+		].filter(Boolean).join(sep);
+		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
+		if (gap < (left ? 2 : 0)) continue;
+		const line = ` ${left}${" ".repeat(gap)}${right} `;
+		if (stage.inline || !statuses.length) return [line];
+		return [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")];
+	}
+	const right = [contextText, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
+	const line = truncateToWidth(` ${right}`, width, "…");
 	return statuses.length ? [line, truncateToWidth(` ${statuses.join("  ")}`, width, "…")] : [line];
 }
 
@@ -1079,7 +1132,7 @@ export default async function (pi) {
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
 		liveCtx = ctx;
-		costCache.count = -1;
+		totalsCache.count = -1;
 		applyFooter(ctx, true);
 		refreshChanges();
 		callOrder.clear(); // a new or resumed session redraws its calls from the start

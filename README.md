@@ -29,10 +29,11 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 
 | Area | Before | After |
 |---|---|---|
-| Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub`, plus the extension statuses row |
+| Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `↑1.2k ↓300 R50k W2.0k CH98.0% · ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub · Perm: Normal`; extension statuses move to a second row only when they do not fit |
 | Footer statuses | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
 | Memory calls | `🧠 search "x" …` | `󰧑 search "x"` drawn like Pi's own tool rows |
 | gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
+| Stale subagent results | Rounded `❀ Stale agent result` card | ` ◈ agent · stale` + ` └ completed 2m ago while the orchestrator was busy` |
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
@@ -43,10 +44,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.3.0
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.4.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.3.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.4.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -87,7 +88,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
-| Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
+| Status line / changes / tokens / cost | `gentle` (`pi` gives the footer back to Pi) / on / on / on |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
