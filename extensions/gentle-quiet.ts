@@ -53,7 +53,8 @@ const DEFAULTS = {
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
-	quiet: { enabled: true, preview: 0, codemode: "failures", hint: "last" },
+	// codemodeOutput: lines of the script's own output shown under a codemode summary.
+	quiet: { enabled: true, preview: 0, codemode: "failures", codemodeOutput: 3, hint: "last" },
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
 	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
@@ -492,6 +493,7 @@ async function configure(ctx) {
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
 			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
 			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
+			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
 			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
 			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
@@ -597,6 +599,7 @@ const seconds = (ms) => (typeof ms === "number" && ms >= 1000 ? `${(ms / 1000).t
 
 /** One summary line plus up to `preview` dim output lines. */
 const CODEMODE_DETAILS = ["summary", "failures", "all"];
+const CODEMODE_OUTPUTS = [3, 5, 10, 0];
 const CODEMODE_CALL_LIMIT = 8;
 
 /** Child calls Pi recorded for a codemode run (details.calls). */
@@ -642,6 +645,15 @@ function codemodeSummary(result, context, t, isError) {
 		return join(mark, fg(t, "toolTitle", callName(call.name)), reason, duration);
 	});
 	if (listed.length > CODEMODE_CALL_LIMIT) rows.push(fg(t, "dim", `… ${listed.length - CODEMODE_CALL_LIMIT} more`));
+	// The script's own output, without Pi's "Script completed / Wall time / Output:" header.
+	// A thrown script already has its error as the summary.
+	const limit = Number.isFinite(config.quiet.codemodeOutput) ? Math.max(0, config.quiet.codemodeOutput) : 0;
+	if (limit > 0 && !isError) {
+		const body = textOf(result).replace(/^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n?/, "");
+		const output = body.split("\n").filter((line) => line.trim() !== "");
+		for (const line of output.slice(0, limit)) rows.push(fg(t, "dim", firstLine(line, 200)));
+		if (output.length > limit) rows.push(fg(t, "dim", `… ${output.length - limit} more lines`));
+	}
 	// The script itself is always hidden, so the expand hint always applies.
 	return { summary, fixed: rows, hidden: true };
 }

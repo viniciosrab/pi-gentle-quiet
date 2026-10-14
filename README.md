@@ -38,16 +38,16 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
-| `codemode` | Script and output | Number of calls and their servers; failed calls listed |
+| `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
 | Prompt | Pi's editor | Pi's editor with a `❯` in front of the input and of sent messages |
 
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.7.0
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.8.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.7.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.8.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -85,6 +85,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Icons: memory / todo / agents / other gentle tools | `󰧑` / `≡` / `◈` / `›` |
 | Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
+| Codemode output lines | `3` (`5`, `10`, `0` to hide) |
 | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
