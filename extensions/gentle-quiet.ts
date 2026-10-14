@@ -986,31 +986,31 @@ function statusLineRows(t, footerData, width) {
 
 	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
 		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
-		.sort(([a], [b]) => a.localeCompare(b))
+		// Permission mode first, then the rest by key.
+		.sort(([a], [b]) => (a === KEYS.mode ? -1 : b === KEYS.mode ? 1 : a.localeCompare(b)))
 		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
 
-	// Details give way in this order: statuses move to their own row, then
-	// effort, change counts, cache counters, tokens, model and location go;
-	// the context and cost stay to the end.
+	// Statuses sit on the left after the model, Perm first. Details give way in
+	// this order: cache counters, tokens, change counts; then the statuses move
+	// to their own row, then effort, model and location go. Context and cost stay.
 	const stages = [
 		{ inline: true, effort: true, counts: true, cache: true, tokens: true, model: true, location: true },
-		{ inline: false, effort: true, counts: true, cache: true, tokens: true, model: true, location: true },
-		{ inline: false, effort: false, counts: true, cache: true, tokens: true, model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: true, tokens: true, model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: true, model: true, location: true },
+		{ inline: true, effort: true, counts: true, cache: false, tokens: true, model: true, location: true },
+		{ inline: true, effort: true, counts: true, cache: false, tokens: false, model: true, location: true },
+		{ inline: true, effort: true, counts: false, cache: false, tokens: false, model: true, location: true },
+		{ inline: false, effort: true, counts: false, cache: false, tokens: false, model: true, location: true },
 		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: true, location: true },
 		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: true },
 		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: false },
 	];
+	const statusText = statuses.map((text) => fg(t, "dim", text)).join(sep);
 	for (const stage of stages) {
-		if (stage.inline && !statuses.length) continue; // same as the next stage
-		const left = [stage.location && location(stage.counts), stage.model && modelText(stage.effort)].filter(Boolean).join(sep);
-		const right = [
-			stage.tokens && tokens(stage.cache),
-			contextText,
-			config.statusLine.cost && fg(t, "text", costText),
-			...(stage.inline ? statuses : []),
+		const left = [
+			stage.location && location(stage.counts),
+			stage.model && modelText(stage.effort),
+			stage.inline && statusText,
 		].filter(Boolean).join(sep);
+		const right = [stage.tokens && tokens(stage.cache), contextText, config.statusLine.cost && fg(t, "text", costText)].filter(Boolean).join(sep);
 		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
 		if (gap < (left ? 2 : 0)) continue;
 		const line = ` ${left}${" ".repeat(gap)}${right} `;

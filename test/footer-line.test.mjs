@@ -53,20 +53,22 @@ async function footer(options = {}) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
 
-test("replaces Pi's footer: location, model, tokens, context, cost and statuses on one line", async () => {
+test("replaces Pi's footer: Perm right after the model and effort, counters on the right", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium +↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub · ⧗ 1 job · Perm: Normal $/);
+	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
 });
 
-test("when the statuses do not fit, they move to a second row first", async () => {
+test("on narrow terminals the counters give way before Perm leaves the first line", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
-	const rows = component.render(120).map(plain);
-	assert.equal(rows.length, 2);
-	assert.match(rows[0], /claude-opus-5-5 · medium +↑1\.2k .* \$1\.75 sub $/);
-	assert.equal(rows[1], " ⧗ 1 job  Perm: Normal");
+	const at = (width) => component.render(width).map(plain);
+	assert.equal(at(105).length, 1);
+	assert.match(at(105)[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
+	const narrow = at(90);
+	assert.equal(narrow.length, 2, "statuses move to a second row only when the first line cannot hold them");
+	assert.equal(narrow[1], " Perm: Normal  ⧗ 1 job");
 });
 
 test("token counters come from every usage Pi records, like Pi's footer", async () => {
@@ -136,11 +138,11 @@ test("with the status line off, the footer is left to Pi", async () => {
 test("narrow terminals drop the cache details, then the tokens, before context and cost", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
 	const at = (width) => plain(component.render(width)[0]);
-	assert.match(at(100), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
-	assert.match(at(90), /↑1\.2k ↓300 · ctx/);
-	assert.doesNotMatch(at(90), /R50k/);
-	assert.doesNotMatch(at(70), /↑/);
-	assert.match(at(70), /ctx .* \$1\.75 sub $/);
+	assert.match(at(110), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
+	assert.match(at(100), /medium +↑1\.2k ↓300 · ctx/, "cache goes first, effort stays");
+	assert.doesNotMatch(at(100), /R50k/);
+	assert.doesNotMatch(at(80), /↑/);
+	assert.match(at(80), /medium +ctx .* \$1\.75 sub $/);
 });
 
 test("Status line tokens can be turned off", async () => {
