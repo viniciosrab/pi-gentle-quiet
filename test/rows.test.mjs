@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, theme } from "./helpers.mjs";
+import { load, lines, picker, theme } from "./helpers.mjs";
 
 const row = (text) => ({ render: () => [text] });
 
@@ -41,4 +41,26 @@ test("the editor shows the prompt icon on its first line only", async () => {
 	const [, first, second] = instance.render(20);
 	assert.equal(first, " [❯] hello", "icon painted with the editor border color");
 	assert.equal(second, "   world");
+});
+
+test("the prompt editor comes back after Pi resets the extension UI (resume, new session, reload)", async () => {
+	const { ui, emit, editor } = await load({ mode: "tui" });
+	const ours = editor();
+	assert.ok(ours, "installed at start");
+	ui.setEditorComponent(undefined); // what Pi's resetExtensionUI does before a session switch
+	await emit("session_start");
+	assert.equal(editor(), ours, "reinstalled on the next session start");
+	ui.setEditorComponent(undefined);
+	await emit("before_agent_start");
+	assert.equal(editor(), ours, "also restored before the next prompt runs");
+});
+
+test("turning the input prompt icon off restores Pi's editor and keeps it off", async () => {
+	const { select } = picker(/^Prompt icon in input/);
+	const { commands, ctx, emit, editor } = await load({ mode: "tui", select });
+	assert.ok(editor(), "installed at start");
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.equal(editor(), undefined, "Pi's default editor is back");
+	await emit("before_agent_start");
+	assert.equal(editor(), undefined, "not reinstalled while the option is off");
 });

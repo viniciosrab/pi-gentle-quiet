@@ -413,19 +413,23 @@ class PromptEditor extends CustomEditor {
 	}
 }
 
-let editorInstalled = false;
+const promptEditorFactory = (tui, editorTheme, keybindings) => new PromptEditor(tui, editorTheme, keybindings);
 let previousEditor;
+let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
 
+// Pi drops custom editors when it resets extension UI (session switch, resume,
+// fork, /reload), so this checks the editor actually in place every time.
 function applyEditor(ctx) {
 	const ui = ctx?.ui;
 	if (ctx?.mode !== "tui" || typeof ui?.setEditorComponent !== "function") return;
-	if (config.prompt.editor && !editorInstalled) {
-		previousEditor = ui.getEditorComponent?.();
-		ui.setEditorComponent((tui, editorTheme, keybindings) => new PromptEditor(tui, editorTheme, keybindings));
-		editorInstalled = true;
-	} else if (!config.prompt.editor && editorInstalled) {
+	const current = typeof ui.getEditorComponent === "function" ? ui.getEditorComponent() : installedOn === ui ? promptEditorFactory : undefined;
+	if (config.prompt.editor && current !== promptEditorFactory) {
+		previousEditor = current;
+		ui.setEditorComponent(promptEditorFactory);
+		installedOn = ui;
+	} else if (!config.prompt.editor && current === promptEditorFactory) {
 		ui.setEditorComponent(previousEditor); // undefined restores Pi's default editor
-		editorInstalled = false;
+		installedOn = undefined;
 	}
 }
 
@@ -841,8 +845,15 @@ export default async function (pi) {
 		applyEditor(ctx);
 	});
 	for (const event of ["before_agent_start", "tool_execution_end", "turn_end"]) {
-		pi.on(event, (_event, ctx) => patch(ctx));
+		pi.on(event, (_event, ctx) => {
+			patch(ctx);
+			applyEditor(ctx);
+		});
 	}
+	// Pi resets extension UI after shutdown; forget the editor so the next start reinstalls it.
+	pi.on("session_shutdown", () => {
+		installedOn = undefined;
+	});
 
 	// Pi uses the first extension that registered a message type; local extensions load
 	// before packages, and a package must be listed before gentle-pi to take over.
