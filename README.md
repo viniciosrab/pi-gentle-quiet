@@ -32,6 +32,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Footer | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
 | Memory calls | `🧠 search "x" …` | `󰧑 search "x"` drawn like Pi's own tool rows |
 | gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
+| Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed |
@@ -82,6 +83,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Tool row margin | on |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
 | Todos/Agents blocks / border | minimal / on |
+| Subagent results | minimal (restart to apply) |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
@@ -92,7 +94,10 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
   affected item falls back to its original look; Pi keeps working.
 - Mouse clicks on the Todos/Agents header can land one row off; use the keyboard shortcuts.
 - Quiet rows expand with `ctrl+o`, not with a click. Toggling quiet tools applies to new calls.
-- Subagent result messages keep gentle-pi's card style.
+- Pi draws a message type with the first extension that registered it. Local extensions load
+  before packages; as a package, list `git:github.com/viniciosrab/pi-gentle-quiet` before
+  `npm:gentle-pi` in `packages` so subagent results use the quiet row.
+- Switching **Subagent results** back to the original card applies after a restart.
 
 ## Development
 

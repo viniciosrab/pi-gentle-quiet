@@ -6,6 +6,7 @@
 //   tools   "🧠 search “x” …", "✿todo · write", "❀ agent run"
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
+//   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
 //           outline in the theme's border color
@@ -47,6 +48,7 @@ const DEFAULTS = {
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	quiet: { enabled: true, preview: 0, codemode: "failures" },
+	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
@@ -88,6 +90,7 @@ function merge(user = {}) {
 		tools: { ...DEFAULTS.tools, ...user.tools },
 		quiet: { ...DEFAULTS.quiet, ...user.quiet },
 		blocks: { ...DEFAULTS.blocks, ...user.blocks },
+		subagents: { ...DEFAULTS.subagents, ...user.subagents },
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
 	};
 }
@@ -464,6 +467,7 @@ async function configure(ctx) {
 			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
+			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
 			[`Prompt icon: ${shown(config.prompt.icon)}`, async () => { config.prompt.icon = await pickIcon(ctx, "Prompt icon", PROMPT_ICONS, config.prompt.icon, false); }],
@@ -787,6 +791,46 @@ function gentleRenderers(renderers, group) {
 	return { ...renderers, renderCall: wrap(renderers.renderCall), renderResult: wrap(renderers.renderResult) };
 }
 
+// ---------------------------------------------------------------------------
+// Subagent results (gentle-agents.result messages)
+// ---------------------------------------------------------------------------
+
+const AGENTS_RESULT_TYPE = "gentle-agents.result";
+// gentle-agents prefixes the answer with "Subagent <agent> (task <id>) <status>." and a blank line.
+const COMPLETION_HEADER = /^Subagent [^\n]+ \(task [^\n]*\) [^\n]+\.$/;
+
+function agentAnswer(message) {
+	const content = message?.content;
+	const text = typeof content === "string" ? content : (content ?? []).filter((part) => part?.type === "text").map((part) => part.text ?? "").join("\n");
+	const split = text.indexOf("\n\n");
+	if (split >= 0 && COMPLETION_HEADER.test(text.slice(0, split)) && text.slice(split + 2).trim()) return text.slice(split + 2);
+	return text;
+}
+
+function agentResultRenderer(message, options = {}, t) {
+	const details = message?.details?.gentleAgents ?? {};
+	const agent = clean(String(details.agent ?? "subagent")) || "subagent";
+	const completed = details.status === "completed";
+	const status = completed ? "done" : String(details.status ?? "finished").replace(/_/g, " ");
+	const answer = agentAnswer(message).replace(/\s+$/, "").split("\n");
+	const summary = answer.find((line) => line.trim() !== "")?.trim() ?? "";
+	const head = join(fg(t, "toolTitle", bold(t, join(config.icons.agents, agent))), fg(t, "dim", "·"), fg(t, completed ? "success" : "error", status));
+	const hidden = answer.filter((line) => line.trim() !== "").length > 1;
+	return {
+		render(width) {
+			if (options.expanded) {
+				return [` ${head}`, ...answer.map((line) => (line.trim() ? truncateToWidth(`   ${fg(t, "toolOutput", line)}`, width, "…") : ""))];
+			}
+			const hint = hidden ? expandHint(t) : "";
+			const left = ` ${head}`;
+			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
+			const top = hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…");
+			return summary ? [top, truncateToWidth(` ${fg(t, "dim", "└")} ${fg(t, "dim", summary)}`, width, "…")] : [top];
+		},
+		invalidate() {},
+	};
+}
+
 export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
@@ -798,6 +842,12 @@ export default async function (pi) {
 	});
 	for (const event of ["before_agent_start", "tool_execution_end", "turn_end"]) {
 		pi.on(event, (_event, ctx) => patch(ctx));
+	}
+
+	// Pi uses the first extension that registered a message type; local extensions load
+	// before packages, and a package must be listed before gentle-pi to take over.
+	if (config.subagents.minimal && typeof pi.registerMessageRenderer === "function") {
+		pi.registerMessageRenderer(AGENTS_RESULT_TYPE, agentResultRenderer);
 	}
 
 	pi.registerMarkdownTransformer?.((markdown, context) => {
