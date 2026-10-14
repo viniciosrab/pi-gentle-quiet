@@ -1069,16 +1069,15 @@ function statusLineRows(t, footerData, width) {
 		if ((withCache || mode === "cache") && cached && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
 	};
-	// "plan 5h 62% · week 31%"; the percent turns warning from 80 and error from 95.
-	const usageWindows = config.statusLine.usage ? currentUsage(ctx) : [];
+	// Gentle Shell's usage bar: "claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%". The first window gets the
+	// same meter as ctx; the others are text.
+	const plan = config.statusLine.usage ? currentUsage(ctx) : { name: "", windows: [] };
 	const usageText = (all) => {
-		const shown = all ? usageWindows : usageWindows.slice(0, 1);
-		if (!shown.length) return "";
-		const parts = shown.map((window) => {
-			const tone = window.percent >= 95 ? "error" : window.percent >= 80 ? "warning" : "text";
-			return fg(t, tone, `${window.label} ${Math.round(window.percent)}%`);
-		});
-		return `${fg(t, "muted", "plan")} ${parts.join(` ${fg(t, "dim", "·")} `)}`;
+		const [first, ...rest] = plan.windows;
+		if (!first) return "";
+		const head = [fg(t, "muted", plan.name), first.label && fg(t, "muted", first.label), gauge(first.percent, t), fg(t, "text", `${Math.round(first.percent)}%`)].filter(Boolean).join(" ");
+		const tail = all ? rest.map((window) => `${fg(t, "muted", "·")} ${fg(t, "muted", window.label)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`) : [];
+		return [head, ...tail].join(" ");
 	};
 	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
 
@@ -1133,7 +1132,7 @@ let piApi; // the extension API, for the MCP tool and server lists
 // Plan usage: 5h / week windows from rate-limit response headers
 // ---------------------------------------------------------------------------
 
-const usageByProvider = new Map(); // provider -> [{ label, percent, resetAt (ms) | null }]
+const usageByProvider = new Map(); // provider -> { name, windows: [{ label, percent, resetAt (ms) | null }] }
 const ANTHROPIC_WINDOWS = [["5h", 18000], ["7d", 604800]];
 
 function windowLabel(seconds) {
@@ -1146,6 +1145,7 @@ function windowLabel(seconds) {
 /** Claude (also through claude-bridge): unified headers, utilization as a 0..1 fraction. Codex: percent plus window minutes. */
 function parseUsageHeaders(headers) {
 	const windows = [];
+	let name = "claude";
 	const number = (value) => Number.parseFloat(value ?? "");
 	for (const [key, seconds] of ANTHROPIC_WINDOWS) {
 		const fraction = number(headers[`anthropic-ratelimit-unified-${key}-utilization`]);
@@ -1157,26 +1157,28 @@ function parseUsageHeaders(headers) {
 		const used = number(headers[`x-codex-${kind}-used-percent`]);
 		const minutes = number(headers[`x-codex-${kind}-window-minutes`]);
 		if (!Number.isFinite(used) || !Number.isFinite(minutes) || minutes <= 0) continue;
+		name = "codex";
 		const reset = Number.parseInt(headers[`x-codex-${kind}-reset-at`] ?? "", 10);
 		windows.push({ label: windowLabel(minutes * 60), percent: used, resetAt: Number.isFinite(reset) ? reset * 1000 : null });
 	}
-	return windows;
+	return { name, windows };
 }
 
 function recordUsage(headers) {
 	const provider = liveCtx?.model?.provider;
 	if (!provider || !headers || typeof headers !== "object") return;
 	const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)]));
-	const windows = parseUsageHeaders(lower);
-	if (!windows.length) return;
-	usageByProvider.set(provider, windows);
+	const usage = parseUsageHeaders(lower);
+	if (!usage.windows.length) return;
+	usageByProvider.set(provider, usage);
 	footerTui?.requestRender?.();
 }
 
-/** Windows of the active provider that have not reset yet. */
+/** The active provider's plan name and windows that have not reset yet. */
 function currentUsage(ctx) {
-	const windows = usageByProvider.get(ctx?.model?.provider) ?? [];
-	return windows.filter((window) => window.resetAt === null || window.resetAt > Date.now());
+	const usage = usageByProvider.get(ctx?.model?.provider);
+	if (!usage) return { name: "", windows: [] };
+	return { name: usage.name, windows: usage.windows.filter((window) => window.resetAt === null || window.resetAt > Date.now()) };
 }
 
 // ---------------------------------------------------------------------------

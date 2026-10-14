@@ -44,10 +44,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.9.0
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.9.1
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.9.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.9.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -90,7 +90,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Todos/Agents blocks / border | minimal / on |
 | Subagent results | minimal (restart to apply) |
 | Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
-| Status line usage | on: `plan 5h 62% · week 31%` after the cost; warning from 80%, error from 95% |
+| Status line usage | on: Gentle Shell's usage bar after the cost, `claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%` (meter like `ctx`; warning from 80%, error from 95%) |
 | Status line MCP | on: `MCP 3/3` (online / installed) among the statuses; warning color when a server is offline |
 | Status line tokens | `cache` (`R W CH%`); `all` adds `↑ ↓`; `off` |
 | Subscription (current provider) | off; on shows `sub` for a plan Pi cannot detect, such as claude-bridge |
@@ -112,7 +112,7 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
 - Providers that report every call at $0 (claude-bridge) get the API-equivalent cost of the same model
   from Pi's `anthropic` prices, the same notional figure Pi shows for other subscriptions. It is an
   estimate of what the tokens would cost on the API, not a charge.
-- `plan 5h … · week …` reads the rate-limit headers of each provider response (Claude, also through
+- `claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%` (`codex …` for Codex) reads the rate-limit headers of each provider response (Claude, also through
   claude-bridge, and Codex), so it needs no credentials or extra requests. It appears after the first
   response of a session, belongs to the provider that reported it, and a window that already reset is
   not shown. API-key providers without plan limits show nothing.
