@@ -85,8 +85,8 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 			getSessionName: () => session.name,
 		},
 	};
-	const emit = async (event) => {
-		for (const handler of handlers[event] ?? []) await handler({}, ctx);
+	const emit = async (event, payload = {}) => {
+		for (const handler of handlers[event] ?? []) await handler(payload, ctx);
 	};
 	await emit("session_start");
 

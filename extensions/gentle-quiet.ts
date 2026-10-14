@@ -60,7 +60,8 @@ const DEFAULTS = {
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
 	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
 	// mcp: "MCP online/installed" among the statuses.
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, subscriptionProviders: [] },
+	// usage: plan windows (5h / week) from the provider's rate-limit response headers.
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -500,6 +501,7 @@ async function configure(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
+			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }],
 			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
@@ -1067,6 +1069,17 @@ function statusLineRows(t, footerData, width) {
 		if ((withCache || mode === "cache") && cached && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
 	};
+	// "plan 5h 62% · week 31%"; the percent turns warning from 80 and error from 95.
+	const usageWindows = config.statusLine.usage ? currentUsage(ctx) : [];
+	const usageText = (all) => {
+		const shown = all ? usageWindows : usageWindows.slice(0, 1);
+		if (!shown.length) return "";
+		const parts = shown.map((window) => {
+			const tone = window.percent >= 95 ? "error" : window.percent >= 80 ? "warning" : "text";
+			return fg(t, tone, `${window.label} ${Math.round(window.percent)}%`);
+		});
+		return `${fg(t, "muted", "plan")} ${parts.join(` ${fg(t, "dim", "·")} `)}`;
+	};
 	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
 
 	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
@@ -1079,14 +1092,16 @@ function statusLineRows(t, footerData, width) {
 	// this order: cache counters, tokens, change counts; then the statuses move
 	// to their own row, then effort, model and location go. Context and cost stay.
 	const stages = [
-		{ inline: true, effort: true, counts: true, cache: true, tokens: true, model: true, location: true },
-		{ inline: true, effort: true, counts: true, cache: false, tokens: true, model: true, location: true },
-		{ inline: true, effort: true, counts: true, cache: false, tokens: false, model: true, location: true },
-		{ inline: true, effort: true, counts: false, cache: false, tokens: false, model: true, location: true },
-		{ inline: false, effort: true, counts: false, cache: false, tokens: false, model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, model: false, location: false },
+		{ inline: true, effort: true, counts: true, cache: true, tokens: true, usage: "all", model: true, location: true },
+		{ inline: true, effort: true, counts: true, cache: false, tokens: true, usage: "all", model: true, location: true },
+		{ inline: true, effort: true, counts: true, cache: false, tokens: false, usage: "all", model: true, location: true },
+		{ inline: true, effort: true, counts: true, cache: false, tokens: false, usage: "first", model: true, location: true },
+		{ inline: true, effort: true, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
+		{ inline: false, effort: true, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: true, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: false, location: true },
+		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: false, location: false },
 	];
 	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
@@ -1099,7 +1114,7 @@ function statusLineRows(t, footerData, width) {
 			stage.model && modelText(stage.effort),
 			stage.inline && statusText,
 		].filter(Boolean).join(sep);
-		const right = [stage.tokens && tokens(stage.cache), contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
+		const right = [stage.tokens && tokens(stage.cache), contextText, costText && fg(t, "text", costText), stage.usage && usageText(stage.usage === "all")].filter(Boolean).join(sep);
 		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
 		if (gap < (left ? 2 : 0)) continue;
 		const line = ` ${left}${" ".repeat(gap)}${right} `;
@@ -1113,6 +1128,56 @@ function statusLineRows(t, footerData, width) {
 
 let piThinking; // pi.getThinkingLevel, bound at load
 let piApi; // the extension API, for the MCP tool and server lists
+
+// ---------------------------------------------------------------------------
+// Plan usage: 5h / week windows from rate-limit response headers
+// ---------------------------------------------------------------------------
+
+const usageByProvider = new Map(); // provider -> [{ label, percent, resetAt (ms) | null }]
+const ANTHROPIC_WINDOWS = [["5h", 18000], ["7d", 604800]];
+
+function windowLabel(seconds) {
+	if (seconds === 604800) return "week";
+	if (seconds >= 86400 && seconds % 86400 === 0) return `${seconds / 86400}d`;
+	if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600}h`;
+	return `${Math.round(seconds / 60)}m`;
+}
+
+/** Claude (also through claude-bridge): unified headers, utilization as a 0..1 fraction. Codex: percent plus window minutes. */
+function parseUsageHeaders(headers) {
+	const windows = [];
+	const number = (value) => Number.parseFloat(value ?? "");
+	for (const [key, seconds] of ANTHROPIC_WINDOWS) {
+		const fraction = number(headers[`anthropic-ratelimit-unified-${key}-utilization`]);
+		if (!Number.isFinite(fraction)) continue;
+		const reset = Number.parseInt(headers[`anthropic-ratelimit-unified-${key}-reset`] ?? "", 10);
+		windows.push({ label: windowLabel(seconds), percent: fraction * 100, resetAt: Number.isFinite(reset) ? reset * 1000 : null });
+	}
+	for (const kind of ["primary", "secondary"]) {
+		const used = number(headers[`x-codex-${kind}-used-percent`]);
+		const minutes = number(headers[`x-codex-${kind}-window-minutes`]);
+		if (!Number.isFinite(used) || !Number.isFinite(minutes) || minutes <= 0) continue;
+		const reset = Number.parseInt(headers[`x-codex-${kind}-reset-at`] ?? "", 10);
+		windows.push({ label: windowLabel(minutes * 60), percent: used, resetAt: Number.isFinite(reset) ? reset * 1000 : null });
+	}
+	return windows;
+}
+
+function recordUsage(headers) {
+	const provider = liveCtx?.model?.provider;
+	if (!provider || !headers || typeof headers !== "object") return;
+	const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)]));
+	const windows = parseUsageHeaders(lower);
+	if (!windows.length) return;
+	usageByProvider.set(provider, windows);
+	footerTui?.requestRender?.();
+}
+
+/** Windows of the active provider that have not reset yet. */
+function currentUsage(ctx) {
+	const windows = usageByProvider.get(ctx?.model?.provider) ?? [];
+	return windows.filter((window) => window.resetAt === null || window.resetAt > Date.now());
+}
 
 // ---------------------------------------------------------------------------
 // MCP servers: online / installed
@@ -1292,6 +1357,9 @@ export default async function (pi) {
 
 	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
 	piApi = pi;
+	// Rate-limit headers arrive with each provider response (claude-bridge rebuilds Claude Code's
+	// rate_limit_event as the unified headers), so no credentials or extra requests are needed.
+	pi.on("after_provider_response", (event) => recordUsage(event?.headers));
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
 		liveCtx = ctx;
