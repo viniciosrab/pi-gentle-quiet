@@ -94,6 +94,18 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
 - Quiet rows expand with `ctrl+o`, not with a click. Toggling quiet tools applies to new calls.
 - Subagent result messages keep gentle-pi's card style.
 
+## Development
+
+```sh
+npm test
+```
+
+Tests run with Node's test runner (Node 22.18+) against stand-ins for Pi's host packages
+(`test/stubs/`), so Pi does not need to be installed. They drive the extension through what it
+registers with Pi: statuses, widgets, tool renderers, the editor and `/gentle-quiet`.
+`test/fixtures/` copies the shapes gentle-pi and gentle-engram draw; when either changes its output,
+update the fixture and the affected test together.
+
 ## Credits
 
 The prompt icon editor is adapted from [pi-pretty](https://www.npmjs.com/package/@heyhuynhgiabuu/pi-pretty) (MIT).
