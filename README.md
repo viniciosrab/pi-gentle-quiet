@@ -44,10 +44,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.5.1
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.6.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.5.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.6.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
@@ -91,6 +91,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
 | Status line tokens | `cache` (`R W CH%`); `all` adds `↑ ↓`; `off` |
 | Subscription (current provider) | off; on shows `sub` for a plan Pi cannot detect, such as claude-bridge |
+| Estimated cost (unpriced providers) | on: zero-priced responses (claude-bridge) are priced at the same model's Anthropic API rates |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
 The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
@@ -105,6 +106,9 @@ The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without 
 - Pi draws a message type with the first extension that registered it. Local extensions load
   before packages; as a package, list `git:github.com/viniciosrab/pi-gentle-quiet` before
   `npm:gentle-pi` in `packages` so subagent results use the quiet row.
+- Providers that report every call at $0 (claude-bridge) get the API-equivalent cost of the same model
+  from Pi's `anthropic` prices, the same notional figure Pi shows for other subscriptions. It is an
+  estimate of what the tokens would cost on the API, not a charge.
 - A zero cost is hidden unless the provider is a known subscription, like Pi's own footer. Providers that
   bill through a plan without telling Pi (claude-bridge reports every call at $0) can be marked in
   `/gentle-quiet` → **Subscription (<provider>)** to show `sub`.

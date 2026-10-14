@@ -57,7 +57,8 @@ const DEFAULTS = {
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
 	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, subscriptionProviders: [] },
+	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -498,6 +499,7 @@ async function configure(ctx) {
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
+			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }],
 			...(ctx.model?.provider ? [[`Subscription (${ctx.model.provider}): ${onOff(config.statusLine.subscriptionProviders.includes(ctx.model.provider))}`, () => {
 				const provider = ctx.model.provider;
 				const list = config.statusLine.subscriptionProviders;
@@ -916,9 +918,49 @@ function gauge(percent, t) {
 }
 
 /** Session usage totals counted the way Pi's own footer counts them. */
+// Providers whose prices stand in for an unpriced provider serving the same model ids
+// (claude-bridge registers Claude models at zero prices).
+const REFERENCE_PROVIDERS = ["anthropic"];
+
+/** Pi's calculateCost: per-million rates, the highest matching tier, 1h cache writes at 2× input. */
+function priceUsage(cost, usage) {
+	const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+	let rates = cost;
+	let matched = -1;
+	for (const tier of cost.tiers ?? []) {
+		if (promptTokens > tier.inputTokensAbove && tier.inputTokensAbove > matched) {
+			rates = tier;
+			matched = tier.inputTokensAbove;
+		}
+	}
+	const longWrite = usage.cacheWrite1h || 0;
+	const shortWrite = (usage.cacheWrite || 0) - longWrite;
+	return ((rates.input || 0) * (usage.input || 0)
+		+ (rates.output || 0) * (usage.output || 0)
+		+ (rates.cacheRead || 0) * (usage.cacheRead || 0)
+		+ (rates.cacheWrite || 0) * shortWrite
+		+ (rates.input || 0) * 2 * longWrite) / 1e6;
+}
+
+/** API-equivalent cost of a zero-priced response, from the same model at a reference provider. */
+function estimatedCost(ctx, message) {
+	if (!config.statusLine.estimateCost || typeof message?.model !== "string") return 0;
+	for (const provider of REFERENCE_PROVIDERS) {
+		if (provider === message.provider) continue;
+		let model;
+		try {
+			model = ctx?.modelRegistry?.find?.(provider, message.model);
+		} catch {
+			model = undefined;
+		}
+		if (model?.cost) return priceUsage(model.cost, message.usage);
+	}
+	return 0;
+}
+
 function sessionTotals(ctx) {
 	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
-	if (entries.length === totalsCache.count && totalsCache.entries === entries.at(-1)) return totalsCache.totals;
+	if (entries.length === totalsCache.count && totalsCache.entries === entries.at(-1) && totalsCache.estimate === config.statusLine.estimateCost) return totalsCache.totals;
 	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined };
 	const add = (usage) => {
 		if (!usage) return;
@@ -933,6 +975,7 @@ function sessionTotals(ctx) {
 		if (entry?.type === "usage") add(entry.usage);
 		else if (entry?.type === "message" && message?.role === "assistant" && message.usage) {
 			add(message.usage);
+			if (!(message.usage.cost?.total > 0)) totals.cost += estimatedCost(ctx, message);
 			const prompt = (message.usage.input || 0) + (message.usage.cacheRead || 0) + (message.usage.cacheWrite || 0);
 			totals.cacheHit = prompt > 0 ? ((message.usage.cacheRead || 0) / prompt) * 100 : undefined;
 		} else if (entry?.type === "message" && message?.role === "toolResult") add(message.usage);
@@ -940,6 +983,7 @@ function sessionTotals(ctx) {
 	}
 	totalsCache.count = entries.length;
 	totalsCache.entries = entries.at(-1);
+	totalsCache.estimate = config.statusLine.estimateCost;
 	totalsCache.totals = totals;
 	return totals;
 }

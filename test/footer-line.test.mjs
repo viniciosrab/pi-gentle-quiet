@@ -209,3 +209,49 @@ test("the menu marks the current provider as subscription and back, and saves it
 	assert.ok(seen[1].items.includes("Subscription (claude-bridge): on"));
 	assert.deepEqual(readConfig().statusLine.subscriptionProviders, []);
 });
+
+// claude-bridge reports real tokens at zero prices; Pi knows the Anthropic prices.
+const bridged = (usage, extra = {}) => ({
+	model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true },
+	subscription: false,
+	registry: { "anthropic/claude-opus-5-5": { cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 } } },
+	entries: [
+		{ type: "message", message: { role: "assistant", provider: "claude-bridge", model: "claude-opus-5-5", usage: { ...usage, cost: { total: 0 } } } },
+	],
+	...extra,
+});
+const subscribed = { statusLine: { subscriptionProviders: ["claude-bridge"] } };
+
+test("an unpriced provider gets the API-equivalent cost from the same Anthropic model", async () => {
+	// 1M input × $4 + 100k output × $20 + 10M cache read × $0.2 + 200k cache write × $5 = 4 + 2 + 2 + 1 = $9.00
+	const session = bridged({ input: 1_000_000, output: 100_000, cacheRead: 10_000_000, cacheWrite: 200_000 });
+	const line = plain((await footer({ session, statuses: {}, config: subscribed })).component.render(160)[0]);
+	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% · \$9\.00 sub $/);
+});
+
+test("price tiers apply like Pi's own cost calculation", async () => {
+	const session = bridged({ input: 200_000, output: 0, cacheRead: 0, cacheWrite: 0 }, {
+		model: { id: "claude-haiku-5-5", provider: "claude-bridge", reasoning: true },
+		registry: { "anthropic/claude-haiku-5-5": { cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, tiers: [{ inputTokensAbove: 1e5, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }] } } },
+	});
+	session.entries[0].message.model = "claude-haiku-5-5";
+	const line = plain((await footer({ session, statuses: {}, config: subscribed })).component.render(160)[0]);
+	assert.match(line, /\$0\.100 sub $/, "200k input above the 100k tier: 200k × $0.5");
+});
+
+test("without a known price the cost stays as reported", async () => {
+	const session = bridged({ input: 1000, output: 1000, cacheRead: 0, cacheWrite: 0 }, { registry: {} });
+	const line = plain((await footer({ session, statuses: {}, config: subscribed })).component.render(160)[0]);
+	assert.match(line, /28% · sub $/);
+});
+
+test("Estimated cost can be turned off in the menu", async () => {
+	const session = bridged({ input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 });
+	const { select, seen } = picker(/^Estimated cost/);
+	const { commands, ctx, component } = await footer({ session, statuses: {}, config: subscribed, load: { select } });
+	assert.match(plain(component.render(160)[0]), /\$4\.00 sub $/);
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[0].items.includes("Estimated cost (unpriced providers): on"));
+	assert.equal(readConfig().statusLine.estimateCost, false);
+	assert.match(plain(component.render(160)[0]), /28% · sub $/);
+});

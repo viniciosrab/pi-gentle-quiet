@@ -71,7 +71,10 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 		hasUI: true,
 		model: session.model,
 		getContextUsage: () => session.usage,
-		modelRegistry: { isUsingOAuth: () => session.subscription ?? false },
+		modelRegistry: {
+			isUsingOAuth: () => session.subscription ?? false,
+			find: (provider, id) => session.registry?.[`${provider}/${id}`],
+		},
 		sessionManager: {
 			getCwd: () => session.cwd ?? "/tmp",
 			getEntries: () => session.entries ?? [],
