@@ -346,7 +346,7 @@ function trimBlankEdges(rows) {
 }
 
 // A row too long for the box, split where its right-aligned details start: the left part keeps the
-// row, the details (model, effort, tokens, time) go on a muted row of their own under it.
+// row, the details (model, effort, tokens, time) go on a muted row of their own, under the name.
 function stackRow(row, inner, t) {
 	if (visibleWidth(row) <= inner) return [row];
 	const toks = tokens(row);
@@ -360,7 +360,9 @@ function stackRow(row, inner, t) {
 		else if (seen++ < gap.index) left += tok.ch;
 	}
 	const right = text.slice(gap.index + gap[0].length).trim();
-	return [truncateToWidth(left, inner, "…"), `  ${fg(t, "muted", truncateToWidth(right, inner - 2, "…"))}`];
+	// The details line up under the name, past the status icon and however many spaces follow it.
+	const indent = Math.min(8, /^\s*\S+\s+/.exec(text.slice(0, gap.index))?.[0].length ?? 2);
+	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
 }
 
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column

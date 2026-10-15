@@ -189,3 +189,18 @@ test("the wheel over the Todos card reaches it", async () => {
 	assert.equal(seen[0].type, "wheel");
 	assert.equal(seen[0].wheelDelta, 3);
 });
+
+test("an agent's details line up under its name, however far the name sits from the icon", async () => {
+	for (const icon of ["◐ ", "◐  "]) {
+		const loaded = await wide();
+		const left = `${icon}gentle-ai-verify  Verify Phase 2 home`;
+		const right = "claude-opus-5-5 · high · 26k · 15s";
+		loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  1 active", `   ${left}${" ".repeat(Math.max(3, width - 5 - left.length - right.length))}${right}`] }));
+		loaded.widgets["gentle-agents"](loaded.tui, theme);
+		loaded.root[NODE]();
+		const out = loaded.rows();
+		const name = out.find((row) => row.includes("gentle-ai-verify"));
+		const details = out[out.indexOf(name) + 1];
+		assert.equal(details.indexOf("claude-opus-5-5"), name.indexOf("gentle-ai-verify"), JSON.stringify(icon));
+	}
+});
