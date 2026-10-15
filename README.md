@@ -37,7 +37,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
-| Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` |
+| Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` (**Tool call tones: theme** in the menu goes back to the theme's colors, e.g. for light themes) |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
 | Prompt | Pi's editor | Pi's editor with a `❯` flush with the margin in front of the input and of sent messages |
@@ -86,6 +86,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | YOLO banner | hidden |
 | Icons: memory / todo / agents / other gentle tools | `􀀀` (U+100000) / `≡` / `◈` / `›` |
 | Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
+| Tool call tones | `claude`: Claude Code's fixed greys; `theme`: the theme's `toolTitle` and `accent` colors |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
 | Codemode output lines | `3` (`5`, `10`, `0` to hide) |
 | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |

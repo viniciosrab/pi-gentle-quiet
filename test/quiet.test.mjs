@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, theme } from "./helpers.mjs";
+import { load, lines, painted, picker, readConfig, theme, writeConfig } from "./helpers.mjs";
 
 const text = (value, extra = {}) => ({ content: [{ type: "text", text: value }], ...extra });
 const native = { renderCall: () => ({ render: () => ["NATIVE"] }), renderResult: () => ({ render: () => ["\x1b[48;5;2mfull\x1b[49m", "output"] }) };
@@ -81,4 +81,27 @@ test("tool calls use Claude Code's tones: light name and command, softer grey pa
 	assert.ok(!read.includes("\x1b[1m"), "no bold title");
 	const bash = tool("bash", native).renderCall({ command: "nproc" }, theme).render(80)[0];
 	assert.ok(bash.includes(`${LIGHT}$ nproc`), "the command row is light, apart from its grey result row");
+});
+
+test("Tool call tones: theme gives the rows back to Pi's theme colors and is saved", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Tool call tones/);
+	const loaded = await load({ mode: "tui", select });
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	assert.ok(seen[0].items.includes("Tool call tones: claude"), "Claude Code tones by default");
+	assert.equal(readConfig().tools.tones, "theme");
+	const read = loaded.tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
+	assert.ok(painted(read, "toolTitle", "\x1b[1mread"), "bold toolTitle name");
+	assert.ok(painted(read, "accent", "/tmp/app.ts"), "accent path");
+	assert.ok(!read.includes("\x1b[38;2;"), "no fixed truecolor");
+	const bash = loaded.tool("bash", native).renderCall({ command: "nproc" }, theme).render(80)[0];
+	assert.ok(painted(bash, "toolTitle", "$ nproc"));
+});
+
+test("an unknown saved tone falls back to the Claude Code tones", async () => {
+	writeConfig({ tools: { tones: "neon" } });
+	const loaded = await load();
+	const read = loaded.tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
+	assert.ok(read.includes("\x1b[38;2;188;188;188mread"));
+	writeConfig({});
 });

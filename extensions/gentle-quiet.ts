@@ -50,7 +50,8 @@ const DEFAULTS = {
 	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", other: "›" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
-	tools: { restyle: true, margin: true },
+	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors.
+	tools: { restyle: true, margin: true, tones: "claude" },
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
@@ -102,13 +103,19 @@ function merge(user = {}) {
 		yoloBanner: user.yoloBanner ?? DEFAULTS.yoloBanner,
 		// memoryCards.icon was the single shared icon of earlier versions; it now seeds the memory icon.
 		icons: { ...DEFAULTS.icons, ...(typeof user.memoryCards?.icon === "string" ? { memory: user.memoryCards.icon } : {}), ...user.icons },
-		tools: { ...DEFAULTS.tools, ...user.tools },
+		tools: toneMode({ ...DEFAULTS.tools, ...user.tools }),
 		quiet: { ...DEFAULTS.quiet, ...user.quiet },
 		blocks: { ...DEFAULTS.blocks, ...user.blocks },
 		subagents: { ...DEFAULTS.subagents, ...user.subagents },
 		statusLine: tokensMode({ ...DEFAULTS.statusLine, ...user.statusLine }),
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
 	};
+}
+
+const TONE_MODES = ["claude", "theme"];
+function toneMode(tools) {
+	if (!TONE_MODES.includes(tools.tones)) tools.tones = DEFAULTS.tools.tones;
+	return tools;
 }
 
 const TOKEN_MODES = ["cache", "all", "off"];
@@ -533,6 +540,7 @@ async function configure(ctx) {
 			...ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }]),
 			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
+			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }],
 			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
 			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
 			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
@@ -600,10 +608,15 @@ const outputLines = (text) => text.replace(/\s+$/, "").split("\n").filter((line,
 // Fixed truecolor so monochrome palettes keep the two tones apart.
 const CALL_TITLE = (text) => `\x1b[38;2;188;188;188m${text}\x1b[39m`;
 const CALL_ARG = (text) => `\x1b[38;2;153;153;153m${text}\x1b[39m`;
+/** Painters for a call row: tool name, its path or argument, and bash's "$ command". */
+const callTones = (t) => config.tools.tones === "theme"
+	? { title: (text) => fg(t, "toolTitle", bold(t, text)), arg: (text) => fg(t, "accent", text), command: (text) => fg(t, "toolTitle", text) }
+	: { title: CALL_TITLE, arg: CALL_ARG, command: CALL_TITLE };
 
 function quietCall(toolName, args = {}, t) {
-	const title = (name) => CALL_TITLE(name);
-	const accent = (text) => CALL_ARG(text);
+	const tones = callTones(t);
+	const title = tones.title;
+	const accent = tones.arg;
 	const dim = (text) => fg(t, "dim", text);
 	switch (toolName) {
 		case "read": {
@@ -613,7 +626,7 @@ function quietCall(toolName, args = {}, t) {
 			return `${title("read")} ${accent(shortPath(args.path ?? args.file_path))}${range}`;
 		}
 		case "bash": // regular weight, like Claude Code's "$ command" row
-			return CALL_TITLE(`$ ${firstLine(args.command)}`);
+			return tones.command(`$ ${firstLine(args.command)}`);
 		case "edit":
 		case "write":
 			return `${title(toolName)} ${accent(shortPath(args.path ?? args.file_path))}`;
@@ -948,8 +961,9 @@ function memoryRenderers(chrome, toolName, renderers) {
 		renderCall(args, t) {
 			const name = chrome.humanToolName(toolName);
 			const arg = chrome.compactToolArg?.(toolName, args) ?? "";
-			const title = CALL_TITLE(join(config.icons.memory, name));
-			return flattened(new Text(join(title, arg && CALL_ARG(arg)), 0, 0), toolOptions("memory"));
+			const tones = callTones(t);
+			const title = tones.title(join(config.icons.memory, name));
+			return flattened(new Text(join(title, arg && tones.arg(arg)), 0, 0), toolOptions("memory"));
 		},
 		renderResult(result, options = {}, t, context = {}) {
 			const text = chrome.renderResultText(toolName, result, {
