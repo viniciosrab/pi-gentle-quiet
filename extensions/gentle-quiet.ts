@@ -1193,6 +1193,62 @@ function gentleRenderers(renderers, group) {
 	return { ...renderers, renderCall: wrap(renderers.renderCall), renderResult: wrap(renderers.renderResult) };
 }
 
+// RDD review tools (gentle_review, capture, scope): gentle-pi's card text, redrawn like the quiet bash row:
+// "› rdd start · risk · resilience" and, under it, "└ ✓ reviewing · medium · created · 9s". The text
+// comes from gentle-pi's own renderers (so its real status and wording stay), only the frame goes.
+const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
+const UNFRAMED_HINT = /\s{2,}\S.*$/; // the expand hint sits after a run of spaces
+
+/** The visible text rows of a gentle-pi card, without its accent bars, rose and padding rows. */
+function cardTextRows(component, width = 200) {
+	let rows;
+	try {
+		rows = component.render(width);
+	} catch {
+		return [];
+	}
+	return rows
+		.map((row) => row.replace(SGR, "").replace(/[▎]/gu, "").replace(GLYPHS, "").trim().replace(UNFRAMED_HINT, ""))
+		.filter((row) => row !== "");
+}
+
+/** A component that redraws from `native` on every render, so a running call's status and clock stay live. */
+const liveRows = (native, build) => ({
+	render: (width) => build(cardTextRows(native), width).map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…"))),
+	invalidate: () => native.invalidate?.(),
+});
+
+function reviewRenderers(renderers) {
+	return {
+		...renderers,
+		renderShell: "self",
+		renderCall(args, t, context = {}) {
+			const state = context.state && typeof context.state === "object" ? context.state : undefined;
+			const native = renderers.renderCall(args, t, { ...context, lastComponent: state?.quietCall });
+			if (state) state.quietCall = native;
+			const tones = callTones(t);
+			return liveRows(native, ([title = "rdd"]) => {
+				const [name, ...rest] = title.split(" ");
+				return [` ${tones.title(join(config.icons.other, name))} ${tones.arg(rest.join(" "))}`.trimEnd()];
+			});
+		},
+		renderResult(result, options = {}, t, context = {}) {
+			if (options.expanded && !options.isPartial) return flattened(renderers.renderResult(result, options, t, context), toolOptions("other"));
+			const state = context.state && typeof context.state === "object" ? context.state : undefined;
+			const native = renderers.renderResult(result, options, t, { ...context, lastComponent: state?.quietResult });
+			if (state) state.quietResult = native;
+			return liveRows(native, (rows) => {
+				const clock = rows.find((row) => ELAPSED_ROW.test(row));
+				const summary = rows.filter((row) => row !== clock)[0] ?? "";
+				const failed = context.isError || /^(failed|error)\b/i.test(summary);
+				const mark = failed ? fg(t, "error", "✗") : /^blocked\b/i.test(summary) ? fg(t, "warning", "●") : options.isPartial ? fg(t, "dim", "…") : fg(t, "success", "✓");
+				const tone = failed ? "error" : "dim";
+				return [` ${fg(t, "dim", "└")} ${mark} ${fg(t, tone, join(summary, clock && `· ${clock}`))}`];
+			});
+		},
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Status line (Pi's footer)
 // ---------------------------------------------------------------------------
@@ -1999,6 +2055,7 @@ export default async function (pi) {
 			if (toolName.startsWith("mem_") && chrome?.humanToolName && chrome?.renderResultText) {
 				return memoryRenderers(chrome, toolName, renderers);
 			}
+			if (REVIEW_TOOLS.test(toolName)) return reviewRenderers(renderers);
 			if (SELF_TOOLS.test(toolName)) return gentleRenderers(renderers, iconGroup(toolName));
 			if (QUIET_TOOLS.has(toolName) && config.quiet.enabled) return quietRenderers(toolName, renderers);
 			return renderers;

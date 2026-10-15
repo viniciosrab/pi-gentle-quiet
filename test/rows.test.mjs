@@ -94,17 +94,38 @@ test("a call component handed back by Pi is not flattened twice, so its rows do 
 	writeConfig({});
 	const { tool } = await load();
 	const card = { render: () => ["   ✿ rdd start"] };
-	const call = tool("gentle_review", { renderCall: (_args, _theme, context) => context.lastComponent ?? card });
+	const call = tool("todo", { renderCall: (_args, _theme, context) => context.lastComponent ?? card });
 	const first = call.renderCall({}, theme, {});
 	const second = call.renderCall({}, theme, { lastComponent: first });
 	const third = call.renderCall({}, theme, { lastComponent: second });
-	assert.equal(lines(first)[0], "    › rdd start");
+	assert.equal(lines(first)[0], "    ≡ rdd start");
 	assert.deepEqual(lines(third), lines(first));
 });
 
 test("the lone duration row that closes a finished call joins the row above it", async () => {
 	writeConfig({});
 	const { tool } = await load();
-	const result = tool("gentle_review", { renderResult: () => ({ render: () => ["medium · created", "                    9s"] }) });
+	const result = tool("todo", { renderResult: () => ({ render: () => ["medium · created", "                    9s"] }) });
 	assert.deepEqual(lines(result.renderResult({}, {}, theme, {})), [" medium · created · 9s"]);
+});
+
+// gentle-pi's review cards as they arrive: float panel rows with accent bars, a rose, padding rows and the clock on its own row.
+const nativeCall = (title) => ({ render: () => [" ▎" + " ".repeat(60), ` ▎ 🌹 ${title}${" ".repeat(30)} ctrl+o to expand   `], invalidate() {} });
+const nativeResult = (...body) => ({ render: () => [" ▎ " + body[0], " ▎", ...body.slice(1).map((row) => ` ▎ ${row}`)], invalidate() {} });
+
+test("rdd calls are drawn like the quiet bash row: a title line and a └ status line with the real status", async () => {
+	writeConfig({});
+	const { tool } = await load();
+	const rdd = tool("gentle_review", { renderCall: () => nativeCall("rdd start · risk · resilience"), renderResult: () => nativeResult("reviewing · medium · created", "          9s") });
+	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" › rdd start · risk · resilience"]);
+	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, {})), [" └ ✓ reviewing · medium · created · 9s"]);
+});
+
+test("rdd results mark blocked and failed states, and a running call keeps its state in the title", async () => {
+	writeConfig({});
+	const { tool } = await load();
+	const rdd = tool("gentle_review_capture_group", { renderCall: () => nativeCall("rdd preparing · capture group"), renderResult: () => nativeResult("blocked · collect · reviewer_results_required") });
+	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" › rdd preparing · capture group"]);
+	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, {})), [" └ ● blocked · collect · reviewer_results_required"]);
+	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, { isError: true })), [" └ ✗ blocked · collect · reviewer_results_required"]);
 });
