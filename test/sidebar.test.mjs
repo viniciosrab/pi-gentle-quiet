@@ -66,6 +66,19 @@ test("the column stacks Agents and Todos in the square outline, a blank row unde
 	assert.ok(out.every((row) => [...row].length <= 59), "rows fit the column minus its scrollbar");
 });
 
+test("the Agents batch clock stays on the title row, right-aligned", async () => {
+	const loaded = await wide();
+	const left = "❀ Agents  1 active · 1 done";
+	const card = (width) => [`   ${left}${" ".repeat(width - 5 - left.length - 6)}16m53s`, "", "   ◐ gentle-ai-worker"];
+	loaded.ui.setWidget("gentle-agents", () => ({ render: card }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows();
+	const top = out.findIndex((row) => row.startsWith("┌"));
+	assert.match(out[top + 1], /^│ ◈ Agents {2}1 active · 1 done +16m53s +│$/);
+	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
+});
+
 test("Todos, Agents and the footer leave their usual places while the column is open", async () => {
 	const { todo, agents, footer } = await wide();
 	assert.deepEqual(todo.render(100), []);

@@ -89,7 +89,7 @@ const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo" };
 const BLOCK_WIDGETS = new Set(["gentle-todo", "gentle-agents"]);
 // gentle-pi tools drawn without Pi's tool box (renderShell "self"); memory tools are handled apart.
 const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|codegraph|session_worktree_register)$/;
-const GLYPHS = /(?:[✿❀]|🤖)\s?/gu; // gentle-pi's card petals (CARD_GLYPH, AGENTS_GLYPH) and orchestrator robot
+const GLYPHS = /(?:[✿❀]|🤖|🌹)\s?/gu; // gentle-pi's card petals (CARD_GLYPH, AGENTS_GLYPH), orchestrator robot and rdd rose
 const BARS = new Set(["▎", "▌", "▍", "┃"]); // float panel accent bars
 const PATCHED = Symbol.for("gentle-quiet.patched");
 const SYMBOLS = /[\p{Extended_Pictographic}☀-➿️‍]/gu;
@@ -348,7 +348,7 @@ function trimBlankEdges(rows) {
 
 // A row too long for the box, split where its right-aligned details start: the left part keeps the
 // row, the details (model, effort, tokens, time) go on a muted row of their own, under the name.
-function stackRow(row, inner, t) {
+function stackRow(row, inner, t, title = false) {
 	if (visibleWidth(row) <= inner) return [row];
 	const toks = tokens(row);
 	const text = toks.map((tok) => tok.ch ?? "").join("");
@@ -361,6 +361,12 @@ function stackRow(row, inner, t) {
 		else if (seen++ < gap.index) left += tok.ch;
 	}
 	const right = text.slice(gap.index + gap[0].length).trim();
+	// The title's detail (the batch clock) stays on the title row, right-aligned.
+	if (title) {
+		const room = inner - visibleWidth(left) - 2;
+		if (room >= visibleWidth(right)) return [`${left}${" ".repeat(inner - visibleWidth(left) - visibleWidth(right))}${fg(t, "muted", right)}`];
+		return [truncateToWidth(left, inner, "…")];
+	}
 	// The details line up under the name, past the status icon and however many spaces follow it.
 	const indent = Math.min(8, /^\s*\S+\s+/.exec(text.slice(0, gap.index))?.[0].length ?? 2);
 	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
@@ -378,7 +384,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	let rows = trimBlankEdges(flatten(target.render(rail.stack ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
-	if (rail.stack) rows = rows.flatMap((row) => stackRow(row, inner, t ?? theme));
+	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }

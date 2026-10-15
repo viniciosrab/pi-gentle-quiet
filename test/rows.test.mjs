@@ -12,6 +12,8 @@ test("gentle tool rows get Pi's margin and their group icon", async () => {
 	assert.equal(draw("ask_user_choice", "✿ question"), " › question");
 	// gentle-pi's orchestrator cards use a robot instead of a petal.
 	assert.equal(draw("orchestrator_list", "🤖 Discover orchestrators · Advertised sessions"), " ◈ Discover orchestrators · Advertised sessions");
+	// rdd tool rows use a rose.
+	assert.equal(draw("gentle_review", "🌹 rdd assess"), " › rdd assess");
 });
 
 test("without gentle-engram installed, memory tools keep their own renderers", async () => {
