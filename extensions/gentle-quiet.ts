@@ -53,7 +53,8 @@ const DEFAULTS = {
 	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", other: "›" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
-	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors.
+	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
+	// "soft" uses the theme's toolTitle for the name and muted for the path, without bold.
 	tools: { restyle: true, margin: true, tones: "claude" },
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
@@ -119,7 +120,7 @@ function merge(user = {}) {
 	};
 }
 
-const TONE_MODES = ["claude", "theme"];
+const TONE_MODES = ["claude", "theme", "soft"];
 function toneMode(tools) {
 	if (!TONE_MODES.includes(tools.tones)) tools.tones = DEFAULTS.tools.tones;
 	return tools;
@@ -760,9 +761,12 @@ const outputLines = (text) => text.replace(/\s+$/, "").split("\n").filter((line,
 const CALL_TITLE = (text) => `\x1b[38;2;188;188;188m${text}\x1b[39m`;
 const CALL_ARG = (text) => `\x1b[38;2;153;153;153m${text}\x1b[39m`;
 /** Painters for a call row: tool name, its path or argument, and bash's "$ command". */
+// "soft" is Claude Code's layout in the theme's own colors: toolTitle name, muted path and $ command, no bold.
 const callTones = (t) => config.tools.tones === "theme"
 	? { title: (text) => fg(t, "toolTitle", bold(t, text)), arg: (text) => fg(t, "accent", text), command: (text) => fg(t, "toolTitle", text) }
-	: { title: CALL_TITLE, arg: CALL_ARG, command: CALL_TITLE };
+	: config.tools.tones === "soft"
+		? { title: (text) => fg(t, "toolTitle", text), arg: (text) => fg(t, "muted", text), command: (text) => fg(t, "muted", text) }
+		: { title: CALL_TITLE, arg: CALL_ARG, command: CALL_ARG };
 
 function quietCall(toolName, args = {}, t) {
 	const tones = callTones(t);
@@ -1341,7 +1345,7 @@ function statusLineRows(t, footerData, width) {
 		withCounts && counts,
 	);
 	const modelText = (withEffort) => model?.id
-		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "syntaxFunction", effort)}`)
+		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "muted", effort)}`)
 		: "";
 	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
 	// "cache" mode keeps the hit rate when the terminal narrows; "all" keeps ↑ ↓ instead.

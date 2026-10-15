@@ -255,3 +255,9 @@ test("Estimated cost can be turned off in the menu", async () => {
 	assert.equal(readConfig().statusLine.estimateCost, false);
 	assert.match(plain(component.render(160)[0]), /28% · sub $/);
 });
+
+test("the effort is painted muted, like Pi's own footer, not in a syntax color", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" } });
+	const row = component.render(170)[0];
+	assert.ok(painted(row, "muted", "medium"));
+});

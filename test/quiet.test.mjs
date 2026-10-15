@@ -71,7 +71,7 @@ test("an unchanged expanded output is reused instead of reprocessed", async () =
 	assert.equal(renders, 2, "Pi's renderer still runs, so new output is picked up");
 });
 
-test("tool calls use Claude Code's tones: light name and command, softer grey path", async () => {
+test("tool calls use Claude Code's tones: light name, softer grey path and $ command", async () => {
 	const { tool } = await load();
 	const LIGHT = "\x1b[38;2;188;188;188m";
 	const GREY = "\x1b[38;2;153;153;153m";
@@ -80,7 +80,8 @@ test("tool calls use Claude Code's tones: light name and command, softer grey pa
 	assert.ok(read.includes(`${GREY}/tmp/app.ts`), "path in the softer grey");
 	assert.ok(!read.includes("\x1b[1m"), "no bold title");
 	const bash = tool("bash", native).renderCall({ command: "nproc" }, theme).render(80)[0];
-	assert.ok(bash.includes(`${LIGHT}$ nproc`), "the command row is light, apart from its grey result row");
+	assert.ok(bash.includes(`${GREY}$ nproc`), "the $ command is the softer grey, like Claude Code's");
+	assert.ok(!bash.includes(LIGHT), "and nothing on the row is in the light tone");
 });
 
 test("Tool call tones: theme gives the rows back to Pi's theme colors and is saved", async () => {
@@ -103,5 +104,27 @@ test("an unknown saved tone falls back to the Claude Code tones", async () => {
 	const loaded = await load();
 	const read = loaded.tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
 	assert.ok(read.includes("\x1b[38;2;188;188;188mread"));
+	writeConfig({});
+});
+
+test("Tool call tones: soft follows the theme quietly: toolTitle name, muted path and command, no bold", async () => {
+	writeConfig({ tools: { tones: "soft" } });
+	const loaded = await load();
+	const read = loaded.tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
+	assert.ok(painted(read, "toolTitle", "read"), "toolTitle name");
+	assert.ok(painted(read, "muted", "/tmp/app.ts"), "muted path");
+	assert.ok(!read.includes("\x1b[1m"), "no bold title");
+	assert.ok(!read.includes("\x1b[38;2;"), "no fixed truecolor");
+	const bash = loaded.tool("bash", native).renderCall({ command: "nproc" }, theme).render(80)[0];
+	assert.ok(painted(bash, "muted", "$ nproc"), "the $ command is muted, like the paths");
+	writeConfig({});
+});
+
+test("the tones option cycles claude → theme → soft → claude", async () => {
+	writeConfig({ tools: { tones: "theme" } });
+	const { select } = picker(/^Tool rows ›$/, /^Tool call tones/, /^Tool call tones/);
+	const loaded = await load({ select });
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	assert.equal(readConfig().tools.tones, "claude");
 	writeConfig({});
 });
