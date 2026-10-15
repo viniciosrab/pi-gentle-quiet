@@ -345,15 +345,17 @@ function trimBlankEdges(rows) {
 	return rows.slice(start, end);
 }
 
-// A panel's rows drawn flattened, inside the outline when it fits and is enabled.
-function drawBlock(target, width, options, t) {
+// A panel's rows drawn flattened, inside the outline when it fits and is enabled. `spaced` (the side
+// column) leaves one blank row between the title and the list.
+function drawBlock(target, width, options, t, spaced = false) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
 		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true }));
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
-	const rows = trimBlankEdges(flatten(target.render(inner + 5), { ...options(), margin: false }));
+	let rows = trimBlankEdges(flatten(target.render(inner + 5), { ...options(), margin: false }));
+	if (spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
 
@@ -361,7 +363,7 @@ function drawBlock(target, width, options, t) {
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, (width) => drawBlock(component, width, options, t));
+	if (key) railBlocks.set(key, (width) => drawBlock(component, width, options, t, true));
 	return new Proxy(component, {
 		get(target, prop) {
 			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t));

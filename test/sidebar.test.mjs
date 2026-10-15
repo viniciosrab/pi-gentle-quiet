@@ -54,13 +54,14 @@ test("the status line is the original bar, full width, set off by a blank row ab
 	assert.equal(out[2], "─".repeat(180));
 });
 
-test("the column stacks Agents and Todos in the same square outline as above the input", async () => {
+test("the column stacks Agents and Todos in the square outline, a blank row under each title", async () => {
 	const { rows } = await wide();
 	const out = rows();
 	const tops = out.flatMap((row, i) => (row.startsWith("┌") ? [i] : []));
 	assert.equal(tops.length, 2);
 	assert.match(out[tops[0] + 1], /^│ ◈ Agents {2}1 active/, "Agents first");
-	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│ ◐ Write it", "│ ○ Test it"], "same padding and tight rows as the panels above the input");
+	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◐ Write it"], "a blank row under the title");
+	assert.equal(out[tops[1] + 4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
 	assert.ok(out[tops[1] - 1].startsWith("└"), "no blank row between the cards");
 	assert.ok(out.every((row) => [...row].length <= 51), "rows fit the column minus its scrollbar");
 });
