@@ -82,7 +82,7 @@ const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo" };
 const BLOCK_WIDGETS = new Set(["gentle-todo", "gentle-agents"]);
 // gentle-pi tools drawn without Pi's tool box (renderShell "self"); memory tools are handled apart.
 const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|codegraph|session_worktree_register)$/;
-const GLYPHS = /[✿❀]\s?/g; // gentle-pi's card petals (CARD_GLYPH, AGENTS_GLYPH)
+const GLYPHS = /(?:[✿❀]|🤖)\s?/gu; // gentle-pi's card petals (CARD_GLYPH, AGENTS_GLYPH) and orchestrator robot
 const BARS = new Set(["▎", "▌", "▍", "┃"]); // float panel accent bars
 const PATCHED = Symbol.for("gentle-quiet.patched");
 const SYMBOLS = /[\p{Extended_Pictographic}☀-➿️‍]/gu;
@@ -684,7 +684,8 @@ async function configure(ctx) {
 // Quiet tools: Pi's own tools as a call row plus a one-line summary
 // ---------------------------------------------------------------------------
 
-const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "codemode"]);
+// gentle-pi's background jobs (bash_background, monitor, job_stop, job_list) follow the same rows.
+const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "codemode", "bash_background", "monitor", "job_stop", "job_list"]);
 const QUIET_PREVIEWS = [0, 1, 3, 5];
 const HOME = os.homedir();
 
@@ -725,6 +726,12 @@ function quietCall(toolName, args = {}, t) {
 		}
 		case "bash": // regular weight, like Claude Code's "$ command" row
 			return tones.command(`$ ${firstLine(args.command)}`);
+		case "bash_background":
+			return join(tones.command(`$ ${firstLine(args.command)}`), dim("· background"));
+		case "monitor":
+			return join(title("monitor"), accent(firstLine(args.label ?? args.command ?? "")));
+		case "job_stop":
+			return join(title("job_stop"), accent(String(args.job_id ?? "")));
 		case "edit":
 		case "write":
 			return `${title(toolName)} ${accent(shortPath(args.path ?? args.file_path))}`;
@@ -851,6 +858,18 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(lines.length ? plural(lines.length, "file") : "no files"), preview: lines };
 		case "ls":
 			return { summary: ok(lines.length ? plural(lines.length, "entry", "entries") : "empty"), preview: lines };
+		case "bash_background": {
+			const id = /\bStarted background job (\S+)\s/.exec(text)?.[1];
+			return { summary: ok(id ? `${id} started` : firstLine(lines[0] ?? "started", 80)) };
+		}
+		case "monitor": {
+			const started = /Started monitor (\S+) .*? for up to (\d+)s/.exec(text);
+			return { summary: ok(started ? `${started[1]} watching · up to ${started[2]}s` : firstLine(lines[0] ?? "started", 80)) };
+		}
+		case "job_stop":
+			return { summary: ok(firstLine(lines[0] ?? "stopped", 80)) };
+		case "job_list":
+			return { summary: ok(/^No background jobs/.test(text) ? "no jobs" : plural(lines.length, "job")) };
 		default:
 			return { summary: ok(lines.length ? plural(lines.length, "line") : "done"), preview: lines, keepEnd: true };
 	}
@@ -1577,6 +1596,45 @@ function staleResultRenderer(entry, options = {}, t) {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Background job notices (gentle-jobs.notice messages)
+// ---------------------------------------------------------------------------
+
+const JOB_NOTICE_TYPE = "gentle-jobs.notice";
+const JOB_ICON = "⧗"; // gentle-pi's JOB_GLYPH
+// "Monitor job-2 ("label") reported 2 new lines:" -> "reported 2 new lines:"
+const JOB_SUBJECT = /^(?:Monitor|Background job) \S+ \(".*?"\) /;
+
+/** A job notice as a row plus a summary line; its lines appear on expand. */
+function jobNoticeRenderer(message, options = {}, t) {
+	const details = message?.details?.gentleJobs ?? {};
+	const content = message?.content;
+	const text = typeof content === "string" ? content : (content ?? []).filter((part) => part?.type === "text").map((part) => part.text ?? "").join("\n");
+	const [first = "", ...body] = text.replace(/\s+$/, "").split("\n");
+	const outcome = first.replace(JOB_SUBJECT, "").replace(/[.:]$/, "");
+	const label = clean(String(details.label ?? ""));
+	const head = join(fg(t, "toolTitle", bold(t, `${JOB_ICON} ${details.kind === "monitor" ? "monitor" : "bash_background"}`)), label && fg(t, "dim", `· ${label}`));
+	let summary;
+	if (details.event === "events") summary = fg(t, "dim", outcome.replace(/^reported /, ""));
+	else if (details.status === "exited" && details.exitCode === 0) summary = fg(t, "success", `✓ ${outcome}`);
+	else if (details.status === "stopped" || details.event === "timeout") summary = fg(t, "warning", outcome);
+	else summary = fg(t, "error", `✗ ${outcome}`);
+	const prefix = `${fg(t, "dim", "└")} ${summary}`;
+	const rows = body.filter((line) => line.trim() !== "");
+	return {
+		render(width) {
+			const top = ` ${head}`;
+			if (options.expanded) {
+				return [top, ` ${prefix}`, ...rows.map((line) => `   ${fg(t, "toolOutput", line)}`)].map((line) => truncateToWidth(line, width, "…"));
+			}
+			const hint = rows.length ? expandHint(t) : "";
+			const gap = width - visibleWidth(top) - visibleWidth(hint) - 1;
+			return [hint && gap >= 2 ? `${top}${" ".repeat(gap)}${hint} ` : truncateToWidth(top, width, "…"), truncateToWidth(` ${prefix}`, width, "…")];
+		},
+		invalidate() {},
+	};
+}
+
 export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
@@ -1636,6 +1694,9 @@ export default async function (pi) {
 	// before packages, and a package must be listed before gentle-pi to take over.
 	if (config.subagents.minimal && typeof pi.registerMessageRenderer === "function") {
 		pi.registerMessageRenderer(AGENTS_RESULT_TYPE, agentResultRenderer);
+	}
+	if (config.quiet.enabled && typeof pi.registerMessageRenderer === "function") {
+		pi.registerMessageRenderer(JOB_NOTICE_TYPE, jobNoticeRenderer);
 	}
 	if (config.subagents.minimal && typeof pi.registerEntryRenderer === "function") {
 		pi.registerEntryRenderer(AGENTS_STALE_RESULT_TYPE, staleResultRenderer);

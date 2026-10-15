@@ -48,7 +48,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `· Perm: Normal` on the left, `R50k W2.0k CH98.0% · ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub` on the right; counters give way first, and statuses move to a second row only when they still do not fit |
 | Footer statuses | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
 | Memory calls | `🧠 search "x" …` | `􀀀 search "x"` drawn like Pi's own tool rows |
-| gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
+| gentle-pi tool rows | `✿todo · write` flush against the edge; `🤖 Discover orchestrators` | ` ≡ todo · write` on Pi's one-column margin; the robot becomes the agents icon (` ◈ Discover orchestrators`) |
 | Stale subagent results | Rounded `❀ Stale agent result` card | ` ◈ agent · stale` + ` └ completed 2m ago while the orchestrator was busy` |
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
@@ -56,6 +56,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` (`/gentle-quiet` → **Tools** tab → **Tool call tones: theme** goes back to the theme's colors, e.g. for light themes) |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
+| Background jobs (`bash_background`, `monitor`, `job_stop`, `job_list`) | Boxed calls; every job notice in a background `⧗ Monitor` card | Quiet rows (` $ npm test · background` + ` └ ✓ job-1 started`); notices as ` ⧗ monitor · label` + ` └ 2 new lines` or ` └ ✓ exited with code 0 after 12s`, lines on `ctrl+o` |
 | Prompt | Pi's editor | Pi's editor with a `❯` flush with the margin in front of the input and of sent messages |
 | Sent user messages | Three-row bar: blank padded rows above and below the text | One-row bar like Claude Code |
 
