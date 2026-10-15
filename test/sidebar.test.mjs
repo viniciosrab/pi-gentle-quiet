@@ -113,8 +113,30 @@ test("a task title with line breaks hangs every line under the task's text and w
 	assert.ok(out.slice(first + 1, second).every((row) => /^ {2}\S/.test(row)), "every continuation hangs under the text");
 	assert.ok(out.slice(first + 1, second).length >= 3, "the long line wraps instead of being cut");
 	assert.ok(!out.some((row) => row.includes("…")), "nothing is truncated");
-	assert.equal(out[second + 1], "  valores muito longos e caracteres especiais");
+	const task = out.slice(second, second + 2).map((row, i) => (i === 0 ? row.slice(2) : row.trim())).join(" ");
+	assert.equal(task, "Escrever testes valores muito longos e caracteres especiais", "the continuation flows into the task's text");
 	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
+});
+
+test("a title gentle-pi already split is joined back and flows to the box width, with its strike closed on every line", async () => {
+	const loaded = await wide();
+	const title = "Escrever testes para casos de borda, entradas inválidas e mensagens de erro exatas · Usando dados isolados para não alterar o banco real durante a execução da suíte";
+	const cut = title.indexOf(" não alterar");
+	const done = "Revisar o módulo de autenticação, cobrindo login, renovação de tokens e sessões expiradas";
+	const rows = ["   ❀ Todos  1 of 2", `   ○ ${title.slice(0, cut)}`, `   ${title.slice(cut + 1)}`, `   ✓ \x1b[9m${done}\x1b[29m`];
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => rows.map((row) => row.padEnd(width)) }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("○ Escrever"));
+	const last = out.findIndex((row) => row.startsWith("✓ "));
+	const lines = out.slice(first, last);
+	assert.equal(lines.map((row, i) => (i === 0 ? row.slice(2) : row.trim())).join(" "), title, "the text is whole, in order");
+	assert.ok(lines.slice(0, -1).every((row) => [...row].length >= 45), "a line is filled before the text moves down");
+	assert.ok(lines.slice(1).every((row) => /^ {2}\S/.test(row)), "continuations hang under the text");
+	const raw = loaded.rail.render(60).filter((row) => row.includes("\x1b[9m"));
+	assert.ok(raw.length >= 1);
+	assert.ok(raw.every((row) => row.lastIndexOf("\x1b[29m") > row.lastIndexOf("\x1b[9m")), "the strike never runs into the border");
 });
 
 test("Todos and Agents leave their usual places while the column is open", async () => {

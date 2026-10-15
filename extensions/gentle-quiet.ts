@@ -398,26 +398,37 @@ function stackRow(row, inner, t, title = false) {
 
 // The scroll indicator row ("↑↓ 1-10/13 · ctrl+shift+↑/↓"): the wheel scrolls the card anyway.
 const SCROLL_ROW = /^\s*↑↓\s+\d+-\d+\/\d+/u;
-// Task rows wrapped so every line of a task lines up under the task's own text, past its status icon.
-// A title with line breaks arrives as rows without an icon; they belong to the task above and hang too.
-const TASK_GLYPH = /^[○◐⊘✓✕]\s/u;
+// Task rows reflowed so every line of a task lines up under the task's own text, past its status icon.
+// gentle-pi may already have split a long title into rows without an icon; they belong to the task above,
+// so they are joined back into its text before it is wrapped once to the box.
+const TASK_GLYPH = /^((?:\x1b\[[0-9;:]*m)*[○◐⊘✓✕](?:\x1b\[[0-9;:]*m)*) (.*)$/su;
 const LEADING_SPACE = /^((?:\x1b\[[0-9;:]*m)*)\s+/;
+const STRIKE_OFF = "\x1b[29m"; // wrapping keeps a struck-through title's style open: close it on every line
 function hangRows(rows, inner, t) {
 	const out = [];
-	let inTask = false;
+	let task; // { icon, text } of the task still collecting continuation rows
+	const flush = () => {
+		if (!task) return;
+		const { icon, text } = task;
+		task = undefined;
+		const lines = typeof PiTui.wrapTextWithAnsi === "function" && visibleWidth(`${icon} ${text}`) > inner ? PiTui.wrapTextWithAnsi(text, inner - 2) : [text];
+		lines.forEach((line, i) => out.push(`${i === 0 ? icon : " "} ${line}${text.includes("\x1b[9m") ? STRIKE_OFF : ""}`.replace(/^ {2}/, "  ")));
+	};
 	rows.forEach((row, index) => {
-		const text = row.replace(SGR, "");
 		if (index === 0) return out.push(...stackRow(row, inner, t, true));
-		const starts = TASK_GLYPH.test(text);
-		const continues = inTask && !starts && text.trim() !== "" && !/^\s*…\s/u.test(text);
-		if (starts) inTask = true;
-		if (!starts && !continues) return out.push(row);
-		const body = continues ? row.replace(LEADING_SPACE, "$1") : row;
-		const lead = continues ? "  " : "";
-		if (visibleWidth(lead + body) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return out.push(lead + body);
-		const [first, ...rest] = PiTui.wrapTextWithAnsi(body, inner - 2);
-		out.push(lead + first, ...rest.map((line) => `  ${line}`));
+		const text = row.replace(SGR, "");
+		const start = TASK_GLYPH.exec(row);
+		if (start) {
+			flush();
+			task = { icon: start[1], text: start[2] };
+		} else if (task && text.trim() !== "" && !/^\s*…\s/u.test(text)) {
+			task.text += ` ${row.replace(LEADING_SPACE, "$1")}`;
+		} else {
+			flush();
+			out.push(row);
+		}
 	});
+	flush();
 	return out;
 }
 
