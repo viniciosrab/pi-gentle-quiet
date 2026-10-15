@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, plain, readConfig, picker } from "./helpers.mjs";
+import { load, painted, plain, readConfig, picker, writeConfig } from "./helpers.mjs";
 
 test("memory status loses the emoji and project, keeps the state", async () => {
 	const { ui, status } = await load();
@@ -38,7 +38,7 @@ test("statuses of other extensions pass through unchanged", async () => {
 });
 
 test("/gentle-quiet toggles an option, redraws the footer and saves it", async () => {
-	const { select, seen } = picker(/^Permission when normal/);
+	const { select, seen } = picker(/^Footer statuses ›$/, /^Permission when normal/);
 	const { ui, status, commands, ctx } = await load({ select });
 	ui.setStatus("gentle:mode", "Permissions: NORMAL");
 	assert.equal(plain(status["gentle:mode"]), "Perm: Normal");
@@ -46,4 +46,19 @@ test("/gentle-quiet toggles an option, redraws the footer and saves it", async (
 	assert.equal(seen[0].title, "Gentle Quiet");
 	assert.equal(status["gentle:mode"], undefined, "normal mode hidden right away");
 	assert.equal(readConfig().permissions.hideWhenNormal, true);
+});
+
+test("/gentle-quiet groups its options in sections; Back returns to them and Reset stays at the top", async () => {
+	writeConfig({ yoloBanner: true });
+	const { select, seen } = picker(/^Tool rows ›$/, /^← Back$/, /^Reset to defaults$/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(seen[0].items, ["Status line ›", "Footer statuses ›", "Tool rows ›", "Blocks and agents ›", "Icons ›", "Prompt ›", "Reset to defaults", "Done"]);
+	assert.equal(seen[1].title, "Gentle Quiet › Tool rows");
+	assert.ok(seen[1].items.includes("Tool call tones: claude"), "the section lists its own options");
+	assert.ok(!seen[1].items.some((item) => item.startsWith("Status line")), "and only those");
+	assert.equal(seen[1].items.at(-1), "← Back");
+	assert.equal(seen[2].title, "Gentle Quiet", "Back returns to the sections");
+	assert.equal(seen[3].title, "Gentle Quiet", "Reset keeps the sections open");
+	assert.equal(readConfig().yoloBanner, false, "Reset restored and saved the defaults");
 });

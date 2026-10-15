@@ -43,17 +43,17 @@ test("running calls do not take the hint from the last finished one", async () =
 
 test("Expand hint cycles last → all → never and is saved", async () => {
 	writeConfig({});
-	const { select, seen } = picker(/^Expand hint/);
+	const { select, seen } = picker(/^Tool rows ›$/, /^Expand hint/);
 	const { tool, commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.includes("Expand hint: last"));
+	assert.ok(seen[1].items.includes("Expand hint: last"));
 	assert.equal(readConfig().quiet.hint, "all");
 	assert.deepEqual(calls(tool, ["a1", "a2"])().map((row) => HINT.test(row)), [true, true]);
 });
 
 test("Expand hint never hides it everywhere", async () => {
 	writeConfig({});
-	const { select } = picker(/^Expand hint/, /^Expand hint/);
+	const { select } = picker(/^Tool rows ›$/, /^Expand hint/, /^Expand hint/);
 	const { tool, commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
 	assert.equal(readConfig().quiet.hint, "never");

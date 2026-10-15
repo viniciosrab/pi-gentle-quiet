@@ -51,9 +51,9 @@ test("a script that threw shows its error in the summary only", async () => {
 
 test("Codemode output cycles 3 → 5 → 10 → 0 → 3 and is saved", async () => {
 	writeConfig({});
-	const { select, seen } = picker(/^Codemode output/);
+	const { select, seen } = picker(/^Tool rows ›$/, /^Codemode output/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.includes("Codemode output lines: 3"));
+	assert.ok(seen[1].items.includes("Codemode output lines: 3"));
 	assert.equal(readConfig().quiet.codemodeOutput, 5);
 });

@@ -60,13 +60,13 @@ test("no MCP servers configured shows nothing", async () => {
 
 test("MCP can be turned off from the menu and is saved", async () => {
 	writeMcp(servers);
-	const { select, seen } = picker(/^Status line MCP/);
+	const { select, seen } = picker(/^Status line ›$/, /^Status line MCP/);
 	writeConfig({});
 	const loaded = await load({ mode: "tui", session: { tools: ["mcp__codegraph__q"] }, select });
 	const component = loaded.footer()({ requestRender() {} }, theme, footerData);
 	assert.match(plain(component.render(200)[0]), /MCP 1\/3/);
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	assert.ok(seen[0].items.includes("Status line MCP: on"));
+	assert.ok(seen[1].items.includes("Status line MCP: on"));
 	assert.equal(readConfig().statusLine.mcp, false);
 	assert.doesNotMatch(plain(component.render(200)[0]), /MCP/);
 });

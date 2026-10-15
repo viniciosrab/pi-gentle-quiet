@@ -85,10 +85,10 @@ test("tool calls use Claude Code's tones: light name and command, softer grey pa
 
 test("Tool call tones: theme gives the rows back to Pi's theme colors and is saved", async () => {
 	writeConfig({});
-	const { select, seen } = picker(/^Tool call tones/);
+	const { select, seen } = picker(/^Tool rows ›$/, /^Tool call tones/);
 	const loaded = await load({ mode: "tui", select });
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	assert.ok(seen[0].items.includes("Tool call tones: claude"), "Claude Code tones by default");
+	assert.ok(seen[1].items.includes("Tool call tones: claude"), "Claude Code tones by default");
 	assert.equal(readConfig().tools.tones, "theme");
 	const read = loaded.tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
 	assert.ok(painted(read, "toolTitle", "\x1b[1mread"), "bold toolTitle name");

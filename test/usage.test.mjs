@@ -94,13 +94,13 @@ test("narrow terminals keep only the first window before dropping the usage", as
 
 test("Status line usage can be turned off in the menu and is saved", async () => {
 	writeConfig({});
-	const { select, seen } = picker(/^Status line usage/);
+	const { select, seen } = picker(/^Status line ›$/, /^Status line usage/);
 	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge-menu", reasoning: false }, usage: { percent: 28 } }, select });
 	const component = loaded.footer()({ requestRender() {} }, theme, footerData);
 	await loaded.emit("after_provider_response", { status: 200, headers: claudeHeaders(0.5, 0.1) });
 	assert.match(plain(component.render(200)[0]), /claude 5h ▰▰▰▰▱▱▱▱ 50%/);
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	assert.ok(seen[0].items.includes("Status line usage: on"));
+	assert.ok(seen[1].items.includes("Status line usage: on"));
 	assert.equal(readConfig().statusLine.usage, false);
 	assert.doesNotMatch(plain(component.render(200)[0]), /claude/);
 });

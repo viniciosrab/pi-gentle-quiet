@@ -56,7 +56,7 @@ test("the prompt editor comes back after Pi resets the extension UI (resume, new
 });
 
 test("turning the input prompt icon off restores Pi's editor and keeps it off", async () => {
-	const { select } = picker(/^Prompt icon in input/);
+	const { select } = picker(/^Prompt ›$/, /^Prompt icon in input/);
 	const { commands, ctx, emit, editor } = await load({ mode: "tui", select });
 	assert.ok(editor(), "installed at start");
 	await commands["gentle-quiet"].handler("", ctx);
@@ -66,7 +66,7 @@ test("turning the input prompt icon off restores Pi's editor and keeps it off", 
 });
 
 test("Tool rows: original leaves gentle-pi and memory rows as their packages draw them", async () => {
-	const { select } = picker(/^Tool rows/);
+	const { select } = picker(/^Tool rows ›$/, /^Tool rows:/);
 	const { tool, commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
 	const base = { renderCall() {}, renderResult() {} };

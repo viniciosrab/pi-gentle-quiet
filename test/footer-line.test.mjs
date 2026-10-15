@@ -122,7 +122,7 @@ test("Status line options: changes and cost can be hidden", async () => {
 });
 
 test("Status line: pi restores Pi's own footer right away and is saved", async () => {
-	const { select } = picker(/^Status line: gentle/);
+	const { select } = picker(/^Status line ›$/, /^Status line: gentle/);
 	const { commands, ctx, footer: current } = await footer({ load: { select } });
 	assert.ok(current(), "installed");
 	await commands["gentle-quiet"].handler("", ctx);
@@ -164,12 +164,12 @@ test("in cache mode a narrow terminal keeps the hit rate after R and W go", asyn
 });
 
 test("Status line tokens cycles cache → all → off and is saved", async () => {
-	const { select, seen } = picker(/^Status line tokens/, /^Status line tokens/, /^Status line tokens/);
+	const { select, seen } = picker(/^Status line ›$/, /^Status line tokens/, /^Status line tokens/, /^Status line tokens/);
 	const { commands, ctx, footer: current } = await footer({ load: { select }, statuses: {} });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.includes("Status line tokens: cache"));
-	assert.ok(seen[1].items.includes("Status line tokens: all"));
-	assert.ok(seen[2].items.includes("Status line tokens: off"));
+	assert.ok(seen[1].items.includes("Status line tokens: cache"));
+	assert.ok(seen[2].items.includes("Status line tokens: all"));
+	assert.ok(seen[3].items.includes("Status line tokens: off"));
 	assert.equal(readConfig().statusLine.tokens, "cache");
 	const line = plain(current()({ requestRender() {} }, theme, footerData({})).render(160)[0]);
 	assert.match(line, / R50k W2\.0k CH98\.0% · ctx /);
@@ -202,11 +202,11 @@ test("a provider marked as subscription shows sub instead of $0.000", async () =
 });
 
 test("the menu marks the current provider as subscription and back, and saves it", async () => {
-	const { select, seen } = picker(/^Subscription \(claude-bridge\)/, /^Subscription \(claude-bridge\)/);
+	const { select, seen } = picker(/^Status line ›$/, /^Subscription \(claude-bridge\)/, /^Subscription \(claude-bridge\)/);
 	const { commands, ctx } = await footer({ session: unpriced(), statuses: {}, load: { select } });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.includes("Subscription (claude-bridge): off"));
-	assert.ok(seen[1].items.includes("Subscription (claude-bridge): on"));
+	assert.ok(seen[1].items.includes("Subscription (claude-bridge): off"));
+	assert.ok(seen[2].items.includes("Subscription (claude-bridge): on"));
 	assert.deepEqual(readConfig().statusLine.subscriptionProviders, []);
 });
 
@@ -247,11 +247,11 @@ test("without a known price the cost stays as reported", async () => {
 
 test("Estimated cost can be turned off in the menu", async () => {
 	const session = bridged({ input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 });
-	const { select, seen } = picker(/^Estimated cost/);
+	const { select, seen } = picker(/^Status line ›$/, /^Estimated cost/);
 	const { commands, ctx, component } = await footer({ session, statuses: {}, config: subscribed, load: { select } });
 	assert.match(plain(component.render(160)[0]), /\$4\.00 sub $/);
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.includes("Estimated cost (unpriced providers): on"));
+	assert.ok(seen[1].items.includes("Estimated cost (unpriced providers): on"));
 	assert.equal(readConfig().statusLine.estimateCost, false);
 	assert.match(plain(component.render(160)[0]), /28% · sub $/);
 });

@@ -47,17 +47,17 @@ test("a one-line answer has nothing to expand, so no hint", async () => {
 });
 
 test("the agents icon follows the configured icon", async () => {
-	const { select } = picker(/^Agents icon/, /^◆$/);
+	const { select } = picker(/^Icons ›$/, /^Agents icon/, /^◆$/);
 	const { messageRenderers, commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
 	assert.match(render(messageRenderers[RESULT], message())[0], /^ ◆ gentle-ai-explore/);
 });
 
 test("subagent results can be switched back to the original card (after restart)", async () => {
-	const { select, seen } = picker(/^Subagent results/);
+	const { select, seen } = picker(/^Blocks and agents ›$/, /^Subagent results/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[0].items.some((item) => /^Subagent results: minimal \(restart to apply\)$/.test(item)));
+	assert.ok(seen[1].items.some((item) => /^Subagent results: minimal \(restart to apply\)$/.test(item)));
 	assert.equal(readConfig().subagents.minimal, false);
 });
 

@@ -527,27 +527,10 @@ async function pickIcon(ctx, title, icons, current, allowNone = true) {
 	return choice;
 }
 
-async function configure(ctx) {
-	while (true) {
-		const items = [
-			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }],
-			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }],
-			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }],
-			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }],
-			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }],
-			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }],
-			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }],
-			...ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }]),
-			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
-			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
-			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }],
-			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
-			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
-			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
-			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
-			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
-			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
-			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
+/** The menu's sections, each a list of [label, action] items built from the current config. */
+function menuSections(ctx) {
+	return [
+		["Status line", () => [
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
 			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }],
@@ -560,25 +543,79 @@ async function configure(ctx) {
 				const list = config.statusLine.subscriptionProviders;
 				config.statusLine.subscriptionProviders = list.includes(provider) ? list.filter((id) => id !== provider) : [...list, provider];
 			}]] : []),
+		]],
+		["Footer statuses", () => [
+			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }],
+			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }],
+			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }],
+			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }],
+			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }],
+			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }],
+			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }],
+		]],
+		["Tool rows", () => [
+			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
+			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
+			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }],
+			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
+			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
+			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
+			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
+			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
+		]],
+		["Blocks and agents", () => [
+			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
+			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
+		]],
+		["Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }])],
+		["Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
 			[`Prompt icon: ${shown(config.prompt.icon)}`, async () => { config.prompt.icon = await pickIcon(ctx, "Prompt icon", PROMPT_ICONS, config.prompt.icon, false); }],
-			["Reset to defaults", () => { config = structuredClone(DEFAULTS); }],
-			["Done", undefined],
-		];
-		const choice = await ctx.ui.select("Gentle Quiet", items.map(([label]) => label));
+		]],
+	];
+}
+
+const SECTION_MARK = " ›";
+const BACK = "← Back";
+
+async function applyChange(ctx, action) {
+	await action();
+	try {
+		saveConfig();
+	} catch (error) {
+		ctx.ui.notify(`Could not save ${CONFIG_FILE}: ${error?.message ?? error}`, "error");
+	}
+	redraw();
+	applyEditor(ctx);
+	applyFooter(ctx);
+}
+
+/** One section's items; stays open after each change, Back or escape returns to the sections. */
+async function configureSection(ctx, name) {
+	while (true) {
+		const section = menuSections(ctx).find(([title]) => title === name);
+		const items = [...section[1](), [BACK, undefined]];
+		const choice = await ctx.ui.select(`Gentle Quiet${SECTION_MARK} ${name}`, items.map(([label]) => label));
 		const action = items.find(([label]) => label === choice)?.[1];
 		if (!action) return;
-		await action();
-		try {
-			saveConfig();
-		} catch (error) {
-			ctx.ui.notify(`Could not save ${CONFIG_FILE}: ${error?.message ?? error}`, "error");
+		await applyChange(ctx, action);
+	}
+}
+
+async function configure(ctx) {
+	while (true) {
+		const sections = menuSections(ctx).map(([name]) => [`${name}${SECTION_MARK}`, () => configureSection(ctx, name)]);
+		const items = [...sections, ["Reset to defaults", undefined], ["Done", undefined]];
+		const choice = await ctx.ui.select("Gentle Quiet", items.map(([label]) => label));
+		if (choice === "Reset to defaults") {
+			await applyChange(ctx, () => { config = structuredClone(DEFAULTS); });
+			continue;
 		}
-		redraw();
-		applyEditor(ctx);
-		applyFooter(ctx);
+		const open = items.find(([label]) => label === choice)?.[1];
+		if (!open) return;
+		await open();
 	}
 }
 
