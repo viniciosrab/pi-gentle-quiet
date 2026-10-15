@@ -79,11 +79,18 @@ test("the Agents batch clock stays on the title row, right-aligned", async () =>
 	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
 });
 
-test("Todos, Agents and the footer leave their usual places while the column is open", async () => {
-	const { todo, agents, footer } = await wide();
+test("Todos and Agents leave their usual places while the column is open", async () => {
+	const { todo, agents } = await wide();
 	assert.deepEqual(todo.render(100), []);
 	assert.deepEqual(agents.render(100), []);
-	assert.deepEqual(footer.render(100), []);
+});
+
+test("the footer shrinks to one coloured row flush at column 0 while the column is open", async () => {
+	const { footer } = await wide();
+	const rows = footer.render(100);
+	assert.equal(rows.length, 1);
+	assert.match(plain(rows[0]), /^\S.* · \S+$/);
+	assert.ok(rows[0].includes("\x1b["));
 });
 
 test("below the breakpoint everything stays where it is", async () => {

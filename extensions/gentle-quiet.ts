@@ -1558,6 +1558,18 @@ function refreshMcp(ctx) {
 	if (JSON.stringify(mcpCache.value) !== before) footerTui?.requestRender?.();
 }
 
+/**
+ * One dim row under the editor while the side column is active. The full status line lives in the
+ * bar on top, but Collie (phone bridge) only recognises Pi's input box when a coloured row sits
+ * under its bottom border, flush at column 0.
+ */
+function sidebarFooterRow(t, width) {
+	const ctx = liveCtx;
+	const sep = ` ${fg(t, "dim", "·")} `;
+	const parts = [shortPath(ctx?.sessionManager?.getCwd?.() ?? ""), ctx?.model?.id].filter(Boolean).map((part) => fg(t, "muted", part));
+	return truncateToWidth(parts.join(sep) || fg(t, "muted", "pi"), width);
+}
+
 function footerFactory(tui, t, footerData) {
 	footerTui = tui;
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
@@ -1568,7 +1580,7 @@ function footerFactory(tui, t, footerData) {
 	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
 	railStatus = bar;
 	return {
-		render: (width) => (sidebar.active ? [] : statusLineRows(t, footerData, width)),
+		render: (width) => (sidebar.active ? [sidebarFooterRow(t, width)] : statusLineRows(t, footerData, width)),
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
