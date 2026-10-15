@@ -159,10 +159,6 @@ registers with Pi: statuses, widgets, tool renderers, the editor and `/gentle-qu
 `test/fixtures/` copies the shapes gentle-pi and gentle-engram draw; when either changes its output,
 update the fixture and the affected test together.
 
-## Credits
-
-The prompt icon editor is adapted from [pi-pretty](https://www.npmjs.com/package/@heyhuynhgiabuu/pi-pretty) (MIT).
-Built for gentle-pi and gentle-engram by Gentleman Programming (MIT).
 
 ## License
 
