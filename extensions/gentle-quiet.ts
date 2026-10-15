@@ -1675,16 +1675,6 @@ function refreshMcp(ctx) {
 	if (JSON.stringify(mcpCache.value) !== before) footerTui?.requestRender?.();
 }
 
-/**
- * The row under the editor while the side column is active: the status line lives in the bar on top,
- * so this row shows nothing. Collie (phone bridge) still needs a row there to find Pi's input box: not
- * whitespace, coloured, flush at column 0. A braille blank (U+2800) is all three and draws empty.
- */
-const INVISIBLE_ROW = "\u2800";
-function sidebarFooterRow(t) {
-	return fg(t, "dim", INVISIBLE_ROW);
-}
-
 function footerFactory(tui, t, footerData) {
 	footerTui = tui;
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
@@ -1695,7 +1685,9 @@ function footerFactory(tui, t, footerData) {
 	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
 	railStatus = bar;
 	return {
-		render: (width) => (sidebar.active ? [sidebarFooterRow(t)] : statusLineRows(t, footerData, width)),
+		// While the side column is open the status line is the bar on top, so nothing is drawn under the
+		// editor. Collie 1.21.3 then cannot find Pi's input box (AltanS/collie#445).
+		render: (width) => (sidebar.active ? [] : statusLineRows(t, footerData, width)),
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
