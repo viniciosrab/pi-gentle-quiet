@@ -94,6 +94,29 @@ test("a long Todos task wraps with its text lined up under the task's own text",
 	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
 });
 
+test("a task title with line breaks hangs every line under the task's text and wraps what is too long", async () => {
+	const loaded = await wide();
+	const rows = [
+		"   ❀ Todos  0 of 3",
+		"   ◐ Revisar a configuração completa do pipeline de integração contínua e confirmar que todas as etapas de build,",
+		"   lint e testes são executadas na ordem correta · comparar com o ambiente de produção e documentar as diferenças",
+		"   ○ Escrever testes",
+		"   valores muito longos e caracteres especiais",
+	];
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => rows.map((row) => row.padEnd(width)) }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◐ Revisar"));
+	const second = out.findIndex((row) => row.startsWith("○ Escrever"));
+	assert.ok(first > 0 && second > first);
+	assert.ok(out.slice(first + 1, second).every((row) => /^ {2}\S/.test(row)), "every continuation hangs under the text");
+	assert.ok(out.slice(first + 1, second).length >= 3, "the long line wraps instead of being cut");
+	assert.ok(!out.some((row) => row.includes("…")), "nothing is truncated");
+	assert.equal(out[second + 1], "  valores muito longos e caracteres especiais");
+	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
+});
+
 test("Todos and Agents leave their usual places while the column is open", async () => {
 	const { todo, agents } = await wide();
 	assert.deepEqual(todo.render(100), []);

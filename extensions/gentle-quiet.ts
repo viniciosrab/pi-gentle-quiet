@@ -396,15 +396,29 @@ function stackRow(row, inner, t, title = false) {
 	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
 }
 
-// A task row too long for the box, wrapped so the text that continues lines up under the task's own
-// text, past its status icon, instead of running back under the icon.
 // The scroll indicator row ("↑↓ 1-10/13 · ctrl+shift+↑/↓"): the wheel scrolls the card anyway.
 const SCROLL_ROW = /^\s*↑↓\s+\d+-\d+\/\d+/u;
+// Task rows wrapped so every line of a task lines up under the task's own text, past its status icon.
+// A title with line breaks arrives as rows without an icon; they belong to the task above and hang too.
 const TASK_GLYPH = /^[○◐⊘✓✕]\s/u;
-function hangRow(row, inner) {
-	if (visibleWidth(row) <= inner || !TASK_GLYPH.test(row.replace(SGR, "")) || typeof PiTui.wrapTextWithAnsi !== "function") return [row];
-	const [first, ...rest] = PiTui.wrapTextWithAnsi(row, inner - 2);
-	return [first, ...rest.map((line) => `  ${line}`)];
+const LEADING_SPACE = /^((?:\x1b\[[0-9;:]*m)*)\s+/;
+function hangRows(rows, inner, t) {
+	const out = [];
+	let inTask = false;
+	rows.forEach((row, index) => {
+		const text = row.replace(SGR, "");
+		if (index === 0) return out.push(...stackRow(row, inner, t, true));
+		const starts = TASK_GLYPH.test(text);
+		const continues = inTask && !starts && text.trim() !== "" && !/^\s*…\s/u.test(text);
+		if (starts) inTask = true;
+		if (!starts && !continues) return out.push(row);
+		const body = continues ? row.replace(LEADING_SPACE, "$1") : row;
+		const lead = continues ? "  " : "";
+		if (visibleWidth(lead + body) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return out.push(lead + body);
+		const [first, ...rest] = PiTui.wrapTextWithAnsi(body, inner - 2);
+		out.push(lead + first, ...rest.map((line) => `  ${line}`));
+	});
+	return out;
 }
 
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
@@ -420,8 +434,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	let rows = trimBlankEdges(flatten(target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
-	if (rail.hang) rows = rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, "")));
-	if (rail.hang) rows = rows.flatMap((row, index) => (index === 0 ? stackRow(row, inner, t ?? theme, true) : hangRow(row, inner)));
+	if (rail.hang) rows = hangRows(rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))), inner, t ?? theme);
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
