@@ -345,25 +345,47 @@ function trimBlankEdges(rows) {
 	return rows.slice(start, end);
 }
 
-// A panel's rows drawn flattened, inside the outline when it fits and is enabled. `spaced` (the side
-// column) leaves one blank row between the title and the list.
-function drawBlock(target, width, options, t, spaced = false) {
+// A row too long for the box, split where its right-aligned details start: the left part keeps the
+// row, the details (model, effort, tokens, time) go on a muted row of their own under it.
+function stackRow(row, inner, t) {
+	if (visibleWidth(row) <= inner) return [row];
+	const toks = tokens(row);
+	const text = toks.map((tok) => tok.ch ?? "").join("");
+	const gap = [...text.matchAll(/ {3,}(?=\S)/g)].pop();
+	if (!gap) return [row];
+	let seen = 0;
+	let left = "";
+	for (const tok of toks) {
+		if (tok.esc) left += tok.esc;
+		else if (seen++ < gap.index) left += tok.ch;
+	}
+	const right = text.slice(gap.index + gap[0].length).trim();
+	return [truncateToWidth(left, inner, "…"), `  ${fg(t, "muted", truncateToWidth(right, inner - 2, "…"))}`];
+}
+
+// A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
+// (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
+// move to their own row instead of being cut off.
+function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
 		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true }));
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
-	let rows = trimBlankEdges(flatten(target.render(inner + 5), { ...options(), margin: false }));
-	if (spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
+	// A stacked panel renders wide so it still lists everything before its rows are split.
+	let rows = trimBlankEdges(flatten(target.render(rail.stack ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
+	if (rail.stack) rows = rows.flatMap((row) => stackRow(row, inner, t ?? theme));
+	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
+const STACK_WIDTH = 120;
 
 // A panel component drawn flattened. While the side column is open the panel is
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, (width) => drawBlock(component, width, options, t, true));
+	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents" }) });
 	return new Proxy(component, {
 		get(target, prop) {
 			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t));
@@ -1570,7 +1592,7 @@ function applyFooter(ctx, force = false) {
 const LAYOUT_NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
 const SIDEBAR_COLUMNS = [120, 140, 160, 180]; // terminal widths the column can open at
-const RAIL_WIDTH = 52;
+const RAIL_WIDTH = 60;
 const RAIL_GAP = 2;
 
 // active: the wide layout is painting; the status line and the panels it holds paint nothing in their usual places.
@@ -1578,14 +1600,37 @@ const sidebar = { tui: undefined, active: false, dispose: undefined };
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the status bar, registered by the footer
 
-/** Agents and Todos as outlined cards, one right under the other. */
+/** Agents and Todos as outlined cards, one right under the other, with where each one sits. */
 function railRows(width) {
 	const rows = [];
+	const hits = [];
 	for (const key of ["gentle-agents", "gentle-todo"]) {
-		const section = railBlocks.get(key)?.(width);
-		if (section?.length) rows.push(...section);
+		const block = railBlocks.get(key);
+		const section = block?.draw(width);
+		if (!section?.length) continue;
+		hits.push({ component: block.component, start: rows.length, height: section.length });
+		rows.push(...section);
 	}
-	return rows;
+	return { rows, hits };
+}
+
+// The cards are drawn here, so their mouse handling is too: a click on a card's title row (Todos'
+// collapse toggle) and the wheel over a card reach the card as if it were drawn in its usual place.
+// The title sits on the row under the top border; the card counts it from its own first row, which
+// is 0 or 1 depending on the theme's card style, so only the matching row answers.
+const TITLE_ROWS = [0, 1];
+function railMouse(event, hits, scrollTop) {
+	const y = scrollTop + event.y;
+	const hit = hits.find((candidate) => y >= candidate.start && y < candidate.start + candidate.height);
+	if (!hit || typeof hit.component?.handleMouse !== "function") return undefined;
+	const local = { ...event, x: Math.max(0, event.x - 2), height: hit.height, width: Math.max(1, event.width - 4) };
+	if (event.type === "wheel") return hit.component.handleMouse({ ...local, y: y - hit.start });
+	if (event.type !== "click" || y - hit.start !== 1) return undefined;
+	for (const row of TITLE_ROWS) {
+		const result = hit.component.handleMouse({ ...local, y: row });
+		if (result?.handled) return result;
+	}
+	return undefined;
 }
 
 function installSidebar(tui) {
@@ -1595,6 +1640,7 @@ function installSidebar(tui) {
 	let failed = false;
 	let barLines = [];
 	let lines = [];
+	let hits = [];
 	const wanted = () =>
 		!failed &&
 		config.sidebar.enabled &&
@@ -1610,6 +1656,16 @@ function installSidebar(tui) {
 		scrollbarTrackStyle: (text) => fg(theme, "border", text),
 		scrollbarThumbStyle: (text) => fg(theme, "accent", text),
 	});
+	const nativeMouse = column.handleMouse?.bind(column);
+	column.handleMouse = (event) => {
+		let result;
+		try {
+			result = railMouse(event, hits, column.scrollTop ?? 0);
+		} catch {
+			result = undefined;
+		}
+		return result?.handled ? result : nativeMouse?.(event);
+	};
 	const bar = { render: () => barLines, invalidate() {} };
 	const attach = () => {
 		if (failed) return;
@@ -1638,7 +1694,9 @@ function installSidebar(tui) {
 				try {
 					const width = column.getContentWidth(RAIL_WIDTH);
 					barLines = (config.statusLine.enabled ? railStatus?.(tui.terminal.columns) : undefined) ?? [];
-					lines = railRows(width).map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
+					const drawn = railRows(width);
+					hits = drawn.hits;
+					lines = drawn.rows.map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
 				} catch {
 					failed = true;
 					return nativeNode.call(root);

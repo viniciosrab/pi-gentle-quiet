@@ -31,7 +31,7 @@ async function wide(options = {}, config = {}) {
 	const bar = layout.entries?.[0]?.component;
 	const body = layout.entries?.[1]?.component?.[NODE]?.();
 	const rail = body?.entries?.[1]?.component;
-	return { ...loaded, ...h, footer, todo, agents, layout, bar, body, rail, rows: (width = 52) => rail?.render(width).map(plain) };
+	return { ...loaded, ...h, footer, todo, agents, layout, bar, body, rail, rows: (width = 60) => rail?.render(width).map(plain) };
 }
 
 test("wide fullscreen terminals put the status bar on top of the conversation and a side column", async () => {
@@ -40,8 +40,8 @@ test("wide fullscreen terminals put the status bar on top of the conversation an
 	assert.equal(layout.entries[0].basis, "auto", "the bar is as tall as its rows");
 	assert.equal(body.type, "hstack");
 	assert.equal(body.entries[0].component[NODE](), native, "the conversation keeps Pi's own layout");
-	assert.equal(body.entries[1].basis, 52, "fixed column width");
-	assert.equal((await wide({ columns: 300 })).body.entries[1].basis, 52, "whatever the terminal width");
+	assert.equal(body.entries[1].basis, 60, "fixed column width");
+	assert.equal((await wide({ columns: 300 })).body.entries[1].basis, 60, "whatever the terminal width");
 });
 
 test("the status line is the original bar, full width, set off by a blank row above and a rule below", async () => {
@@ -63,7 +63,7 @@ test("the column stacks Agents and Todos in the square outline, a blank row unde
 	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◐ Write it"], "a blank row under the title");
 	assert.equal(out[tops[1] + 4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
 	assert.ok(out[tops[1] - 1].startsWith("└"), "no blank row between the cards");
-	assert.ok(out.every((row) => [...row].length <= 51), "rows fit the column minus its scrollbar");
+	assert.ok(out.every((row) => [...row].length <= 59), "rows fit the column minus its scrollbar");
 });
 
 test("Todos, Agents and the footer leave their usual places while the column is open", async () => {
@@ -130,4 +130,62 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	await commands["gentle-quiet"].handler("", ctx);
 	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160 });
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
+});
+
+test("an agent's label and model are not cut off in the column: the details go on their own row", async () => {
+	const loaded = await wide();
+	const left = "◐ gentle-ai-worker  Phase 2 home page (resume)";
+	const right = "claude-sonnet-5-5 · high · 3.7M · 7m43s";
+	// gentle-pi lays the row out for the width it is given: details right-aligned when they fit.
+	const card = (width) => ["   ❀ Agents  1 active".padEnd(width), `   ${left}${" ".repeat(Math.max(3, width - 5 - left.length - right.length))}${right}`];
+	loaded.ui.setWidget("gentle-agents", () => ({ render: card }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE](); // the next layout pass reads the new card
+	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
+	const top = out.findIndex((row) => row.startsWith("┌"));
+	assert.deepEqual(out.slice(top + 1, top + 6), ["│ ◈ Agents  1 active", "│", `│ ${left}`, `│   ${right}`, out[top + 5]]);
+	assert.ok(out[top + 5].startsWith("└"));
+	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
+});
+
+// A Todos card like gentle-pi's: only a click on its title row toggles it; the title is row `titleRow` of the card.
+async function clickable(titleRow) {
+	const loaded = await wide();
+	const seen = [];
+	loaded.ui.setWidget("gentle-todo", () => ({
+		render: panel("Todos  1 of 2", "◐ Write it", "○ Test it"),
+		handleMouse(event) {
+			seen.push(event);
+			return event.type === "wheel" || event.y === titleRow ? { handled: true, render: true } : undefined;
+		},
+	}));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const column = loaded.rail;
+	// Agents card: rows 0-4; Todos card from row 5, its title on row 6.
+	const mouse = (type, y, extra = {}) => column.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 100, screenY: y, ...extra });
+	return { seen, mouse };
+}
+
+test("clicking the Todos title in the column toggles it, whatever row the card counts its title on", async () => {
+	for (const titleRow of [0, 1]) {
+		const { seen, mouse } = await clickable(titleRow);
+		assert.equal(mouse("click", 6)?.handled, true, `title row ${titleRow}`);
+		assert.equal(seen.filter((event) => event.type === "click" && event.y === titleRow).length, 1);
+	}
+});
+
+test("clicks elsewhere in the column are not sent to the cards", async () => {
+	const { seen, mouse } = await clickable(0);
+	assert.equal(mouse("click", 8)?.handled, undefined, "on an item");
+	assert.equal(mouse("click", 2)?.handled, undefined, "on the Agents card");
+	assert.equal(mouse("click", 20)?.handled, undefined, "below the cards");
+	assert.deepEqual(seen, []);
+});
+
+test("the wheel over the Todos card reaches it", async () => {
+	const { seen, mouse } = await clickable(0);
+	assert.equal(mouse("wheel", 8, { wheelDelta: 3 })?.handled, true);
+	assert.equal(seen[0].type, "wheel");
+	assert.equal(seen[0].wheelDelta, 3);
 });
