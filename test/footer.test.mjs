@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, plain, readConfig, picker, writeConfig } from "./helpers.mjs";
+import { load, painted, plain, readConfig, picker, theme, writeConfig } from "./helpers.mjs";
 
 test("memory status loses the emoji and project, keeps the state", async () => {
 	const { ui, status } = await load();
@@ -61,4 +61,36 @@ test("/gentle-quiet groups its options in sections; Back returns to them and Res
 	assert.equal(seen[2].title, "Gentle Quiet", "Back returns to the sections");
 	assert.equal(seen[3].title, "Gentle Quiet", "Reset keeps the sections open");
 	assert.equal(readConfig().yoloBanner, false, "Reset restored and saved the defaults");
+});
+
+test("in the terminal /gentle-quiet is one screen with horizontal tabs", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui" });
+	const keys = { left: "\x1b[D", right: "\x1b[C", down: "\x1b[B", enter: "\r", escape: "\x1b" };
+	const screens = [];
+	loaded.ui.custom = (factory) => new Promise((resolve) => {
+		const tui = { requestRender() {} };
+		const component = factory(tui, { ...theme, bg: (_name, text) => `[${plain(text)}]` }, {}, resolve);
+		const view = () => component.render(80).map(plain);
+		screens.push(view());
+		component.handleInput(keys.right); // Footer
+		component.handleInput(keys.right); // Tools
+		screens.push(view());
+		component.handleInput(keys.down); // Tool row margin
+		component.handleInput(keys.down); // Tool call tones
+		component.handleInput(keys.enter);
+		setTimeout(() => {
+			screens.push(view());
+			component.handleInput(keys.escape);
+		}, 50);
+	});
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	const tabBar = (screen) => screen.find((line) => line.includes("Status") && line.includes("Prompt"));
+	assert.equal(tabBar(screens[0]).trim(), "[ Status ]  Footer   Tools   Blocks   Icons   Prompt   Reset", "tabs side by side, the active one highlighted");
+	assert.ok(screens[0].includes(" → Status line: gentle"), "first tab's first option selected");
+	assert.match(tabBar(screens[1]), /\[ Tools \]/, "→ moves to the next tab");
+	assert.ok(screens[1].includes(" → Tool rows: quiet (new calls)"));
+	assert.ok(screens[2].includes(" → Tool call tones: theme"), "enter changes the option in place and the screen stays open");
+	assert.equal(readConfig().tools.tones, "theme", "and it is saved");
+	assert.ok(screens[0].some((line) => line.includes("←→ tabs")), "key hints at the bottom");
 });

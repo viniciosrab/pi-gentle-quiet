@@ -22,7 +22,7 @@
 // @ts-nocheck
 
 import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -530,7 +530,7 @@ async function pickIcon(ctx, title, icons, current, allowNone = true) {
 /** The menu's sections, each a list of [label, action] items built from the current config. */
 function menuSections(ctx) {
 	return [
-		["Status line", () => [
+		["Status line", "Status", () => [
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
 			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }],
@@ -544,7 +544,7 @@ function menuSections(ctx) {
 				config.statusLine.subscriptionProviders = list.includes(provider) ? list.filter((id) => id !== provider) : [...list, provider];
 			}]] : []),
 		]],
-		["Footer statuses", () => [
+		["Footer statuses", "Footer", () => [
 			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }],
 			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }],
 			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }],
@@ -553,7 +553,7 @@ function menuSections(ctx) {
 			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }],
 			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }],
 		]],
-		["Tool rows", () => [
+		["Tool rows", "Tools", () => [
 			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
 			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }],
@@ -563,13 +563,13 @@ function menuSections(ctx) {
 			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
 			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
 		]],
-		["Blocks and agents", () => [
+		["Blocks and agents", "Blocks", () => [
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 		]],
-		["Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }])],
-		["Prompt", () => [
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }])],
+		["Prompt", "Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
 			[`Prompt icon: ${shown(config.prompt.icon)}`, async () => { config.prompt.icon = await pickIcon(ctx, "Prompt icon", PROMPT_ICONS, config.prompt.icon, false); }],
@@ -596,7 +596,7 @@ async function applyChange(ctx, action) {
 async function configureSection(ctx, name) {
 	while (true) {
 		const section = menuSections(ctx).find(([title]) => title === name);
-		const items = [...section[1](), [BACK, undefined]];
+		const items = [...section[2](), [BACK, undefined]];
 		const choice = await ctx.ui.select(`Gentle Quiet${SECTION_MARK} ${name}`, items.map(([label]) => label));
 		const action = items.find(([label]) => label === choice)?.[1];
 		if (!action) return;
@@ -604,7 +604,68 @@ async function configureSection(ctx, name) {
 	}
 }
 
+const isAsync = (fn) => fn?.constructor?.name === "AsyncFunction";
+const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }]]];
+
+/**
+ * The menu as one screen with horizontal tabs: ←/→ or tab switch sections, ↑/↓ pick an option,
+ * enter changes it in place, escape closes. Options that open their own prompt (labels, icons)
+ * close the screen, run, and reopen it on the same tab and row.
+ */
+async function configureTabs(ctx) {
+	let tab = 0;
+	let row = 0;
+	while (true) {
+		const picked = await ctx.ui.custom((tui, t, _keys, done) => {
+			let cached;
+			const tabs = () => [...menuSections(ctx), RESET_TAB];
+			const items = () => tabs()[tab][2]();
+			const refresh = () => { cached = undefined; tui.requestRender(); };
+			const move = (step) => { tab = (tab + step + tabs().length) % tabs().length; row = 0; refresh(); };
+			return {
+				render(width) {
+					if (cached) return cached;
+					const w = Math.max(1, width);
+					const fit = (line) => truncateToWidth(line, w);
+					const bar = tabs().map(([, short], i) => (i === tab ? t.bg("selectedBg", fg(t, "text", bold(t, ` ${short} `))) : fg(t, "muted", ` ${short} `))).join(" ");
+					const list = items();
+					row = Math.min(row, list.length - 1);
+					cached = [
+						fg(t, "border", "─".repeat(w)),
+						fit(` ${fg(t, "accent", bold(t, "Gentle Quiet"))}`),
+						"",
+						fit(` ${bar}`),
+						"",
+						...list.map(([label], i) => fit(i === row ? fg(t, "accent", ` → ${label}`) : `   ${fg(t, "text", label)}`)),
+						"",
+						fit(` ${fg(t, "dim", "←→ tabs  ↑↓ select  enter change  esc close")}`),
+						fg(t, "border", "─".repeat(w)),
+					];
+					return cached;
+				},
+				invalidate() { cached = undefined; },
+				handleInput(data) {
+					const list = items();
+					if (matchesKey(data, Key.right) || matchesKey(data, Key.tab)) return move(1);
+					if (matchesKey(data, Key.left) || matchesKey(data, Key.shift("tab"))) return move(-1);
+					if (matchesKey(data, Key.up)) { row = (row - 1 + list.length) % list.length; return refresh(); }
+					if (matchesKey(data, Key.down)) { row = (row + 1) % list.length; return refresh(); }
+					if (matchesKey(data, Key.escape)) return done(undefined);
+					if (matchesKey(data, Key.enter)) {
+						const action = list[row]?.[1];
+						if (isAsync(action)) return done(action);
+						if (action) void applyChange(ctx, action).then(refresh);
+					}
+				},
+			};
+		});
+		if (!picked) return;
+		await applyChange(ctx, picked);
+	}
+}
+
 async function configure(ctx) {
+	if (ctx.mode === "tui" && typeof ctx.ui.custom === "function") return configureTabs(ctx);
 	while (true) {
 		const sections = menuSections(ctx).map(([name]) => [`${name}${SECTION_MARK}`, () => configureSection(ctx, name)]);
 		const items = [...sections, ["Reset to defaults", undefined], ["Done", undefined]];

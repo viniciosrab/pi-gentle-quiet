@@ -37,7 +37,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
-| Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` (`/gentle-quiet` → **Tool rows** → **Tool call tones: theme** goes back to the theme's colors, e.g. for light themes) |
+| Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` (`/gentle-quiet` → **Tools** tab → **Tool call tones: theme** goes back to the theme's colors, e.g. for light themes) |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
 | Prompt | Pi's editor | Pi's editor with a `❯` flush with the margin in front of the input and of sent messages |
@@ -76,27 +76,28 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 
 ## Configure
 
-`/gentle-quiet` opens a menu of sections; pick one to see its options, and **← Back** (or escape)
-to return. Every change applies immediately and is saved to `<Pi agent dir>/gentle-quiet.json`
-(normally `~/.pi/agent/gentle-quiet.json`). **Reset to defaults** sits on the first screen.
+`/gentle-quiet` opens one screen with tabs side by side (`Status  Footer  Tools  Blocks  Icons  Prompt  Reset`):
+←/→ or tab switch tabs, ↑/↓ pick an option, enter changes it, escape closes. Every change applies
+immediately and is saved to `<Pi agent dir>/gentle-quiet.json` (normally `~/.pi/agent/gentle-quiet.json`).
+Outside the terminal UI (RPC clients) the same sections are offered as nested menus.
 
-| Section | Option | Default |
+| Tab | Option | Default |
 |---|---|---|
-| Status line | Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
+| Status | Status line / changes / cost | `gentle` (`pi` gives the footer back to Pi) / on / on |
 | | Status line usage | on: Gentle Shell's usage bar after the cost, `claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%` (meter like `ctx`; warning from 80%, error from 95%) |
 | | Status line MCP | on: `MCP 3/3` (online / installed) among the statuses; warning color when a server is offline |
 | | Status line tokens | `cache` (`R W CH%`); `all` adds `↑ ↓`; `off` |
 | | Estimated cost (unpriced providers) | on: zero-priced responses (claude-bridge) are priced at the same model's Anthropic API rates |
 | | Subscription (current provider) | off; on shows `sub` for a plan Pi cannot detect, such as claude-bridge |
-| Footer statuses | Memory in footer / label / project name | on / `mem` / off |
+| Footer | Memory in footer / label / project name | on / `mem` / off |
 | | Permission in footer / label / hidden when normal | on / `Perm` / shown |
 | | YOLO banner | hidden |
-| Tool rows | Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
+| Tools | Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
 | | Tool call tones | `claude`: Claude Code's fixed greys; `theme`: the theme's `toolTitle` and `accent` colors |
 | | Quiet tools / preview lines | on / 0 |
 | | Expand hint (`ctrl+o to expand`) | `last`: only the most recent call (`all`, `never`) |
 | | Codemode output lines / detail | `3` (`5`, `10`, `0` to hide) / `failures` |
-| Blocks and agents | Todos/Agents blocks / border | minimal / on |
+| Blocks | Todos/Agents blocks / border | minimal / on |
 | | Subagent results | minimal (restart to apply) |
 | Icons | Memory / todo / agents / other gentle tools | `􀀀` (U+100000) / `≡` / `◈` / `›` |
 | Prompt | Prompt icon in input / in sent messages / icon | on / on / `❯` |
@@ -125,7 +126,7 @@ The default memory icon U+100000 is an outlined brain from a local `GentleBrain.
   (Pi hides them when it disconnects), so a server configured with `exposure: hidden` reads as offline.
 - A zero cost is hidden unless the provider is a known subscription, like Pi's own footer. Providers that
   bill through a plan without telling Pi (claude-bridge reports every call at $0) can be marked in
-  `/gentle-quiet` → **Status line** → **Subscription (<provider>)** to show `sub`.
+  `/gentle-quiet` → **Status** tab → **Subscription (<provider>)** to show `sub`.
 - The status line reads changes with `git` (against `HEAD`, untracked files included) after each turn and
   tool call. It does not show subscription usage or the active Gentle profile.
 - Switching **Subagent results** back to the original card applies after a restart.
