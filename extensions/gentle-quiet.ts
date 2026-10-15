@@ -238,7 +238,7 @@ function flatten(lines, { margin, group, dedentAll = false }) {
 	// Panels drop their shared indent on every row; tool rows only on rows that were boxed.
 	const indents = rows.filter((r) => (dedentAll || r.boxed) && r.visible.trim()).map((r) => r.visible.length - r.visible.trimStart().length);
 	const dedent = indents.length ? Math.min(...indents) : 0;
-	return rows.map(({ toks, visible, boxed }) => {
+	const drawn = rows.map(({ toks, visible, boxed }) => {
 		let skip = dedentAll || boxed ? Math.min(dedent, visible.length - visible.trimStart().length) : 0;
 		let text = "";
 		for (const tok of toks) {
@@ -250,12 +250,34 @@ function flatten(lines, { margin, group, dedentAll = false }) {
 		text = text.replace(GLYPHS, icon ? `${icon} ` : "").replace(/(?:\s|\x1b\[[0-9;:]*m)+$/u, (tail) => tail.replace(/\s+/gu, "")); // trailing padding, colors kept
 		return (margin ? " " : "") + text;
 	});
+	return dedentAll ? drawn : joinElapsed(drawn);
+}
+
+const ELAPSED_ROW = /^\s*\d+(?:\.\d+)?(?:ms|s|m|h)(?:\d+(?:ms|s|m))?\s*$/;
+const SGR = /\x1b\[[0-9;:]*m/g;
+
+/** gentle-pi closes a finished call with a row holding only its duration, far right and loose;
+ * it joins the last row above it instead. */
+function joinElapsed(rows) {
+	const out = [];
+	for (const row of rows) {
+		const text = row.replace(SGR, "");
+		const last = out.length - 1;
+		if (ELAPSED_ROW.test(text) && last >= 0 && out[last].replace(SGR, "").trim() !== "") {
+			out[last] = `${out[last].replace(/(?:\s|\x1b\[[0-9;:]*m)+$/u, (tail) => tail.replace(/\s+/gu, ""))} ${fg(theme, "dim", `· ${text.trim()}`)}`;
+		} else out.push(row);
+	}
+	return out;
 }
 
 /** Wraps a rendered component so its rows go through flatten(); input and mouse pass through. */
+const flattenedProxies = new WeakSet();
 function flattened(component, options) {
 	if (!component || typeof component.render !== "function") return component;
-	return new Proxy(component, {
+	// Pi hands a row's last component back to its renderer, which may return it again: wrapping it a
+	// second time would flatten (and indent) its rows once more on every redraw.
+	if (flattenedProxies.has(component)) return component;
+	const proxy = new Proxy(component, {
 		get(target, key) {
 			if (key === "render") {
 				return (width) => {
@@ -270,6 +292,8 @@ function flattened(component, options) {
 			return Reflect.set(target, key, value, target);
 		},
 	});
+	flattenedProxies.add(proxy);
+	return proxy;
 }
 
 const toolOptions = (group) => () => ({ margin: config.tools.margin, group });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, picker, theme } from "./helpers.mjs";
+import { load, lines, picker, theme, writeConfig } from "./helpers.mjs";
 
 const row = (text) => ({ render: () => [text] });
 
@@ -88,4 +88,23 @@ test("sent user messages are a one-row bar: no blank padded rows above and below
 	assert.equal(body.paddingX, 0, "the prompt icon sits flush with the margin");
 	assert.equal(body.cachedText, undefined, "render cache built with the old padding is dropped");
 	assert.equal(message.outputPad, 1, "Pi's own padding setting is left as it was");
+});
+
+test("a call component handed back by Pi is not flattened twice, so its rows do not drift right", async () => {
+	writeConfig({});
+	const { tool } = await load();
+	const card = { render: () => ["   ✿ rdd start"] };
+	const call = tool("gentle_review", { renderCall: (_args, _theme, context) => context.lastComponent ?? card });
+	const first = call.renderCall({}, theme, {});
+	const second = call.renderCall({}, theme, { lastComponent: first });
+	const third = call.renderCall({}, theme, { lastComponent: second });
+	assert.equal(lines(first)[0], "    › rdd start");
+	assert.deepEqual(lines(third), lines(first));
+});
+
+test("the lone duration row that closes a finished call joins the row above it", async () => {
+	writeConfig({});
+	const { tool } = await load();
+	const result = tool("gentle_review", { renderResult: () => ({ render: () => ["medium · created", "                    9s"] }) });
+	assert.deepEqual(lines(result.renderResult({}, {}, theme, {})), [" medium · created · 9s"]);
 });
