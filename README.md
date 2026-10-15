@@ -7,7 +7,7 @@ Keep the Gentle AI workflow (ODD, subagents, todo, review, memory) and Pi's own 
 extension only changes how things are drawn: execution, tools, and data stay untouched.
 
 ```
- ❯ run the tests
+❯ run the tests
 
  $ npm test
  └ ✓ 42 lines · 3.1s                                 ctrl+o to expand
@@ -21,8 +21,23 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 │ ◐ Add tests · in progress                                        │
 └──────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────
- ❯
- Perm: Normal
+❯
+Perm: Normal
+```
+
+`/gentle-quiet` opens its options as tabs:
+
+```
+ Gentle Quiet
+
+  Status   Footer   Tools   Blocks   Icons   Prompt   Reset
+
+ → Tool rows: quiet (new calls)
+   Tool row margin: on
+   Tool call tones: claude
+   ...
+
+ ←→ tabs  ↑↓ select  enter change  esc close
 ```
 
 ## What it changes
