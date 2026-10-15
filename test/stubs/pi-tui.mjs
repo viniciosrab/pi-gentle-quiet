@@ -3,6 +3,21 @@ const strip = (text) => text.replace(/\x1b\[[0-9;:]*m/g, "");
 
 export const visibleWidth = (text) => [...strip(text)].length;
 
+// Word wrap on visible width; escape sequences stay attached to their words.
+export function wrapTextWithAnsi(text, width) {
+	const lines = [];
+	let line = "";
+	for (const word of text.split(" ")) {
+		const next = line === "" ? word : `${line} ${word}`;
+		if (line !== "" && visibleWidth(next) > width) {
+			lines.push(line);
+			line = word;
+		} else line = next;
+	}
+	lines.push(line);
+	return lines;
+}
+
 export function truncateToWidth(text, width, ellipsis = "…") {
 	if (visibleWidth(text) <= width) return text;
 	return [...strip(text)].slice(0, Math.max(0, width - 1)).join("") + ellipsis;

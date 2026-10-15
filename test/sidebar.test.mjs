@@ -79,6 +79,20 @@ test("the Agents batch clock stays on the title row, right-aligned", async () =>
 	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
 });
 
+test("a long Todos task wraps with its text lined up under the task's own text", async () => {
+	const loaded = await wide();
+	const long = "T8b1 Home parity part 1: nav/hero/price/integration/panel worker running and then some more words to wrap";
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => ["   ❀ Todos  1 of 2".padEnd(width), `   ◐ ${long}`.padEnd(width), "   ○ Short one".padEnd(width)] }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◐ T8b1"));
+	assert.ok(first > 0);
+	assert.match(out[first + 1], /^ {2}\S/, "continuation hangs under the text, past the icon");
+	assert.ok(out.some((row) => row === "○ Short one"), "other tasks are untouched");
+	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
+});
+
 test("Todos and Agents leave their usual places while the column is open", async () => {
 	const { todo, agents } = await wide();
 	assert.deepEqual(todo.render(100), []);

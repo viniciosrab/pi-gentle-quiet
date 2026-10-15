@@ -396,6 +396,15 @@ function stackRow(row, inner, t, title = false) {
 	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
 }
 
+// A task row too long for the box, wrapped so the text that continues lines up under the task's own
+// text, past its status icon, instead of running back under the icon.
+const TASK_GLYPH = /^[○◐⊘✓✕]\s/u;
+function hangRow(row, inner) {
+	if (visibleWidth(row) <= inner || !TASK_GLYPH.test(row.replace(SGR, "")) || typeof PiTui.wrapTextWithAnsi !== "function") return [row];
+	const [first, ...rest] = PiTui.wrapTextWithAnsi(row, inner - 2);
+	return [first, ...rest.map((line) => `  ${line}`)];
+}
+
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
 // (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
 // move to their own row instead of being cut off.
@@ -407,8 +416,9 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
-	let rows = trimBlankEdges(flatten(target.render(rail.stack ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
+	let rows = trimBlankEdges(flatten(target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
+	if (rail.hang) rows = rows.flatMap((row, index) => (index === 0 ? stackRow(row, inner, t ?? theme, true) : hangRow(row, inner)));
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
@@ -418,10 +428,10 @@ const STACK_WIDTH = 120;
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents" }) });
+	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents", hang: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t));
+			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { hang: key === "gentle-todo" }));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
