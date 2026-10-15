@@ -70,3 +70,15 @@ test("an unchanged expanded output is reused instead of reprocessed", async () =
 	assert.equal(component.render(80), first, "same array returned while nothing changed");
 	assert.equal(renders, 2, "Pi's renderer still runs, so new output is picked up");
 });
+
+test("tool calls use Claude Code's tones: light name and command, softer grey path", async () => {
+	const { tool } = await load();
+	const LIGHT = "\x1b[38;2;188;188;188m";
+	const GREY = "\x1b[38;2;153;153;153m";
+	const read = tool("read", native).renderCall({ path: "/tmp/app.ts" }, theme).render(80)[0];
+	assert.ok(read.includes(`${LIGHT}read`), "tool name in the light tone");
+	assert.ok(read.includes(`${GREY}/tmp/app.ts`), "path in the softer grey");
+	assert.ok(!read.includes("\x1b[1m"), "no bold title");
+	const bash = tool("bash", native).renderCall({ command: "nproc" }, theme).render(80)[0];
+	assert.ok(bash.includes(`${LIGHT}$ nproc`), "the command row is light, apart from its grey result row");
+});

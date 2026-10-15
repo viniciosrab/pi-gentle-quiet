@@ -464,6 +464,22 @@ if (typeof userProto?.rebuild === "function" && !userProto[USER_PAD_PATCHED]) {
 	};
 	userProto[USER_PAD_PATCHED] = true;
 }
+// Sent user messages: one-row bar like Claude Code, without Pi's blank padded row
+// above and below the text. Separate symbol so a running Pi picks it up on /reload.
+const USER_ROWS_PATCHED = Symbol.for("gentle-quiet.userMessageRows");
+if (typeof userProto?.rebuild === "function" && !userProto[USER_ROWS_PATCHED]) {
+	const rebuild = userProto.rebuild;
+	userProto.rebuild = function () {
+		const result = rebuild.call(this);
+		const body = this.children?.[0];
+		if (globalThis[CURRENT_CONFIG]?.()?.prompt?.userMessage && typeof body?.paddingY === "number") {
+			body.paddingY = 0;
+			body.cachedText = undefined; // drop the render cache built with the old padding
+		}
+		return result;
+	};
+	userProto[USER_ROWS_PATCHED] = true;
+}
 let previousEditor;
 let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
 
@@ -580,9 +596,14 @@ const textOf = (result) => (result?.content ?? []).filter((c) => c?.type === "te
 // Output lines without Pi's bracketed footers ("[Truncated: …]", "[Showing lines …]").
 const outputLines = (text) => text.replace(/\s+$/, "").split("\n").filter((line, i, all) => line !== "" && !(i >= all.length - 2 && /^\[.*\]$/.test(line)));
 
+// Claude Code's tool-call tones, measured from its UI: a light title, a softer grey for paths and commands.
+// Fixed truecolor so monochrome palettes keep the two tones apart.
+const CALL_TITLE = (text) => `\x1b[38;2;188;188;188m${text}\x1b[39m`;
+const CALL_ARG = (text) => `\x1b[38;2;153;153;153m${text}\x1b[39m`;
+
 function quietCall(toolName, args = {}, t) {
-	const title = (name) => fg(t, "toolTitle", bold(t, name));
-	const accent = (text) => fg(t, "accent", text);
+	const title = (name) => CALL_TITLE(name);
+	const accent = (text) => CALL_ARG(text);
 	const dim = (text) => fg(t, "dim", text);
 	switch (toolName) {
 		case "read": {
@@ -592,7 +613,7 @@ function quietCall(toolName, args = {}, t) {
 			return `${title("read")} ${accent(shortPath(args.path ?? args.file_path))}${range}`;
 		}
 		case "bash": // regular weight, like Claude Code's "$ command" row
-			return fg(t, "toolTitle", `$ ${firstLine(args.command)}`);
+			return CALL_TITLE(`$ ${firstLine(args.command)}`);
 		case "edit":
 		case "write":
 			return `${title(toolName)} ${accent(shortPath(args.path ?? args.file_path))}`;
@@ -927,8 +948,8 @@ function memoryRenderers(chrome, toolName, renderers) {
 		renderCall(args, t) {
 			const name = chrome.humanToolName(toolName);
 			const arg = chrome.compactToolArg?.(toolName, args) ?? "";
-			const title = fg(t, "toolTitle", bold(t, join(config.icons.memory, name)));
-			return flattened(new Text(join(title, arg && fg(t, "accent", arg)), 0, 0), toolOptions("memory"));
+			const title = CALL_TITLE(join(config.icons.memory, name));
+			return flattened(new Text(join(title, arg && CALL_ARG(arg)), 0, 0), toolOptions("memory"));
 		},
 		renderResult(result, options = {}, t, context = {}) {
 			const text = chrome.renderResultText(toolName, result, {

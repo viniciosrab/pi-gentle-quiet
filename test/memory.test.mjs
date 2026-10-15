@@ -14,7 +14,7 @@ test("memory calls are drawn like Pi's tool rows with the memory icon", async ()
 	const renderers = tool("mem_search", { renderCall() {}, renderResult() {} });
 	const call = renderers.renderCall({ query: "config" }, theme);
 	assert.equal(lines(call)[0], " \u{100000} search “config”");
-	assert.ok(painted(call.render(80)[0], "accent", "“config”"));
+	assert.ok(call.render(80)[0].includes("\x1b[38;2;153;153;153m“config”"), "argument in Claude Code's argument grey");
 	const result = { details: { data: { results: [1, 2, 3] } } };
 	assert.equal(lines(renderers.renderResult(result, {}, theme, {}))[0], " └ ✓ 3 results");
 });

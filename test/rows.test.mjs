@@ -74,3 +74,14 @@ test("Tool rows: original leaves gentle-pi and memory rows as their packages dra
 	assert.equal(tool("subagent_run", base), base);
 	assert.equal(tool("mem_search", base), base);
 });
+
+test("sent user messages are a one-row bar: no blank padded rows above and below", async () => {
+	await load();
+	const { UserMessageComponent } = await import("@earendil-works/pi-coding-agent");
+	const message = new UserMessageComponent("hi", 1);
+	const [body] = message.children;
+	assert.equal(body.paddingY, 0, "no blank row above or below the text");
+	assert.equal(body.paddingX, 0, "the prompt icon sits flush with the margin");
+	assert.equal(body.cachedText, undefined, "render cache built with the old padding is dropped");
+	assert.equal(message.outputPad, 1, "Pi's own padding setting is left as it was");
+});

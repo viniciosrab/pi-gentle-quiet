@@ -37,9 +37,11 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
+| Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
 | Prompt | Pi's editor | Pi's editor with a `❯` flush with the margin in front of the input and of sent messages |
+| Sent user messages | Three-row bar: blank padded rows above and below the text | One-row bar like Claude Code |
 
 ## Install
 
