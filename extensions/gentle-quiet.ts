@@ -1639,15 +1639,13 @@ function refreshMcp(ctx) {
 }
 
 /**
- * One dim row under the editor while the side column is active. The full status line lives in the
- * bar on top, but Collie (phone bridge) only recognises Pi's input box when a coloured row sits
- * under its bottom border, flush at column 0.
+ * The row under the editor while the side column is active: the status line lives in the bar on top,
+ * so this row shows nothing. Collie (phone bridge) still needs a row there to find Pi's input box: not
+ * whitespace, coloured, flush at column 0. A braille blank (U+2800) is all three and draws empty.
  */
-function sidebarFooterRow(t, width) {
-	const ctx = liveCtx;
-	const sep = ` ${fg(t, "dim", "·")} `;
-	const parts = [shortPath(ctx?.sessionManager?.getCwd?.() ?? ""), ctx?.model?.id].filter(Boolean).map((part) => fg(t, "muted", part));
-	return truncateToWidth(parts.join(sep) || fg(t, "muted", "pi"), width);
+const INVISIBLE_ROW = "\u2800";
+function sidebarFooterRow(t) {
+	return fg(t, "dim", INVISIBLE_ROW);
 }
 
 function footerFactory(tui, t, footerData) {
@@ -1660,7 +1658,7 @@ function footerFactory(tui, t, footerData) {
 	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
 	railStatus = bar;
 	return {
-		render: (width) => (sidebar.active ? [sidebarFooterRow(t, width)] : statusLineRows(t, footerData, width)),
+		render: (width) => (sidebar.active ? [sidebarFooterRow(t)] : statusLineRows(t, footerData, width)),
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();

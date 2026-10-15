@@ -85,12 +85,13 @@ test("Todos and Agents leave their usual places while the column is open", async
 	assert.deepEqual(agents.render(100), []);
 });
 
-test("the footer shrinks to one coloured row flush at column 0 while the column is open", async () => {
+test("the footer shrinks to one invisible coloured row flush at column 0 while the column is open", async () => {
 	const { footer } = await wide();
 	const rows = footer.render(100);
 	assert.equal(rows.length, 1);
-	assert.match(plain(rows[0]), /^\S.* · \S+$/);
-	assert.ok(rows[0].includes("\x1b["));
+	// A braille blank: drawn empty, yet not whitespace, so Collie still finds Pi's input box above it.
+	assert.equal(plain(rows[0]), "\u2800");
+	assert.ok(rows[0].includes("\x1b["), "coloured, as Collie requires");
 });
 
 test("below the breakpoint everything stays where it is", async () => {
