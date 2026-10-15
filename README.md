@@ -52,6 +52,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Stale subagent results | Rounded `❀ Stale agent result` card | ` ◈ agent · stale` + ` └ completed 2m ago while the orchestrator was busy` |
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
 | Todos / Agents blocks | Background panel with an accent bar and padding rows | Flat rows in a square outline using the theme's `border` color |
+| Wide terminals | Todos and Agents above the input, status line under it | In a fullscreen Pi with 140+ columns, the status line becomes a bar on top (full width, with a rule under it) and Agents and Todos move to a column on the right, in the same square outline; they leave their usual places while it is open, and narrower terminals keep everything where it was (`/gentle-quiet` → **Blocks** tab → **Side column**) |
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
 | Tool call tones | Bold `toolTitle` name, `accent` path | Claude Code's tones, fixed truecolor: tool name and `$ command` in light grey `#bcbcbc`, paths and arguments in `#999999` (`/gentle-quiet` → **Tools** tab → **Tool call tones: theme** goes back to the theme's colors, e.g. for light themes) |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |

@@ -12,6 +12,8 @@
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
 //           outline in the theme's border color
+//   sidebar fullscreen terminals with 140+ columns: the status line becomes a bar on top and Agents and
+//           Todos a column on the right (Gentle Shell's layout, drawn in this style); narrower ones keep them in place
 //   quiet   read/bash/edit/write/grep/find/ls/codemode collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
@@ -22,6 +24,7 @@
 // @ts-nocheck
 
 import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -66,6 +69,9 @@ const DEFAULTS = {
 	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
+	// Status, Agents and Todos in a column beside the conversation once the fullscreen terminal
+	// has at least minColumns columns; narrower terminals keep them above and below the input.
+	sidebar: { enabled: true, minColumns: 140 },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
 const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"];
@@ -106,6 +112,7 @@ function merge(user = {}) {
 		tools: toneMode({ ...DEFAULTS.tools, ...user.tools }),
 		quiet: { ...DEFAULTS.quiet, ...user.quiet },
 		blocks: { ...DEFAULTS.blocks, ...user.blocks },
+		sidebar: { ...DEFAULTS.sidebar, ...user.sidebar },
 		subagents: { ...DEFAULTS.subagents, ...user.subagents },
 		statusLine: tokensMode({ ...DEFAULTS.statusLine, ...user.statusLine }),
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
@@ -338,28 +345,31 @@ function trimBlankEdges(rows) {
 	return rows.slice(start, end);
 }
 
-// A panel component drawn flattened, inside the outline when it fits and is enabled.
-function blockComponent(component, options, t) {
+// A panel's rows drawn flattened, inside the outline when it fits and is enabled.
+function drawBlock(target, width, options, t) {
+	const inner = width - BOX_CHROME;
+	if (!config.blocks.border || inner < BOX_MIN_INNER) {
+		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true }));
+	}
+	// The panel keeps ~3 columns of margin and accent bar on the left, which
+	// flatten() removes, and 2 on the right; render it wider to fill the box.
+	const rows = trimBlankEdges(flatten(target.render(inner + 5), { ...options(), margin: false }));
+	return rows.length ? boxed(rows, width, t ?? theme) : rows;
+}
+
+// A panel component drawn flattened. While the side column is open the panel is
+// drawn there instead (see railBlocks) and leaves its own place empty.
+function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
+	if (key) railBlocks.set(key, (width) => drawBlock(component, width, options, t));
 	return new Proxy(component, {
-		get(target, key) {
-			if (key === "render") {
-				return (width) => {
-					const inner = width - BOX_CHROME;
-					if (!config.blocks.border || inner < BOX_MIN_INNER) {
-						return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true }));
-					}
-					// The panel keeps ~3 columns of margin and accent bar on the left, which
-					// flatten() removes, and 2 on the right; render it wider to fill the box.
-					const rows = trimBlankEdges(flatten(target.render(inner + 5), { ...options(), margin: false }));
-					return rows.length ? boxed(rows, width, t ?? theme) : rows;
-				};
-			}
-			const value = Reflect.get(target, key, target);
+		get(target, prop) {
+			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t));
+			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
-		set(target, key, value) {
-			return Reflect.set(target, key, value, target);
+		set(target, prop, value) {
+			return Reflect.set(target, prop, value, target);
 		},
 	});
 }
@@ -369,7 +379,12 @@ function rewriteWidget(key, content) {
 	if (!BLOCK_WIDGETS.has(key) || !config.blocks.minimal || content === undefined) return content;
 	const options = blockOptions(WIDGET_GROUP[key]);
 	if (Array.isArray(content)) return flatten(content, options());
-	if (typeof content === "function") return (tui, t, ...rest) => blockComponent(content(tui, t, ...rest), options, t);
+	if (typeof content === "function") {
+		return (tui, t, ...rest) => {
+			openSidebar(tui);
+			return blockComponent(content(tui, t, ...rest), options, t, key);
+		};
+	}
 	return content;
 }
 
@@ -390,6 +405,7 @@ function patch(ctx) {
 		};
 		ui.setWidget = (key, content, ...rest) => {
 			if (trackedWidget(key)) rawWidget.set(key, [content, rest]);
+			if (content === undefined) railBlocks.delete(key);
 			setWidget(key, rewriteWidget(key, content), ...rest);
 		};
 		// The /yolo toggle also announces itself with a notification; hide it with the banner.
@@ -574,6 +590,8 @@ function menuSections(ctx) {
 		["Blocks and agents", "Blocks", () => [
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
+			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }],
+			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
 		]],
 		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }])],
@@ -1508,12 +1526,18 @@ function footerFactory(tui, t, footerData) {
 	footerTui = tui;
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
 	refreshChanges();
+	openSidebar(tui);
+	// On wide terminals the status line is the bar on top of the side-column layout: a blank row
+	// keeps it off whatever the terminal draws above Pi (herdr's tabs), one column of margin, a rule below.
+	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
+	railStatus = bar;
 	return {
-		render: (width) => statusLineRows(t, footerData, width),
+		render: (width) => (sidebar.active ? [] : statusLineRows(t, footerData, width)),
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
 			if (footerTui === tui) footerTui = undefined;
+			if (railStatus === bar) railStatus = undefined;
 		},
 	};
 }
@@ -1531,6 +1555,141 @@ function applyFooter(ctx, force = false) {
 		footerInstalled = false;
 	} else if (footerInstalled) {
 		footerTui?.requestRender?.();
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Side column: Agents and Todos beside the conversation, the status line on top, on wide terminals
+// ---------------------------------------------------------------------------
+
+// Gentle Shell's sidebar layout, kept when Gentle Shell is disabled: in a fullscreen Pi the layout
+// root is a tree whose node can be swapped for [status bar / [conversation | column]]. Pi's own
+// internals (layout-node, ScrollView), so every step is guarded and falls back to the native layout.
+const LAYOUT_NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
+const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
+const SIDEBAR_COLUMNS = [120, 140, 160, 180]; // terminal widths the column can open at
+const RAIL_WIDTH = 52;
+const RAIL_GAP = 2;
+
+// active: the wide layout is painting; the status line and the panels it holds paint nothing in their usual places.
+const sidebar = { tui: undefined, active: false, dispose: undefined };
+const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
+let railStatus; // (width) => rows of the status bar, registered by the footer
+
+/** Agents and Todos as outlined cards, one right under the other. */
+function railRows(width) {
+	const rows = [];
+	for (const key of ["gentle-agents", "gentle-todo"]) {
+		const section = railBlocks.get(key)?.(width);
+		if (section?.length) rows.push(...section);
+	}
+	return rows;
+}
+
+function installSidebar(tui) {
+	const host = tui;
+	const roots = new Set();
+	const cleanups = [];
+	let failed = false;
+	let barLines = [];
+	let lines = [];
+	const wanted = () =>
+		!failed &&
+		config.sidebar.enabled &&
+		host.mode === "fullscreen" &&
+		tui.terminal.columns >= config.sidebar.minColumns &&
+		// Gentle Shell paints its own sidebar when it is enabled.
+		typeof tui.terminal[GENTLE_SIDEBAR]?.ownsHost !== "function";
+	const column = new PiTui.ScrollView({ render: () => lines, invalidate() {} }, {
+		follow: "none",
+		primary: false,
+		overscroll: "contain",
+		scrollbar: "auto",
+		scrollbarTrackStyle: (text) => fg(theme, "border", text),
+		scrollbarThumbStyle: (text) => fg(theme, "accent", text),
+	});
+	const bar = { render: () => barLines, invalidate() {} };
+	const attach = () => {
+		if (failed) return;
+		try {
+			const root = host.layoutRoot;
+			if (!root || typeof root[LAYOUT_NODE] !== "function" || roots.has(root)) return;
+			const nativeNode = root[LAYOUT_NODE];
+			const descriptor = Object.getOwnPropertyDescriptor(root, LAYOUT_NODE);
+			const conversation = { render: () => [], invalidate() {}, [LAYOUT_NODE]: () => nativeNode.call(root) };
+			const withColumn = {
+				render: () => [],
+				invalidate() {},
+				[LAYOUT_NODE]: () => ({
+					type: "hstack",
+					gap: RAIL_GAP,
+					align: "stretch",
+					entries: [
+						{ component: conversation, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+						{ component: column, basis: RAIL_WIDTH, grow: 0, shrink: 0, minSize: RAIL_WIDTH },
+					],
+				}),
+			};
+			const replacement = () => {
+				sidebar.active = false;
+				if (!wanted()) return nativeNode.call(root);
+				try {
+					const width = column.getContentWidth(RAIL_WIDTH);
+					barLines = (config.statusLine.enabled ? railStatus?.(tui.terminal.columns) : undefined) ?? [];
+					lines = railRows(width).map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
+				} catch {
+					failed = true;
+					return nativeNode.call(root);
+				}
+				if (!barLines.length && !lines.length) return nativeNode.call(root);
+				sidebar.active = true;
+				const body = lines.length ? withColumn : conversation;
+				if (!barLines.length) return body[LAYOUT_NODE]();
+				return {
+					type: "vstack",
+					gap: 0,
+					align: "stretch",
+					entries: [
+						{ component: bar, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
+						{ component: body, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+					],
+				};
+			};
+			root[LAYOUT_NODE] = replacement;
+			roots.add(root);
+			cleanups.push(() => {
+				if (root[LAYOUT_NODE] !== replacement) return;
+				if (descriptor) Object.defineProperty(root, LAYOUT_NODE, descriptor);
+				else Reflect.deleteProperty(root, LAYOUT_NODE);
+			});
+			tui.requestRender?.();
+		} catch {
+			failed = true;
+			sidebar.active = false;
+		}
+	};
+	attach();
+	// Pi replaces the layout root without a session event; bind again when it does.
+	const timer = setInterval(attach, 100);
+	timer.unref?.();
+	return () => {
+		failed = true;
+		sidebar.active = false;
+		clearInterval(timer);
+		for (const cleanup of cleanups.reverse()) cleanup();
+		tui.requestRender?.();
+	};
+}
+
+// One layout per terminal; installed by the first footer or panel that Pi builds on it.
+function openSidebar(tui) {
+	if (!tui?.terminal || typeof PiTui.ScrollView !== "function" || sidebar.tui === tui) return;
+	try {
+		sidebar.dispose?.();
+		sidebar.tui = tui;
+		sidebar.dispose = installSidebar(tui);
+	} catch {
+		sidebar.dispose = undefined;
 	}
 }
 
