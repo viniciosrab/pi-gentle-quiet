@@ -27,7 +27,7 @@ test("tools outside gentle-pi, memory and quiet tools are left alone", async () 
 test("sent user messages get the prompt icon; other messages do not", async () => {
 	const { markdown } = await load();
 	const [transform] = markdown;
-	assert.equal(transform("hi", { messageType: "user" }), " ❯ hi");
+	assert.equal(transform("hi", { messageType: "user" }), "❯ hi");
 	assert.equal(transform("hi", { messageType: "assistant" }), "hi");
 	assert.equal(transform("  ", { messageType: "user" }), "  ");
 });
@@ -39,8 +39,8 @@ test("the editor shows the prompt icon on its first line only", async () => {
 	const instance = factory({}, {}, {});
 	assert.equal(instance.getPaddingX(), 0, "reported padding excludes the icon");
 	const [, first, second] = instance.render(20);
-	assert.equal(first, " [❯] hello", "icon painted with the editor border color");
-	assert.equal(second, "   world");
+	assert.equal(first, "[❯] hello", "icon flush with the margin, painted with the editor border color");
+	assert.equal(second, "  world");
 });
 
 test("the prompt editor comes back after Pi resets the extension UI (resume, new session, reload)", async () => {

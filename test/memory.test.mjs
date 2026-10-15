@@ -13,7 +13,7 @@ test("memory calls are drawn like Pi's tool rows with the memory icon", async ()
 	const { tool } = await load();
 	const renderers = tool("mem_search", { renderCall() {}, renderResult() {} });
 	const call = renderers.renderCall({ query: "config" }, theme);
-	assert.equal(lines(call)[0], " 󰧑 search “config”");
+	assert.equal(lines(call)[0], " \u{100000} search “config”");
 	assert.ok(painted(call.render(80)[0], "accent", "“config”"));
 	const result = { details: { data: { results: [1, 2, 3] } } };
 	assert.equal(lines(renderers.renderResult(result, {}, theme, {}))[0], " └ ✓ 3 results");

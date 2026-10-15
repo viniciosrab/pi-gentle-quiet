@@ -31,7 +31,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 |---|---|---|
 | Status line | Pi's footer (tokens, context, model) | Gentle Shell's bar: `~/app main ±2 +3 -1 · model · effort` … `· Perm: Normal` on the left, `R50k W2.0k CH98.0% · ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub` on the right; counters give way first, and statuses move to a second row only when they still do not fit |
 | Footer statuses | `🧠 project · ✓ 4 results`, `Permissions: YOLO`, `🚀 YOLO ON 🔥 …` | `mem 4 results`, `Perm: Yolo` (theme colors), banner hidden |
-| Memory calls | `🧠 search "x" …` | `󰧑 search "x"` drawn like Pi's own tool rows |
+| Memory calls | `🧠 search "x" …` | `􀀀 search "x"` drawn like Pi's own tool rows |
 | gentle-pi tool rows | `✿todo · write` flush against the edge | ` ≡ todo · write` on Pi's one-column margin |
 | Stale subagent results | Rounded `❀ Stale agent result` card | ` ◈ agent · stale` + ` └ completed 2m ago while the orchestrator was busy` |
 | Subagent results | Rounded `❀ Agent result` card | ` ◈ gentle-ai-explore · done` + ` └ first line of the answer`; `ctrl+o` shows it all |
@@ -39,7 +39,7 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 | Pi tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `codemode`) | Boxed output preview | Call row plus a one-line summary; `ctrl+o` shows Pi's full output |
 | `edit` | Diff preview while editing | `+N -M` and the first two changed lines in the theme's diff colors |
 | `codemode` | Script and output | Number of calls and their servers; failed calls listed; the first lines of the script's output |
-| Prompt | Pi's editor | Pi's editor with a `❯` in front of the input and of sent messages |
+| Prompt | Pi's editor | Pi's editor with a `❯` flush with the margin in front of the input and of sent messages |
 
 ## Install
 
@@ -82,7 +82,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Memory in footer / label / project name | on / `mem` / off |
 | Permission in footer / label / hidden when normal | on / `Perm` / shown |
 | YOLO banner | hidden |
-| Icons: memory / todo / agents / other gentle tools | `󰧑` / `≡` / `◈` / `›` |
+| Icons: memory / todo / agents / other gentle tools | `􀀀` (U+100000) / `≡` / `◈` / `›` |
 | Tool rows (gentle-pi and memory) / margin | `quiet` (`original` leaves them as their packages draw them) / on |
 | Quiet tools / preview lines / codemode detail | on / 0 / `failures` |
 | Codemode output lines | `3` (`5`, `10`, `0` to hide) |
@@ -97,7 +97,7 @@ For the full effect, turn off gentle-pi's visual extensions in `pi config` (or i
 | Estimated cost (unpriced providers) | on: zero-priced responses (claude-bridge) are priced at the same model's Anthropic API rates |
 | Prompt icon in input / in sent messages / icon | on / on / `❯` |
 
-The memory icon `󰧑` needs a [Nerd Font](https://www.nerdfonts.com/). Without one, pick `⟲` in the menu.
+The default memory icon U+100000 is an outlined brain from a local `GentleBrain.ttf` font in `~/.local/share/fonts`; without that font, pick `󰧑` (needs a [Nerd Font](https://www.nerdfonts.com/)) or `⟲` in the menu.
 
 ## Limits
 

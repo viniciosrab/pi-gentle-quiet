@@ -58,17 +58,17 @@ test("replaces Pi's footer: Perm right after the model and effort, counters on t
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
+	assert.match(rows[0], /^\/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
 });
 
 test("on narrow terminals the counters give way before Perm leaves the first line", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	const at = (width) => component.render(width).map(plain);
 	assert.equal(at(105).length, 1);
-	assert.match(at(105)[0], /^ \/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
+	assert.match(at(105)[0], /^\/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
 	const narrow = at(90);
 	assert.equal(narrow.length, 2, "statuses move to a second row only when the first line cannot hold them");
-	assert.equal(narrow[1], " Perm: Normal  ⧗ 1 job");
+	assert.equal(narrow[1], "Perm: Normal  ⧗ 1 job");
 });
 
 test("token counters come from every usage Pi records, like Pi's footer", async () => {

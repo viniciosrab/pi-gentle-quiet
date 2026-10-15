@@ -16,12 +16,12 @@
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
 //           with ctrl+o expanding to Pi's own output (execution stays Pi's)
-//   prompt  " ❯ " before the input and before sent user messages (from pi-pretty,
+//   prompt  "❯ " flush with the margin before the input and sent user messages (from pi-pretty,
 //           without its rounded borders, so the editor stays native)
 // Neither package offers display options, so this rewrites their UI writes.
 // @ts-nocheck
 
-import { CustomEditor, getAgentDir, keyHint } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -45,8 +45,9 @@ const DEFAULTS = {
 	permissions: { show: true, label: "Perm", hideWhenNormal: false },
 	yoloBanner: false,
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
-	// memory: Nerd Font brain outline (nf-md-brain), drawn in the theme color like any text.
-	icons: { memory: "\u{F09D1}", todo: "≡", agents: "◈", other: "›" },
+	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
+	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
+	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", other: "›" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
 	tools: { restyle: true, margin: true },
@@ -69,7 +70,7 @@ const DEFAULTS = {
 const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"];
 // Memory-specific choices: brain, history (recall) and database from the Nerd Font,
 // plus a plain Unicode recall arrow for fonts without Nerd Font glyphs.
-const MEMORY_ICONS = ["\u{F09D1}", "\u{F02DA}", "\u{F01BC}", "⟲"];
+const MEMORY_ICONS = ["\u{100000}", "\u{E28C}", "\u{F09D1}", "\u{F02DA}", "\u{F01BC}", "⟲"];
 const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["other", "Other gentle tools icon"]];
 const AGENT_TOOLS = /^(subagent_.*|orchestrator_.*)$/;
 const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolName === "todo" ? "todo" : AGENT_TOOLS.test(toolName) ? "agents" : "other");
@@ -409,7 +410,9 @@ function redraw() {
 
 // Native editor plus a prompt icon in front of the first input line, copied
 // from pi-pretty's PromptEditor without its rounded corners and side borders.
-const PROMPT_WIDTH = 3; // " ❯ "
+// "❯ " flush with the margin: Collie (herdr phone bridge) only recognises the
+// pi input box when the icon sits in column 0, as in oh-my-pi's layout.
+const PROMPT_WIDTH = 2; // "❯ "
 class PromptEditor extends CustomEditor {
 	constructor(tui, editorTheme, keybindings, options) {
 		super(tui, editorTheme, keybindings, options);
@@ -433,12 +436,34 @@ class PromptEditor extends CustomEditor {
 		if (!first || padding > Math.floor((width - 1) / 2) || !first.startsWith(" ".repeat(padding))) return lines;
 		const icon = [...(config.prompt.icon || "❯")][0];
 		const colored = typeof this.borderColor === "function" ? this.borderColor(icon) : icon;
-		lines[1] = `${first.slice(0, this.userPaddingX)} ${colored} ${first.slice(padding)}`;
+		lines[1] = `${first.slice(0, this.userPaddingX)}${colored} ${first.slice(padding)}`;
 		return lines;
 	}
 }
 
 const promptEditorFactory = (tui, editorTheme, keybindings) => new PromptEditor(tui, editorTheme, keybindings);
+
+// Sent user messages: drop Pi's outputPad so the prompt icon sits flush with the
+// margin, like the input. Patched once per process; the patch reads the config of
+// the latest loaded copy of this module, so /reload and /gentle-quiet still apply.
+const USER_PAD_PATCHED = Symbol.for("gentle-quiet.userMessagePad");
+const CURRENT_CONFIG = Symbol.for("gentle-quiet.config");
+globalThis[CURRENT_CONFIG] = () => config;
+const userProto = UserMessageComponent?.prototype;
+if (typeof userProto?.rebuild === "function" && !userProto[USER_PAD_PATCHED]) {
+	const rebuild = userProto.rebuild;
+	userProto.rebuild = function () {
+		if (!globalThis[CURRENT_CONFIG]?.()?.prompt?.userMessage) return rebuild.call(this);
+		const pad = this.outputPad;
+		this.outputPad = 0;
+		try {
+			return rebuild.call(this);
+		} finally {
+			this.outputPad = pad;
+		}
+	};
+	userProto[USER_PAD_PATCHED] = true;
+}
 let previousEditor;
 let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
 
@@ -566,8 +591,8 @@ function quietCall(toolName, args = {}, t) {
 				: "";
 			return `${title("read")} ${accent(shortPath(args.path ?? args.file_path))}${range}`;
 		}
-		case "bash":
-			return title(`$ ${firstLine(args.command)}`);
+		case "bash": // regular weight, like Claude Code's "$ command" row
+			return fg(t, "toolTitle", `$ ${firstLine(args.command)}`);
 		case "edit":
 		case "write":
 			return `${title(toolName)} ${accent(shortPath(args.path ?? args.file_path))}`;
@@ -681,7 +706,7 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(lines.length ? plural(lines.length, "line") : "no output"), preview: lines, keepEnd: true };
 		case "edit": {
 			const { added, removed } = diffCounts(result?.details?.diff);
-			const counts = added || removed ? `${fg(t, "toolDiffAdded", `+${added}`)} ${fg(t, "toolDiffRemoved", `-${removed}`)}` : "edited";
+			const counts = added || removed ? `${DIFF_STYLE["+"].paint(`+${added}`)} ${DIFF_STYLE["-"].paint(`-${removed}`)}` : "edited";
 			return { summary: join(fg(t, "success", "✓"), counts, seconds(context.durationMs) && fg(t, "dim", `· ${seconds(context.durationMs)}`)), preview: String(result?.details?.diff ?? "").split("\n").filter((line) => /^[+-]\s*\d/.test(line)), diff: true, minPreview: 2 };
 		}
 		case "write": {
@@ -711,15 +736,40 @@ function quietResultText(toolName, result, options, context, t) {
 	const count = Math.max(config.quiet.preview, info.minPreview ?? 0);
 	const source = info.preview ?? [];
 	const shown = info.fixed ?? (count > 0 ? (info.keepEnd ? source.slice(-count) : source.slice(0, count)) : []);
-	const color = (line) => (info.diff ? fg(t, line.startsWith("+") ? "toolDiffAdded" : "toolDiffRemoved", line) : fg(t, info.color ?? "dim", line));
+	const color = (line) => fg(t, info.color ?? "dim", line);
 	// Something stays hidden: more output than the preview, or written content.
 	const hidden = info.hidden ?? (source.length > shown.length || (toolName === "write" && String(context.args?.content ?? "") !== ""));
 	return {
 		summary: `${prefix} ${info.summary}`,
 		hint: hidden ? expandHint(t) : "",
 		// Fixed rows (codemode calls) arrive colored; the component truncates them to width.
-		rest: info.fixed ? shown.map((line) => `  ${line}`) : shown.map((line) => `  ${color(firstLine(line, 200))}`),
+		rest: info.fixed
+			? shown.map((line) => `  ${line}`)
+			: info.diff
+				? shown.map((line) => ({ diff: line[0], text: firstLine(line, 200) }))
+				: shown.map((line) => `  ${color(firstLine(line, 200))}`),
 	};
+}
+
+// Minimal diff rows: no backgrounds, removed lines in soft red, added in soft green,
+// changed words a brighter tone of the same color.
+// Fixed truecolor on purpose: monochrome terminal palettes (Omarchy's grey themes)
+// turn Pi's toolDiffAdded/toolDiffRemoved into the same grey as everything else.
+const rgb = ([r, g, b]) => `\x1b[38;2;${r};${g};${b}m`;
+const diffStyle = (text, word) => ({
+	text: rgb(text),
+	word: rgb(word),
+	paint: (value) => `${rgb(text)}${value}\x1b[39m`,
+});
+const DIFF_STYLE = {
+	"+": diffStyle([125, 170, 130], [165, 215, 170]),
+	"-": diffStyle([185, 135, 150], [215, 165, 180]), // soft rose
+};
+
+function diffRow({ diff, text }, width) {
+	const plain = truncateToWidth(`  ${text}`, Math.max(1, width - 1), "…");
+	const style = DIFF_STYLE[diff];
+	return style ? ` ${style.paint(plain)}` : ` ${plain}`;
 }
 
 // Pi's own hint, so a rebound expand key shows its actual binding.
@@ -759,29 +809,67 @@ function quietResultComponent({ summary, hint: available, rest }, order) {
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
 			lines.push(hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…"));
-			for (const line of rest) lines.push(truncateToWidth(` ${line}`, width, "…"));
+			for (const line of rest) lines.push(typeof line === "object" ? diffRow(line, width) : truncateToWidth(` ${line}`, width, "…"));
 			return lines;
 		},
 		invalidate() {},
 	};
 }
 
+/**
+ * Recolors one native expanded diff line ("-12 text", "+12 text", wrapped tails):
+ * the line in its soft tone, Pi's inverse word highlight in the brighter tone.
+ */
+function tintLine(line, style) {
+	const out = [style.text];
+	for (const tok of tokens(line)) {
+		if (tok.ch !== undefined) {
+			out.push(tok.ch);
+			continue;
+		}
+		const m = /^\x1b\[([0-9;:]*)m$/.exec(tok.esc);
+		if (!m) continue; // drop OSC and other sequences inside the row
+		const params = m[1] === "" ? ["0"] : m[1].split(";");
+		if (params.includes("7")) out.push(style.word);
+		else if (params.includes("27") || params.includes("0")) out.push(style.text);
+	}
+	out.push("\x1b[0m");
+	return out.join("");
+}
+
+const plainText = (line) => tokens(line).map((tok) => tok.ch ?? "").join("");
+
+/** Tints every diff line of a native expanded edit/write result; context stays as is. */
+function tintDiff(lines) {
+	let current = null; // style of the diff line a wrapped tail belongs to
+	return lines.map((line) => {
+		const plain = plainText(line);
+		const m = /^\s*([+-])\s*\d/.exec(plain); // "-2" or padded "- 882"
+		if (m) current = DIFF_STYLE[m[1]];
+		else if (/^\s*\d/.test(plain) || plain.trim() === "" || /^\s*\.\.\./.test(plain)) current = null;
+		return current ? tintLine(line, current) : line;
+	});
+}
+
 /** Shifts a component one column right (Pi's text margin) and drops its backgrounds. */
-function padded(component) {
+function padded(component, { diff = false } = {}) {
 	if (!component || typeof component.render !== "function") return component;
 	// Expanded outputs can be thousands of lines and redraw on every frame:
 	// reuse the previous result while the native lines are unchanged.
 	let lastIn;
 	let lastOut;
+	let lastWidth;
 	return new Proxy(component, {
 		get(target, key) {
 			if (key === "render") {
 				return (width) => {
 					const lines = target.render(Math.max(1, width - 1));
-					if (lastIn && lastIn.length === lines.length && lines.every((line, i) => line === lastIn[i])) return lastOut;
+					if (lastIn && lastWidth === width && lastIn.length === lines.length && lines.every((line, i) => line === lastIn[i])) return lastOut;
 					lastIn = lines;
+					lastWidth = width;
 					// Lines without escape sequences have no background to drop.
-					lastOut = lines.map((line) => ` ${line.includes("\x1b[") ? tokens(line).map((tok) => (tok.esc ? stripBackground(tok.esc) : tok.ch)).join("") : line}`);
+					const shown = diff ? tintDiff(lines) : lines;
+					lastOut = shown.map((line, i) => (diff && line !== lines[i] ? ` ${line}` : ` ${line.includes("\x1b[") ? tokens(line).map((tok) => (tok.esc ? stripBackground(tok.esc) : tok.ch)).join("") : line}`));
 					return lastOut;
 				};
 			}
@@ -808,7 +896,7 @@ function quietRenderers(toolName, renderers) {
 					// Pi's renderer reuses its own previous component only, never ours.
 					const native = renderers.renderResult(result, options, t, { ...context, lastComponent: state?.quietNative });
 					if (state) state.quietNative = native;
-					if (native) return padded(native);
+					if (native) return padded(native, { diff: toolName === "edit" || toolName === "write" });
 				} catch {
 					// fall back to the summary below
 				}
@@ -1114,15 +1202,17 @@ function statusLineRows(t, footerData, width) {
 			stage.inline && statusText,
 		].filter(Boolean).join(sep);
 		const right = [stage.tokens && tokens(stage.cache), contextText, costText && fg(t, "text", costText), stage.usage && usageText(stage.usage === "all")].filter(Boolean).join(sep);
-		const gap = width - 2 - visibleWidth(left) - visibleWidth(right);
+		// Rows start at column 0: Collie (herdr phone bridge) only finds the pi input box
+		// when the status lines under it do not start with a space.
+		const gap = width - 1 - visibleWidth(left) - visibleWidth(right);
 		if (gap < (left ? 2 : 0)) continue;
-		const line = ` ${left}${" ".repeat(gap)}${right} `;
+		const line = `${left}${" ".repeat(gap)}${right} `;
 		if (stage.inline || !secondRow.length) return [line];
-		return [line, truncateToWidth(` ${secondRow.join("  ")}`, width, "…")];
+		return [line, truncateToWidth(secondRow.join("  "), width, "…")];
 	}
 	const right = [contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
-	const line = truncateToWidth(` ${right}`, width, "…");
-	return secondRow.length ? [line, truncateToWidth(` ${secondRow.join("  ")}`, width, "…")] : [line];
+	const line = truncateToWidth(right, width, "…");
+	return secondRow.length ? [line, truncateToWidth(secondRow.join("  "), width, "…")] : [line];
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
@@ -1246,6 +1336,7 @@ function mcpCounts(ctx) {
 }
 
 /** Re-reads the counts now and redraws the footer when they changed (servers connect after startup). */
+let mcpTimers = [];
 function refreshMcp(ctx) {
 	const before = JSON.stringify(mcpCache.value);
 	mcpCache.at = 0;
@@ -1370,7 +1461,18 @@ export default async function (pi) {
 		applyFooter(ctx, true);
 		refreshChanges();
 		// MCP servers connect after startup (Pi waits up to ~10s): look again as they come up.
-		for (const delay of [1500, 4000, 11000]) setTimeout(() => refreshMcp(ctx), delay).unref?.();
+		for (const timer of mcpTimers) clearTimeout(timer);
+		mcpTimers = [1500, 4000, 11000].map((delay) => {
+			const timer = setTimeout(() => {
+				try {
+					refreshMcp(ctx);
+				} catch {
+					// ctx went stale after a session replacement or reload
+				}
+			}, delay);
+			timer.unref?.();
+			return timer;
+		});
 		callOrder.clear(); // a new or resumed session redraws its calls from the start
 		latestFinished = -1;
 		patch(ctx);
@@ -1383,11 +1485,17 @@ export default async function (pi) {
 			applyEditor(ctx);
 			// Files change through tools and turns; a short delay batches bursts of calls.
 			if (event !== "before_agent_start") refreshChanges(500);
-			refreshMcp(ctx);
+			try {
+				refreshMcp(ctx);
+			} catch {
+				// ctx went stale after a session replacement or reload
+			}
 		});
 	}
 	// Pi resets extension UI after shutdown; forget the editor so the next start reinstalls it.
 	pi.on("session_shutdown", () => {
+		for (const timer of mcpTimers) clearTimeout(timer);
+		mcpTimers = [];
 		installedOn = undefined;
 	});
 
@@ -1402,7 +1510,7 @@ export default async function (pi) {
 
 	pi.registerMarkdownTransformer?.((markdown, context) => {
 		if (!config.prompt.userMessage || context?.messageType !== "user" || markdown.trim() === "") return markdown;
-		return ` ${config.prompt.icon || "❯"} ${markdown}`;
+		return `${config.prompt.icon || "❯"} ${markdown}`;
 	});
 
 	pi.registerCommand("gentle-quiet", {

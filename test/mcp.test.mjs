@@ -80,5 +80,5 @@ test("MCP sits with the statuses: after Perm on the left, and on the second row 
 	assert.match(plain(component.render(200)[0]), /medium · Perm: Normal · MCP 1\/3 /);
 	const narrow = component.render(60).map(plain);
 	assert.equal(narrow.length, 2);
-	assert.equal(narrow[1], " Perm: Normal  MCP 1/3");
+	assert.equal(narrow[1], "Perm: Normal  MCP 1/3");
 });
