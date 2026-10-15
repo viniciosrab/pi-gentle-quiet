@@ -22,7 +22,8 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 └──────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────
 ❯
-Perm: Normal
+────────────────────────────────────────────────────────────────────
+~/app main · claude-opus-5-5 · medium · Perm: Normal     ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub
 ```
 
 `/gentle-quiet` opens its options as tabs:
