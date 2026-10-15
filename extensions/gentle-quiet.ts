@@ -392,6 +392,14 @@ function patch(ctx) {
 			if (trackedWidget(key)) rawWidget.set(key, [content, rest]);
 			setWidget(key, rewriteWidget(key, content), ...rest);
 		};
+		// The /yolo toggle also announces itself with a notification; hide it with the banner.
+		if (typeof ui.notify === "function") {
+			const notify = ui.notify.bind(ui);
+			ui.notify = (message, ...rest) => {
+				if (!config.yoloBanner && typeof message === "string" && message.startsWith("🚀 YOLO ON")) return;
+				return notify(message, ...rest);
+			};
+		}
 		ui[PATCHED] = true;
 		original = { setStatus, setWidget };
 	} catch {

@@ -31,6 +31,21 @@ test("YOLO banner is hidden in the footer and above the editor", async () => {
 	assert.equal(widgets["gentle:yolo"], undefined);
 });
 
+test("the /yolo notification is hidden with the banner; other notifications pass through", async () => {
+	const { ui, notices } = await load();
+	ui.notify("🚀 YOLO ON 🔥 — destructive confirmations remain", "warning");
+	ui.notify("Saved", "info");
+	assert.deepEqual(notices, [["Saved", "info"]]);
+});
+
+test("with the banner shown, the /yolo notification is shown too", async () => {
+	writeConfig({ yoloBanner: true });
+	const { ui, notices } = await load();
+	ui.notify("🚀 YOLO ON 🔥", "warning");
+	assert.deepEqual(notices, [["🚀 YOLO ON 🔥", "warning"]]);
+	writeConfig({});
+});
+
 test("statuses of other extensions pass through unchanged", async () => {
 	const { ui, status } = await load();
 	ui.setStatus("other", "keep me");
