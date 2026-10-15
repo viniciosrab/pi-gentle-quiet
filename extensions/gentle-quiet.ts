@@ -398,6 +398,8 @@ function stackRow(row, inner, t, title = false) {
 
 // A task row too long for the box, wrapped so the text that continues lines up under the task's own
 // text, past its status icon, instead of running back under the icon.
+// The scroll indicator row ("↑↓ 1-10/13 · ctrl+shift+↑/↓"): the wheel scrolls the card anyway.
+const SCROLL_ROW = /^\s*↑↓\s+\d+-\d+\/\d+/u;
 const TASK_GLYPH = /^[○◐⊘✓✕]\s/u;
 function hangRow(row, inner) {
 	if (visibleWidth(row) <= inner || !TASK_GLYPH.test(row.replace(SGR, "")) || typeof PiTui.wrapTextWithAnsi !== "function") return [row];
@@ -418,6 +420,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	let rows = trimBlankEdges(flatten(target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
+	if (rail.hang) rows = rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, "")));
 	if (rail.hang) rows = rows.flatMap((row, index) => (index === 0 ? stackRow(row, inner, t ?? theme, true) : hangRow(row, inner)));
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;

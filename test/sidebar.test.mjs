@@ -82,7 +82,7 @@ test("the Agents batch clock stays on the title row, right-aligned", async () =>
 test("a long Todos task wraps with its text lined up under the task's own text", async () => {
 	const loaded = await wide();
 	const long = "T8b1 Home parity part 1: nav/hero/price/integration/panel worker running and then some more words to wrap";
-	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => ["   ❀ Todos  1 of 2".padEnd(width), `   ◐ ${long}`.padEnd(width), "   ○ Short one".padEnd(width)] }));
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => ["   ❀ Todos  1 of 2".padEnd(width), `   ◐ ${long}`.padEnd(width), "   ○ Short one".padEnd(width), "   ↑↓ 1-10/13 · ctrl+shift+↑/↓".padEnd(width)] }));
 	loaded.widgets["gentle-todo"](loaded.tui, theme);
 	loaded.root[NODE]();
 	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
@@ -90,6 +90,7 @@ test("a long Todos task wraps with its text lined up under the task's own text",
 	assert.ok(first > 0);
 	assert.match(out[first + 1], /^ {2}\S/, "continuation hangs under the text, past the icon");
 	assert.ok(out.some((row) => row === "○ Short one"), "other tasks are untouched");
+	assert.ok(!out.some((row) => row.includes("↑↓")), "the scroll indicator row is dropped");
 	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
 });
 
