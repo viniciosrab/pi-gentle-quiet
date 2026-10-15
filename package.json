@@ -1,6 +1,6 @@
 {
 	"name": "pi-gentle-quiet",
-	"version": "0.10.0",
+	"version": "0.11.0",
 	"description": "A quiet, Pi-native look for gentle-pi and gentle-engram: minimal footer, compact tool rows, flat bordered Todos/Agents blocks, configured with /gentle-quiet.",
 	"license": "MIT",
 	"type": "module",

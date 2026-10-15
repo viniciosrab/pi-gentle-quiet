@@ -46,10 +46,10 @@ extension only changes how things are drawn: execution, tools, and data stay unt
 ## Install
 
 ```sh
-pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.9.1
+pi install git:github.com/viniciosrab/pi-gentle-quiet@v0.11.0
 ```
 
-Pin a tag (as above) to keep your look stable; drop `@v0.9.1` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
+Pin a tag (as above) to keep your look stable; drop `@v0.11.0` to follow `main`. Restart Pi, then run `/gentle-quiet` to configure it.
 
 ### Recommended settings
 
