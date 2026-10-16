@@ -102,107 +102,90 @@ test("in the terminal /gentle-quiet is one screen with horizontal tabs", async (
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
 	const tabBar = (screen) => screen.find((line) => line.includes("Status") && line.includes("Prompt"));
 	assert.equal(tabBar(screens[0]).trim(), "[ Status ]  Footer   Tools   Blocks   Icons   Prompt   Reset", "tabs side by side, the active one highlighted");
-	assert.ok(screens[0].some((line) => line.startsWith(" → Status line: gentle")), "first tab's first option selected");
+	assert.ok(screens[0].some((line) => /^ → Status line +gentle$/.test(line)), "first tab's first option selected");
 	assert.match(tabBar(screens[1]), /\[ Tools \]/, "→ moves to the next tab");
-	assert.ok(screens[1].some((line) => line.startsWith(" → Tool rows: quiet (new calls)")));
-	assert.ok(screens[2].some((line) => line.startsWith(" → Tool call tones: theme")), "enter changes the option in place and the screen stays open");
+	assert.ok(screens[1].some((line) => /^ → Tool rows +quiet \(new calls\)$/.test(line)));
+	assert.ok(screens[2].some((line) => /^ → Tool call tones +theme$/.test(line)), "enter changes the option in place and the screen stays open");
 	assert.equal(readConfig().tools.tones, "theme", "and it is saved");
 	assert.ok(screens[0].some((line) => line.includes("←→ tabs")), "key hints at the bottom");
 });
 
-test("the selected option's caption sits to its right, dimmed, and follows the selection", async () => {
+// Pi's own settings list: labels and values in two aligned columns, the selected option's description
+// under the list in the dim role, set off by a blank row.
+async function menu(steps, width = 100, session = { model: { id: "m", provider: "claude-bridge" } }) {
 	writeConfig({});
-	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
-	const keys = { right: "\x1b[C", down: "\x1b[B", escape: "\x1b" };
+	const loaded = await load({ mode: "tui", session });
 	const screens = [];
 	loaded.ui.custom = (factory) => new Promise((resolve) => {
 		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
-		const view = () => component.render(100).map(plain);
-		screens.push(view());
-		component.handleInput(keys.down); // Status line changes
-		screens.push(view());
-		component.handleInput(keys.right); // Footer → Memory in footer
-		screens.push(view());
-		component.handleInput(keys.escape);
-	});
-	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	// The caption sits in a column right of the list, from the selected row down.
-	const help = (screen) => {
-		const at = screen.findIndex((line) => line.startsWith(" → "));
-		const column = screen[at].search(/ {4}\S/) + 4;
-		if (column < 4) return undefined;
-		const rows = [];
-		for (let i = at; i < screen.length && screen[i].slice(column).trim() && screen[i].length > column; i++) rows.push(screen[i].slice(column).trim());
-		return rows.join(" ");
-	};
-	assert.equal(help(screens[0]), "Which footer shows under the editor. Now: this extension's status line.");
-	assert.equal(help(screens[1]), "Files and lines changed since the last commit, such as ±2 +3 -1.");
-	assert.equal(help(screens[2]), "Engram memory activity among the statuses, such as mem 4 results.");
-	for (const screen of screens) assert.ok(screen.every((line) => line.length <= 100), "fits the width");
-});
-
-test("every option in every tab has a description", async () => {
-	writeConfig({});
-	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
-	const missing = [];
-	loaded.ui.custom = (factory) => new Promise((resolve) => {
-		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
-		for (let tab = 0; tab < 7; tab++) {
-			const first = component.render(100).map(plain).find((line) => line.startsWith(" → "));
-			let label = first;
-			do {
-				const screen = component.render(100).map(plain);
-				label = screen.find((line) => line.startsWith(" → "));
-				if (!/ {4}\S/.test(label.trimEnd())) missing.push(label);
-				component.handleInput("\x1b[B");
-			} while (component.render(100).map(plain).find((line) => line.startsWith(" → ")) !== first);
-			component.handleInput("\x1b[C");
-		}
-		component.handleInput("\x1b");
-	});
-	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	assert.deepEqual(missing, []);
-});
-
-test("a caption follows the current value of an option that cycles", async () => {
-	writeConfig({});
-	const loaded = await load({ mode: "tui" });
-	const captions = [];
-	loaded.ui.custom = (factory) => new Promise((resolve) => {
-		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
-		for (let i = 0; i < 4; i++) component.handleInput("\x1b[B"); // Status line tokens
-		const caption = () => component.render(160).map(plain).find((line) => line.startsWith(" → ")).replace(/^.*? {4}(?=\S)/, "").trimEnd();
-		captions.push(caption());
-		component.handleInput("\r");
-		setTimeout(() => {
-			captions.push(caption());
+		const run = async () => {
+			for (const step of steps) {
+				if (step === "view") screens.push(component.render(width));
+				else if (step === "wait") await new Promise((done) => setTimeout(done, 50));
+				else component.handleInput(step);
+			}
 			component.handleInput("\x1b");
-		}, 50);
+		};
+		void run();
 	});
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	assert.deepEqual(captions, [
+	return screens;
+}
+const KEY = { right: "\x1b[C", down: "\x1b[B", enter: "\r" };
+/** The description rows: dim rows between the list and the key hints. */
+const description = (screen) => {
+	const rows = screen.filter((line) => painted(line, "dim") && !plain(line).includes("←→ tabs"));
+	return rows.length ? rows.map((line) => plain(line).trim()).join(" ") : undefined;
+};
+
+test("options are laid out like Pi's settings: label and value columns, the description under the list", async () => {
+	const [screen] = await menu([KEY.down, "view"]);
+	const rows = screen.map(plain);
+	const at = rows.findIndex((line) => line.startsWith(" → "));
+	// The longest label, "Estimated cost (unpriced providers)", sets the column; values start two after it.
+	const row = (cursor, label, value) => ` ${cursor}${label.padEnd(35)}  ${value}`;
+	assert.equal(rows[at], row("→ ", "Status line changes", "on"));
+	assert.equal(rows[at - 1], row("  ", "Status line", "gentle"));
+	assert.equal(rows[at + 1], row("  ", "Status line usage", "on"));
+	const hints = rows.findIndex((line) => line.includes("←→ tabs"));
+	assert.deepEqual(rows.slice(hints - 3, hints), ["", "   Files and lines changed since the last commit, such as ±2 +3 -1.", ""]);
+	assert.ok(painted(screen[hints - 2], "dim"), "description in the dim role");
+	assert.ok(painted(screen[at], "accent", "Status line changes"), "selected label in accent");
+	assert.ok(painted(screen[at + 1], "muted", "on"), "other values muted");
+});
+
+test("the description follows the selection across tabs", async () => {
+	const screens = await menu(["view", KEY.down, "view", KEY.right, "view"]);
+	assert.deepEqual(screens.map(description), [
+		"Which footer shows under the editor. Now: this extension's status line.",
+		"Files and lines changed since the last commit, such as ±2 +3 -1.",
+		"Engram memory activity among the statuses, such as mem 4 results.",
+	]);
+});
+
+test("a description follows the current value of an option that cycles", async () => {
+	const screens = await menu([KEY.down, KEY.down, KEY.down, KEY.down, "view", KEY.enter, "wait", "view"]);
+	assert.deepEqual(screens.map(description), [
 		"Token counts in the status line. Now: cache reads, writes and hit rate.",
 		"Token counts in the status line. Now: input and output tokens plus the cache figures.",
 	]);
 });
 
-test("the caption is dimmed and goes under the option when the terminal is too narrow for a column", async () => {
-	writeConfig({});
-	const loaded = await load({ mode: "tui" });
-	let wide;
-	let narrow;
-	loaded.ui.custom = (factory) => new Promise((resolve) => {
-		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
-		component.handleInput("\x1b[B"); // Status line changes
-		wide = component.render(120);
-		narrow = component.render(60).map(plain);
-		component.handleInput("\x1b");
-	});
-	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	const selected = wide.find((line) => plain(line).startsWith(" → "));
-	assert.ok(painted(selected, "dim", "Files and lines changed"), "caption in the dim role");
-	const at = narrow.findIndex((line) => line.startsWith(" → "));
-	assert.equal(narrow[at], " → Status line changes: on");
-	assert.match(narrow[at + 1], /^ {5}Files and lines changed/);
-	assert.ok(narrow.every((line) => line.length <= 60));
+test("a long description wraps under the list within the width", async () => {
+	const [screen] = await menu([...Array(6).fill(KEY.down), "view"], 60);
+	const rows = screen.map(plain);
+	assert.equal(description(screen), "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge.");
+	assert.ok(screen.filter((line) => painted(line, "dim")).length > 2, "wrapped over several rows");
+	assert.ok(rows.every((line) => line.length <= 60));
+});
+
+test("every option in every tab has a description", async () => {
+	const steps = [];
+	for (let tab = 0; tab < 7; tab++) {
+		for (let row = 0; row < 12; row++) steps.push("view", KEY.down);
+		steps.push(KEY.right);
+	}
+	const screens = await menu(steps);
+	const missing = screens.filter((screen) => !description(screen)).map((screen) => plain(screen.find((line) => plain(line).startsWith(" → ")) ?? ""));
+	assert.deepEqual([...new Set(missing)], []);
 });

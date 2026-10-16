@@ -45,8 +45,8 @@ For the full effect, turn off gentle-pi's visual extensions in `~/.pi/agent/sett
 ## Configure
 
 `/gentle-quiet` opens a tabbed menu: `Status`, `Footer`, `Tools`, `Blocks`, `Icons`, `Prompt` and `Reset`.
-Use ←/→ to switch tabs, ↑/↓ to pick an option and enter to change it. A dim caption beside the selected
-option says what it controls and what its current value does. Changes apply right away and are
+Use ←/→ to switch tabs, ↑/↓ to pick an option and enter to change it. Like Pi's own settings, a dim
+description under the list says what the selected option controls. Changes apply right away and are
 saved to `~/.pi/agent/gentle-quiet.json`.
 
 Common choices:

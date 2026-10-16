@@ -753,33 +753,30 @@ async function configureSection(ctx, name) {
 const isAsync = (fn) => fn?.constructor?.name === "AsyncFunction";
 const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }, "Puts every option back to its default and saves it."]]];
 
-const CAPTION_GAP = 4; // columns between the option list and the caption beside it
-const CAPTION_MIN = 24; // narrower than this, the caption goes under the selected option instead
+// Pi's settings list (SettingsList): labels padded to one column (at most 36 wide), values two columns
+// after, the selected row in accent behind "→ ", other values muted, and the selected option's
+// description under the list in the dim role, set off by a blank row. Labels are "Label: value".
+const LABEL_MAX = 36;
 
-/**
- * The option list with the selected option's caption in a dim column to its right, starting on the
- * selected row. On narrow terminals the caption hangs under the selected option.
- */
 function listRows(list, row, width, t, fit) {
-	const labels = list.map(([label], i) => (i === row ? fg(t, "accent", ` → ${label}`) : `   ${fg(t, "text", label)}`));
-	const help = list[row]?.[2];
-	if (!help) return labels.map(fit);
-	const column = Math.max(...list.map(([label]) => visibleWidth(label))) + 3 + CAPTION_GAP;
-	if (width - column < CAPTION_MIN) {
-		const under = wrapWords(help, Math.max(10, width - 5)).map((line) => `     ${fg(t, "dim", line)}`);
-		return [...labels.slice(0, row + 1), ...under, ...labels.slice(row + 1)].map(fit);
-	}
-	const caption = wrapWords(help, width - column - 1);
-	const rows = labels.slice();
-	while (rows.length < row + caption.length) rows.push("");
-	return rows.map((text, i) => {
-		const line = caption[i - row];
-		if (line === undefined) return fit(text);
-		return fit(`${text}${" ".repeat(Math.max(0, column - visibleWidth(text)))}${fg(t, "dim", line)}`);
+	const split = (text) => {
+		const at = text.indexOf(": ");
+		return at < 0 ? [text, ""] : [text.slice(0, at), text.slice(at + 2)];
+	};
+	const items = list.map(([text]) => split(text));
+	const column = Math.min(LABEL_MAX, Math.max(...items.map(([label]) => visibleWidth(label))));
+	const rows = items.map(([label, value], i) => {
+		const selected = i === row;
+		const padded = label + " ".repeat(Math.max(0, column - visibleWidth(label)));
+		const cursor = selected ? fg(t, "accent", "→ ") : "  ";
+		return fit(` ${cursor}${selected ? fg(t, "accent", padded) : fg(t, "text", padded)}  ${selected ? fg(t, "accent", value) : fg(t, "muted", value)}`);
 	});
+	const help = list[row]?.[2];
+	if (!help) return rows;
+	return [...rows, "", ...wrapWords(help, Math.max(10, width - 5)).map((line) => fit(` ${fg(t, "dim", `  ${line}`)}`))];
 }
 
-/** Word-wrapped plain text: the selected option's caption. */
+/** Word-wrapped plain text: the selected option's description. */
 function wrapWords(text, width) {
 	const lines = [];
 	let line = "";
