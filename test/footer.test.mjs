@@ -102,15 +102,15 @@ test("in the terminal /gentle-quiet is one screen with horizontal tabs", async (
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
 	const tabBar = (screen) => screen.find((line) => line.includes("Status") && line.includes("Prompt"));
 	assert.equal(tabBar(screens[0]).trim(), "[ Status ]  Footer   Tools   Blocks   Icons   Prompt   Reset", "tabs side by side, the active one highlighted");
-	assert.ok(screens[0].includes(" → Status line: gentle"), "first tab's first option selected");
+	assert.ok(screens[0].some((line) => line.startsWith(" → Status line: gentle")), "first tab's first option selected");
 	assert.match(tabBar(screens[1]), /\[ Tools \]/, "→ moves to the next tab");
-	assert.ok(screens[1].includes(" → Tool rows: quiet (new calls)"));
-	assert.ok(screens[2].includes(" → Tool call tones: theme"), "enter changes the option in place and the screen stays open");
+	assert.ok(screens[1].some((line) => line.startsWith(" → Tool rows: quiet (new calls)")));
+	assert.ok(screens[2].some((line) => line.startsWith(" → Tool call tones: theme")), "enter changes the option in place and the screen stays open");
 	assert.equal(readConfig().tools.tones, "theme", "and it is saved");
 	assert.ok(screens[0].some((line) => line.includes("←→ tabs")), "key hints at the bottom");
 });
 
-test("the selected option's caption hangs under it and follows the selection", async () => {
+test("the selected option's caption sits to its right, dimmed, and follows the selection", async () => {
 	writeConfig({});
 	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
 	const keys = { right: "\x1b[C", down: "\x1b[B", escape: "\x1b" };
@@ -126,12 +126,14 @@ test("the selected option's caption hangs under it and follows the selection", a
 		component.handleInput(keys.escape);
 	});
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	// The caption hangs right under the selected row: "   └ text", continued on "     text".
+	// The caption sits in a column right of the list, from the selected row down.
 	const help = (screen) => {
 		const at = screen.findIndex((line) => line.startsWith(" → "));
+		const column = screen[at].search(/ {4}\S/) + 4;
+		if (column < 4) return undefined;
 		const rows = [];
-		for (let i = at + 1; i < screen.length && /^ {3}[└ ] \S/.test(screen[i]); i++) rows.push(screen[i].slice(5));
-		return rows.length && screen[at + 1].startsWith("   └ ") ? rows.join(" ") : undefined;
+		for (let i = at; i < screen.length && screen[i].slice(column).trim() && screen[i].length > column; i++) rows.push(screen[i].slice(column).trim());
+		return rows.join(" ");
 	};
 	assert.equal(help(screens[0]), "Which footer shows under the editor. Now: this extension's status line.");
 	assert.equal(help(screens[1]), "Files and lines changed since the last commit, such as ±2 +3 -1.");
@@ -151,7 +153,7 @@ test("every option in every tab has a description", async () => {
 			do {
 				const screen = component.render(100).map(plain);
 				label = screen.find((line) => line.startsWith(" → "));
-				if (!screen[screen.indexOf(label) + 1]?.startsWith("   └ ")) missing.push(label);
+				if (!/ {4}\S/.test(label.trimEnd())) missing.push(label);
 				component.handleInput("\x1b[B");
 			} while (component.render(100).map(plain).find((line) => line.startsWith(" → ")) !== first);
 			component.handleInput("\x1b[C");
@@ -169,7 +171,7 @@ test("a caption follows the current value of an option that cycles", async () =>
 	loaded.ui.custom = (factory) => new Promise((resolve) => {
 		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
 		for (let i = 0; i < 4; i++) component.handleInput("\x1b[B"); // Status line tokens
-		const caption = () => component.render(120).map(plain).find((line) => line.startsWith("   └ "));
+		const caption = () => component.render(160).map(plain).find((line) => line.startsWith(" → ")).replace(/^.*? {4}(?=\S)/, "").trimEnd();
 		captions.push(caption());
 		component.handleInput("\r");
 		setTimeout(() => {
@@ -179,7 +181,28 @@ test("a caption follows the current value of an option that cycles", async () =>
 	});
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
 	assert.deepEqual(captions, [
-		"   └ Token counts in the status line. Now: cache reads, writes and hit rate.",
-		"   └ Token counts in the status line. Now: input and output tokens plus the cache figures.",
+		"Token counts in the status line. Now: cache reads, writes and hit rate.",
+		"Token counts in the status line. Now: input and output tokens plus the cache figures.",
 	]);
+});
+
+test("the caption is dimmed and goes under the option when the terminal is too narrow for a column", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui" });
+	let wide;
+	let narrow;
+	loaded.ui.custom = (factory) => new Promise((resolve) => {
+		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
+		component.handleInput("\x1b[B"); // Status line changes
+		wide = component.render(120);
+		narrow = component.render(60).map(plain);
+		component.handleInput("\x1b");
+	});
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	const selected = wide.find((line) => plain(line).startsWith(" → "));
+	assert.ok(painted(selected, "dim", "Files and lines changed"), "caption in the dim role");
+	const at = narrow.findIndex((line) => line.startsWith(" → "));
+	assert.equal(narrow[at], " → Status line changes: on");
+	assert.match(narrow[at + 1], /^ {5}Files and lines changed/);
+	assert.ok(narrow.every((line) => line.length <= 60));
 });

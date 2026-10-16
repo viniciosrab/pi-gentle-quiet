@@ -753,6 +753,32 @@ async function configureSection(ctx, name) {
 const isAsync = (fn) => fn?.constructor?.name === "AsyncFunction";
 const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }, "Puts every option back to its default and saves it."]]];
 
+const CAPTION_GAP = 4; // columns between the option list and the caption beside it
+const CAPTION_MIN = 24; // narrower than this, the caption goes under the selected option instead
+
+/**
+ * The option list with the selected option's caption in a dim column to its right, starting on the
+ * selected row. On narrow terminals the caption hangs under the selected option.
+ */
+function listRows(list, row, width, t, fit) {
+	const labels = list.map(([label], i) => (i === row ? fg(t, "accent", ` → ${label}`) : `   ${fg(t, "text", label)}`));
+	const help = list[row]?.[2];
+	if (!help) return labels.map(fit);
+	const column = Math.max(...list.map(([label]) => visibleWidth(label))) + 3 + CAPTION_GAP;
+	if (width - column < CAPTION_MIN) {
+		const under = wrapWords(help, Math.max(10, width - 5)).map((line) => `     ${fg(t, "dim", line)}`);
+		return [...labels.slice(0, row + 1), ...under, ...labels.slice(row + 1)].map(fit);
+	}
+	const caption = wrapWords(help, width - column - 1);
+	const rows = labels.slice();
+	while (rows.length < row + caption.length) rows.push("");
+	return rows.map((text, i) => {
+		const line = caption[i - row];
+		if (line === undefined) return fit(text);
+		return fit(`${text}${" ".repeat(Math.max(0, column - visibleWidth(text)))}${fg(t, "dim", line)}`);
+	});
+}
+
 /** Word-wrapped plain text: the selected option's caption. */
 function wrapWords(text, width) {
 	const lines = [];
@@ -778,13 +804,15 @@ async function configureTabs(ctx) {
 	while (true) {
 		const picked = await ctx.ui.custom((tui, t, _keys, done) => {
 			let cached;
+			let cachedWidth;
 			const tabs = () => [...menuSections(ctx), RESET_TAB];
 			const items = () => tabs()[tab][2]();
 			const refresh = () => { cached = undefined; tui.requestRender(); };
 			const move = (step) => { tab = (tab + step + tabs().length) % tabs().length; row = 0; refresh(); };
 			return {
 				render(width) {
-					if (cached) return cached;
+					if (cached && cachedWidth === width) return cached;
+					cachedWidth = width;
 					const w = Math.max(1, width);
 					const fit = (line) => truncateToWidth(line, w);
 					const bar = tabs().map(([, short], i) => (i === tab ? t.bg("selectedBg", fg(t, "text", bold(t, ` ${short} `))) : fg(t, "muted", ` ${short} `))).join(" ");
@@ -796,10 +824,7 @@ async function configureTabs(ctx) {
 						"",
 						fit(` ${bar}`),
 						"",
-						// The selected option's caption hangs under it, like a tool row's summary.
-						...list.flatMap(([label, , help], i) => i !== row
-							? [fit(`   ${fg(t, "text", label)}`)]
-							: [fit(fg(t, "accent", ` → ${label}`)), ...(help ? wrapWords(help, Math.max(10, w - 6)).map((line, n) => fit(`   ${fg(t, "dim", n === 0 ? "└" : " ")} ${fg(t, "muted", line)}`)) : [])]),
+						...listRows(list, row, w, t, fit),
 						"",
 						fit(` ${fg(t, "dim", "←→ tabs  ↑↓ select  enter change  esc close")}`),
 						fg(t, "border", "─".repeat(w)),
