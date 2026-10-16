@@ -152,7 +152,8 @@ The default memory icon U+100000 is an outlined brain from a local `GentleBrain.
   bill through a plan without telling Pi (claude-bridge reports every call at $0) can be marked in
   `/gentle-quiet` → **Status** tab → **Subscription (<provider>)** to show `sub`.
 - The status line reads changes with `git` (against `HEAD`, untracked files included) after each turn and
-  tool call. It does not show subscription usage or the active Gentle profile.
+  tool call, and every 2 seconds, so edits a subagent makes show while it works. Committed lines leave
+  the count. It does not show the active Gentle profile.
 - Switching **Subagent results** back to the original card applies after a restart.
 
 ## Development

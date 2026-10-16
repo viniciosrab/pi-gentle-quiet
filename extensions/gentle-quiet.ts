@@ -1350,15 +1350,27 @@ async function readChanges(cwd) {
 	return { files, added, deleted };
 }
 
+let changesReading = false; // one git read at a time: a slow repository never piles them up
+
 function refreshChanges(delay = 0) {
 	clearTimeout(changesTimer);
 	changesTimer = setTimeout(async () => {
-		const cwd = liveCtx?.sessionManager?.getCwd?.();
-		if (!cwd || !config.statusLine.enabled || !config.statusLine.changes) return;
-		const next = await readChanges(cwd);
-		const previous = changesByCwd.get(cwd);
-		changesByCwd.set(cwd, next);
-		if (JSON.stringify(previous) !== JSON.stringify(next)) footerTui?.requestRender?.();
+		let cwd;
+		try {
+			cwd = liveCtx?.sessionManager?.getCwd?.();
+		} catch {
+			return; // ctx went stale after a session replacement or reload
+		}
+		if (!cwd || changesReading || !config.statusLine.enabled || !config.statusLine.changes) return;
+		changesReading = true;
+		try {
+			const next = await readChanges(cwd);
+			const previous = changesByCwd.get(cwd);
+			changesByCwd.set(cwd, next);
+			if (JSON.stringify(previous) !== JSON.stringify(next)) footerTui?.requestRender?.();
+		} finally {
+			changesReading = false;
+		}
 	}, delay);
 	changesTimer.unref?.();
 }
@@ -1769,11 +1781,13 @@ function shareUsage(provider, usage) {
 	}
 }
 
-// While a subagent works the main process gets no responses of its own: look at the file now and then.
+// While a subagent works the main process gets no responses or tool events of its own: look at the
+// shared files and at git now and then, so usage, cost and the changed lines follow the subagent.
 function watchUsage(tui) {
 	clearInterval(usageTimer);
 	usageTimer = setInterval(() => {
 		if (syncUsage() | spendChanged()) tui?.requestRender?.();
+		if (!changesReading) refreshChanges();
 	}, USAGE_POLL_MS);
 	usageTimer.unref?.();
 }

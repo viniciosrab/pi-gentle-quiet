@@ -93,6 +93,18 @@ test("shows the working tree changes from git: files and added/removed lines", a
 	assert.ok(painted(line, "toolDiffRemoved", "-1"));
 });
 
+test("files changed by another process (a subagent) show up without any event in this one", async () => {
+	const dir = repo();
+	const { component, renders } = await footer({ session: { cwd: dir } });
+	await settle();
+	assert.match(plain(component.render(200)[0]), / main ±2 \+3 -1 · /);
+	const before = renders();
+	writeFileSync(path.join(dir, "c.txt"), "x\ny\n");
+	await new Promise((resolve) => setTimeout(resolve, 2600));
+	assert.match(plain(component.render(200)[0]), / main ±3 \+5 -1 · /);
+	assert.ok(renders() > before, "the footer is redrawn when the counts change");
+});
+
 test("the context gauge turns warning at 80% and error at 95%", async () => {
 	const warn = (await footer({ session: { usage: { percent: 85 } } })).component.render(120)[0];
 	assert.ok(painted(warn, "warning", "▰▰▰▰▰▰▰"));
