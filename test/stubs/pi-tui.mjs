@@ -51,6 +51,12 @@ export class ScrollView {
 	render(width) {
 		return this.content.render(width);
 	}
+	// Like Pi's: the content and viewport heights the owner computed; scrollTop stays within them.
+	updateLayout(contentHeight, viewportHeight) {
+		this.contentHeight = contentHeight;
+		this.viewportHeight = viewportHeight;
+		this.scrollTop = Math.max(0, Math.min(this.scrollTop, contentHeight - viewportHeight));
+	}
 	handleMouse() {}
 	scrollBy() {}
 	setScrollbar() {}

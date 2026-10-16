@@ -443,7 +443,8 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
-	let rows = trimBlankEdges(flatten(target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5), { ...options(), margin: false }));
+	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
+	let rows = trimBlankEdges(flatten(rail.grow ? fullHeight(render) : render(), { ...options(), margin: false }));
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	if (rail.hang) rows = hangRows(rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))), inner, t ?? theme);
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
@@ -451,11 +452,28 @@ function drawBlock(target, width, options, t, rail = {}) {
 }
 const STACK_WIDTH = 120;
 
+// gentle-pi's Todos card keeps its list to a few rows with its own ScrollView, sized by the viewport
+// it hands to updateLayout(). Drawn in the side column it gets a viewport as tall as its list, so the
+// card grows with it and the column scrolls instead, once it reaches the bottom of the terminal.
+function fullHeight(render) {
+	const proto = PiTui.ScrollView?.prototype;
+	const native = proto?.updateLayout;
+	if (typeof native !== "function") return render();
+	proto.updateLayout = function (contentHeight, viewportHeight, ...rest) {
+		return native.call(this, contentHeight, Math.max(viewportHeight, contentHeight), ...rest);
+	};
+	try {
+		return render();
+	} finally {
+		proto.updateLayout = native;
+	}
+}
+
 // A panel component drawn flattened. While the side column is open the panel is
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents", hang: key === "gentle-todo" }) });
+	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
 			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { hang: key === "gentle-todo" }));

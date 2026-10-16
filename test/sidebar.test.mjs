@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ScrollView } from "@earendil-works/pi-tui";
 import { load, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
@@ -137,6 +138,37 @@ test("a title gentle-pi already split is joined back and flows to the box width,
 	const raw = loaded.rail.render(60).filter((row) => row.includes("\x1b[9m"));
 	assert.ok(raw.length >= 1);
 	assert.ok(raw.every((row) => row.lastIndexOf("\x1b[29m") > row.lastIndexOf("\x1b[9m")), "the strike never runs into the border");
+});
+
+// gentle-pi's Todos card: its own ScrollView keeps the list to a few rows and adds the scroll indicator.
+const TASKS = Array.from({ length: 12 }, (_, i) => `○ T${i + 1} task`);
+function scrollingTodo() {
+	const scroll = new ScrollView({ render: () => TASKS, invalidate() {} });
+	return {
+		render(width) {
+			scroll.updateLayout(TASKS.length, 3);
+			const visible = TASKS.slice(scroll.scrollTop, scroll.scrollTop + scroll.viewportHeight);
+			return ["❀ Todos  0 of 12", ...visible, `↑↓ 1-3/${TASKS.length} · ctrl+shift+↑/↓`].map((row) => `   ${row}`.padEnd(width));
+		},
+	};
+}
+
+test("the Todos card in the column grows with its list instead of scrolling inside", async () => {
+	const loaded = await wide();
+	loaded.ui.setWidget("gentle-todo", () => scrollingTodo());
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	assert.deepEqual(out.filter((row) => /^○ T\d+/.test(row)), TASKS);
+	assert.ok(!out.some((row) => row.includes("↑↓")), "no scroll indicator row");
+});
+
+test("below the breakpoint the Todos card keeps scrolling inside", async () => {
+	const loaded = await wide({ columns: 139 });
+	loaded.ui.setWidget("gentle-todo", () => scrollingTodo());
+	const todo = loaded.widgets["gentle-todo"](loaded.tui, theme);
+	const out = todo.render(60).map(plain);
+	assert.equal(out.filter((row) => /○ T\d+/.test(row)).length, 3);
 });
 
 test("Todos and Agents leave their usual places while the column is open", async () => {
