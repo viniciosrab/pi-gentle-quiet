@@ -4,21 +4,6 @@ A quiet, Pi-native look for [gentle-pi](https://github.com/Gentleman-Programming
 [gentle-engram](https://github.com/Gentleman-Programming/engram). The Gentle AI workflow stays the
 same; only how it is drawn changes.
 
-```
-❯ run the tests
-
- $ npm test
- └ ✓ 42 lines · 3.1s                                 ctrl+o to expand
-
-┌──────────────────────────────────────────────────────────────────┐
-│ ≡ Todos  1 of 3                                    ctrl+shift+t  │
-│ ✓ Write the parser                                               │
-│ ◐ Add tests · in progress                                        │
-└──────────────────────────────────────────────────────────────────┘
-❯
-~/app main ±2 +3 -1 · claude-opus-5-5 · medium      ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub · claude 5h ▰▰▰▰▰▱▱▱ 62%
-```
-
 ## What you get
 
 - **Quiet tool rows.** Each call is one row plus a one-line result. `ctrl+o` shows the full output.
