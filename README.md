@@ -138,7 +138,9 @@ The default memory icon U+100000 is an outlined brain from a local `GentleBrain.
 - `claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%` (`codex …` for Codex) reads the rate-limit headers of each provider response (Claude, also through
   claude-bridge, and Codex), so it needs no credentials or extra requests. It appears after the first
   response of a session, belongs to the provider that reported it, and a window that already reset is
-  not shown. API-key providers without plan limits show nothing.
+  not shown. API-key providers without plan limits show nothing. Subagents run as their own Pi
+  processes, so every process shares its latest reading in `~/.pi/agent/gentle-quiet-usage.json`
+  and the main footer picks up a subagent's reading within ~2 seconds, while it is still working.
 - `MCP online/installed` counts the enabled servers of `~/.pi/agent/mcp.json`, the trusted project's
   `.pi/mcp.json` and servers registered by extensions. A server is online while Pi shows tools for it
   (Pi hides them when it disconnects), so a server configured with `exposure: hidden` reads as offline.

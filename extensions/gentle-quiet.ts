@@ -1603,18 +1603,76 @@ function parseUsageHeaders(headers) {
 	return { name, windows };
 }
 
+// Every subagent is its own Pi process, so its readings never reach this one's events. Each process
+// shares its readings through this file and takes the newer ones it finds there (`at`, ms).
+const USAGE_FILE = path.join(AGENT_DIR, "gentle-quiet-usage.json");
+const USAGE_POLL_MS = 2000;
+let usageFileStamp; // mtime of the file as last read
+let usageTimer;
+
+function readUsageFile() {
+	try {
+		const value = JSON.parse(readFileSync(USAGE_FILE, "utf8"));
+		return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+	} catch {
+		return {}; // missing or malformed: nothing shared yet
+	}
+}
+
+/** Takes the readings other processes wrote since the last look; true when one is newer than ours. */
+function syncUsage() {
+	let stamp;
+	try {
+		stamp = statSync(USAGE_FILE).mtimeMs;
+	} catch {
+		return false;
+	}
+	if (stamp === usageFileStamp) return false;
+	usageFileStamp = stamp;
+	let changed = false;
+	for (const [provider, usage] of Object.entries(readUsageFile())) {
+		if (!Array.isArray(usage?.windows) || !Number.isFinite(usage.at)) continue;
+		if ((usageByProvider.get(provider)?.at ?? -Infinity) >= usage.at) continue;
+		usageByProvider.set(provider, { name: String(usage.name ?? ""), windows: usage.windows, at: usage.at });
+		changed = true;
+	}
+	return changed;
+}
+
+function shareUsage(provider, usage) {
+	try {
+		mkdirSync(AGENT_DIR, { recursive: true });
+		const tmp = `${USAGE_FILE}.${process.pid}.tmp`;
+		writeFileSync(tmp, JSON.stringify({ ...readUsageFile(), [provider]: usage }));
+		renameSync(tmp, USAGE_FILE);
+	} catch {
+		// sharing is best effort: this process still shows its own reading
+	}
+}
+
+// While a subagent works the main process gets no responses of its own: look at the file now and then.
+function watchUsage(tui) {
+	clearInterval(usageTimer);
+	usageTimer = setInterval(() => {
+		if (syncUsage()) tui?.requestRender?.();
+	}, USAGE_POLL_MS);
+	usageTimer.unref?.();
+}
+
 function recordUsage(headers) {
 	const provider = liveCtx?.model?.provider;
 	if (!provider || !headers || typeof headers !== "object") return;
 	const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)]));
-	const usage = parseUsageHeaders(lower);
+	const usage = { ...parseUsageHeaders(lower), at: Date.now() };
 	if (!usage.windows.length) return;
 	usageByProvider.set(provider, usage);
+	shareUsage(provider, usage);
 	footerTui?.requestRender?.();
 }
 
 /** The active provider's plan name and windows that have not reset yet. */
 function currentUsage(ctx) {
+	syncUsage();
 	const usage = usageByProvider.get(ctx?.model?.provider);
 	if (!usage) return { name: "", windows: [] };
 	return { name: usage.name, windows: usage.windows.filter((window) => window.resetAt === null || window.resetAt > Date.now()) };
@@ -1695,6 +1753,7 @@ function refreshMcp(ctx) {
 
 function footerFactory(tui, t, footerData) {
 	footerTui = tui;
+	watchUsage(tui);
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
 	refreshChanges();
 	openSidebar(tui);
@@ -1709,7 +1768,10 @@ function footerFactory(tui, t, footerData) {
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
-			if (footerTui === tui) footerTui = undefined;
+			if (footerTui === tui) {
+				footerTui = undefined;
+				clearInterval(usageTimer);
+			}
 			if (railStatus === bar) railStatus = undefined;
 		},
 	};
@@ -2061,6 +2123,7 @@ export default async function (pi) {
 	}
 	// Pi resets extension UI after shutdown; forget the editor so the next start reinstalls it.
 	pi.on("session_shutdown", () => {
+		clearInterval(usageTimer);
 		for (const timer of mcpTimers) clearTimeout(timer);
 		mcpTimers = [];
 		installedOn = undefined;

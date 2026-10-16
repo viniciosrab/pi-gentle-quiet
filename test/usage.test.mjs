@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { configFile, load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
 const footerData = { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} };
 const now = () => Math.floor(Date.now() / 1000);
@@ -103,4 +105,45 @@ test("Status line usage can be turned off in the menu and is saved", async () =>
 	assert.ok(seen[1].items.includes("Status line usage: on"));
 	assert.equal(readConfig().statusLine.usage, false);
 	assert.doesNotMatch(plain(component.render(200)[0]), /claude/);
+});
+
+// Subagents are separate Pi processes: each one shares its readings through this file.
+const usageFile = path.join(path.dirname(configFile), "gentle-quiet-usage.json");
+const readUsageFile = () => JSON.parse(readFileSync(usageFile, "utf8"));
+const writeUsageFile = (value) => writeFileSync(usageFile, JSON.stringify(value));
+
+test("a reading is shared with the other Pi processes through the usage file", async () => {
+	const { emit } = await start("claude-bridge-share");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.55, 0.25) });
+	const shared = readUsageFile()["claude-bridge-share"];
+	assert.equal(shared.name, "claude");
+	assert.deepEqual(shared.windows.map((window) => [window.label, Math.round(window.percent)]), [["5h", 55], ["week", 25]]);
+});
+
+test("a subagent's newer reading shows in the main footer before the subagent returns", async () => {
+	const { emit, line } = await start("claude-bridge-child");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
+	const reset = (now() + 7200) * 1000;
+	writeUsageFile({
+		...readUsageFile(),
+		"claude-bridge-child": { name: "claude", at: Date.now() + 1000, windows: [{ label: "5h", percent: 67, resetAt: reset }, { label: "week", percent: 38, resetAt: reset }] },
+	});
+	assert.match(plain(line()), /claude 5h ▰▰▰▰▰▱▱▱ 67% · week 38% $/);
+});
+
+test("an older reading in the file does not replace a newer one of this process", async () => {
+	const { emit, line } = await start("claude-bridge-older");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
+	writeUsageFile({
+		...readUsageFile(),
+		"claude-bridge-older": { name: "claude", at: 1, windows: [{ label: "5h", percent: 90, resetAt: null }] },
+	});
+	assert.match(plain(line()), /claude 5h ▰▰▰▱▱▱▱▱ 40% · week 20% $/);
+});
+
+test("a missing or malformed usage file leaves the footer as it was", async () => {
+	const { emit, line } = await start("claude-bridge-broken");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
+	writeFileSync(usageFile, "{not json");
+	assert.match(plain(line()), /claude 5h ▰▰▰▱▱▱▱▱ 40% · week 20% $/);
 });
