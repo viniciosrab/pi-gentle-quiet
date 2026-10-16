@@ -30,7 +30,7 @@ export const theme = {
  * Loads the extension against a fake Pi API and returns what it registered,
  * plus a UI that records status and widget writes after the extension's patch.
  */
-export async function load({ mode = "rpc", select, input, session = {}, thinking = "medium" } = {}) {
+export async function load({ mode = "rpc", select, input, custom, session = {}, thinking = "medium" } = {}) {
 	const { default: extension } = await import("../extensions/gentle-quiet.ts");
 	const handlers = {};
 	const commands = {};
@@ -38,9 +38,14 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 	const messageRenderers = {};
 	const entryRenderers = {};
 	const markdown = [];
+	const shortcuts = {};
+	const sent = [];
 	await extension({
 		on: (event, handler) => ((handlers[event] ??= []).push(handler)),
 		registerCommand: (name, command) => (commands[name] = command),
+		registerShortcut: (key, shortcut) => (shortcuts[key] = shortcut),
+		getCommands: () => session.commands ?? [],
+		sendUserMessage: (text, options) => sent.push([text, options]),
 		registerToolRenderer: (resolver) => toolResolvers.push(resolver),
 		registerMessageRenderer: (type, renderer) => (messageRenderers[type] = renderer),
 		registerEntryRenderer: (type, renderer) => (entryRenderers[type] = renderer),
@@ -66,6 +71,7 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 		getEditorComponent: () => editorFactory,
 		setEditorComponent: (factory) => (editorFactory = factory),
 		setFooter: (factory) => (footerFactory = factory),
+		...(custom ? { custom } : {}),
 	};
 	// Session data the status line reads; tests override what they need.
 	const ctx = {
@@ -94,7 +100,7 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 	/** The renderers Pi would use for a tool whose own renderers are `base`. */
 	const tool = (name, base = {}) => toolResolvers.reduceRight((next, resolver) => () => resolver(name, next), () => base)();
 
-	return { ctx, ui, status, widgets, notices, commands, tool, messageRenderers, entryRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
+	return { ctx, ui, status, widgets, notices, commands, shortcuts, sent, tool, messageRenderers, entryRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
 }
 
 /** Renders a component (or a tool row) to plain lines at `width`. */

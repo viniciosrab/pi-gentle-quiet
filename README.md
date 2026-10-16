@@ -12,6 +12,8 @@ same; only how it is drawn changes.
   the right and the status line moves to the top. The Todos card shows every task.
 - **One status line** with your folder, branch, changed lines, model, context, cost and plan usage.
 - **A `❯` prompt** and one-row user messages, like Claude Code.
+- **Gentle Shell's `alt+k` command menu** (models, profiles, persona, review mode, doctor…), without
+  turning Gentle Shell back on.
 
 ## Install
 
@@ -36,7 +38,8 @@ For the full effect, turn off gentle-pi's visual extensions in `~/.pi/agent/sett
 ```
 
 - Keep Pi's built-in `codemode` enabled, or MCP tools become unreachable.
-- Turning off `gentle-shell.ts` also removes `/gentle:changes`, `/gentle:usage` and the `alt+k` palette.
+- Turning off `gentle-shell.ts` also removes `/gentle:changes`, `/gentle:usage` and `/gentle:customize`.
+  The `alt+k` menu stays: pi-gentle-quiet opens it instead. Set `GENTLE_PI_COMMANDS_KEY` to move it, or `off`.
 - List `pi-gentle-quiet` before `npm:gentle-pi` in `packages` so subagent results use the quiet row.
 
 ## Configure

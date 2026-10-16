@@ -42,6 +42,7 @@ const AGENT_DIR = (() => {
 })();
 const CONFIG_FILE = path.join(AGENT_DIR, "gentle-quiet.json");
 const ENGRAM_CHROME = path.join(AGENT_DIR, "npm/node_modules/gentle-engram/memory-tool-chrome.js");
+const GENTLE_PI_LIB = path.join(AGENT_DIR, "npm/node_modules/gentle-pi/lib");
 
 const DEFAULTS = {
 	memory: { show: true, label: "mem", showProject: false },
@@ -1211,6 +1212,65 @@ async function loadEngramChrome() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Command palette: Gentle Shell's alt+k menu while Gentle Shell itself stays off
+// ---------------------------------------------------------------------------
+
+// The palette is gentle-pi's own component (lib/command-palette.ts); Gentle Shell only binds a key to
+// it. With Gentle Shell turned off in settings.json (the recommended setup) the same menu is bound
+// here, so no Gentle Shell visuals come back. While Gentle Shell is on it keeps the key.
+async function loadPalette() {
+	const files = ["command-palette.ts", "command-palette-catalog.ts"].map((name) => path.join(GENTLE_PI_LIB, name));
+	if (!files.every((file) => existsSync(file))) return undefined;
+	try {
+		const [palette, catalog] = await Promise.all(files.map((file) => import(pathToFileURL(file).href)));
+		if (typeof palette.CommandPalette !== "function" || typeof catalog.buildCommandPaletteGroups !== "function") return undefined;
+		return { ...palette, buildCommandPaletteGroups: catalog.buildCommandPaletteGroups };
+	} catch {
+		return undefined; // gentle-pi moved or changed: no shortcut rather than a broken one
+	}
+}
+
+/** True when settings.json turns Gentle Shell off in the gentle-pi package entry. */
+function gentleShellOff() {
+	try {
+		const settings = JSON.parse(readFileSync(path.join(AGENT_DIR, "settings.json"), "utf8"));
+		return (settings?.packages ?? []).some((entry) =>
+			typeof entry === "object" && /gentle-pi/.test(String(entry?.source ?? "")) && (entry.extensions ?? []).includes("-extensions/gentle-shell.ts"));
+	} catch {
+		return false; // unreadable: assume Gentle Shell owns the key
+	}
+}
+
+async function openPalette(pi, palette, ctx) {
+	if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return;
+	const groups = palette.buildCommandPaletteGroups(pi.getCommands?.() ?? [], {});
+	if (groups.length === 0) {
+		ctx.ui.notify("No Gentle commands are registered.", "info");
+		return;
+	}
+	const result = await ctx.ui.custom(
+		(tui, t, _keybindings, done) => new palette.CommandPalette(groups, (value) => {
+			done(value);
+			try {
+				tui.requestRender(true); // repaint every cell behind the closed overlay, like Gentle Shell
+			} catch {
+				// a dead terminal must not break closing
+			}
+		}, t, () => Math.max(0, tui.terminal?.rows ?? 0)),
+		{ overlay: true, overlayOptions: { anchor: "center", width: "70%", minWidth: 60, maxHeight: "85%" } },
+	);
+	if (result?.type === "run") pi.sendUserMessage(`/${result.name}`, { expandPromptTemplates: true });
+}
+
+async function registerPalette(pi) {
+	if (typeof pi.registerShortcut !== "function" || !gentleShellOff()) return;
+	const palette = await loadPalette();
+	const key = palette?.commandsKey?.(process.env);
+	if (!key) return;
+	pi.registerShortcut(key, { description: "Open the Gentle command palette", handler: (ctx) => openPalette(pi, palette, ctx) });
+}
+
 // Memory tool rows drawn like Pi's own: bold tool title, accent argument,
 // and a colored status mark on the result line.
 function memoryRenderers(chrome, toolName, renderers) {
@@ -2209,6 +2269,7 @@ function jobNoticeRenderer(message, options = {}, t) {
 export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
+	await registerPalette(pi);
 
 	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
 	piApi = pi;

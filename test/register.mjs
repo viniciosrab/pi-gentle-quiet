@@ -11,4 +11,12 @@ registerHooks({
 		if (STUBS[specifier]) return { url: STUBS[specifier], shortCircuit: true };
 		return nextResolve(specifier, context);
 	},
+	// Node does not strip types under node_modules, where Pi installs gentle-pi. The stand-ins tests
+	// put there are plain JavaScript, so they load as modules as they are (Pi itself loads them with jiti).
+	load(url, context, nextLoad) {
+		if (url.includes("/gentle-quiet-test-") && url.includes("/node_modules/") && url.endsWith(".ts")) {
+			return { ...nextLoad(url, { ...context, format: "module" }), format: "module", shortCircuit: true };
+		}
+		return nextLoad(url, context);
+	},
 });
