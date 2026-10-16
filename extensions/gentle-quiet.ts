@@ -675,44 +675,44 @@ const ICON_HELP = {
 function menuSections(ctx) {
 	return [
 		["Status line", "Status", () => [
-			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }, "gentle draws this extension's status line under the editor; pi gives the footer back to Pi."],
-			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }, "Files and lines changed since the last commit (±2 +3 -1), updated every 2 seconds."],
-			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }, "Your Claude or Codex plan usage (5h and week windows), read from each response."],
-			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online / installed (MCP 3/3); turns yellow when one is offline."],
-			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, "cache shows cache reads, writes and hit rate; all adds input and output tokens; off hides them."],
-			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "The session's cost, subagents included."],
-			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices $0 responses (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
+			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }, `Which footer shows under the editor. Now: ${config.statusLine.enabled ? "this extension's status line" : "Pi's own footer"}.`],
+			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }, "Files and lines changed since the last commit, such as ±2 +3 -1."],
+			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }, "Your Claude or Codex plan usage for the 5-hour and weekly windows."],
+			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online out of those installed, such as MCP 3/3."],
+			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, `Token counts in the status line. Now: ${{ cache: "cache reads, writes and hit rate", all: "input and output tokens plus the cache figures", off: "hidden" }[config.statusLine.tokens]}.`],
+			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "What the session has cost so far, subagents included."],
+			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
 			...(ctx.model?.provider ? [[`Subscription (${ctx.model.provider}): ${onOff(config.statusLine.subscriptionProviders.includes(ctx.model.provider))}`, () => {
 				const provider = ctx.model.provider;
 				const list = config.statusLine.subscriptionProviders;
 				config.statusLine.subscriptionProviders = list.includes(provider) ? list.filter((id) => id !== provider) : [...list, provider];
-			}, "Marks the current provider as a subscription, so the status line shows sub."]] : []),
+			}, `Treats ${ctx.model.provider} as a subscription, so the status line adds sub next to the cost.`]] : []),
 		]],
 		["Footer statuses", "Footer", () => [
-			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }, "Shows Engram memory activity (mem 4 results) among the statuses."],
-			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }, "The word in front of the memory status."],
+			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }, "Engram memory activity among the statuses, such as mem 4 results."],
+			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }, "The word shown before the memory status."],
 			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }, "Adds the Engram project name to the memory status."],
-			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "Shows the session permission mode (Perm: Yolo) among the statuses."],
-			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }, "The word in front of the permission status."],
-			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }, "hidden shows the permission status only when it is not the normal mode."],
+			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "The session's permission mode among the statuses, such as Perm: Yolo."],
+			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }, "The word shown before the permission status."],
+			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }, `${config.permissions.hideWhenNormal ? "The permission status shows only when the mode is not Normal." : "The permission status always shows, Normal mode included."}`],
 			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }, "gentle-pi's YOLO banner above the editor and its /yolo notification."],
 		]],
 		["Tool rows", "Tools", () => [
-			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, "quiet redraws gentle-pi and memory tool calls as compact rows; original leaves them as their packages draw them."],
-			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Puts those rows on Pi's one-column margin, lined up with Pi's own tools."],
-			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }, "claude: Claude Code's fixed greys; soft: the same layout in theme colors; theme: the theme's tool colors."],
-			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row plus a one-line summary; ctrl+o shows the full output."],
-			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }, "Where ctrl+o to expand shows: only on the latest call, on every call, or never."],
-			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }, "Output lines shown under a quiet tool's summary."],
-			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }, "Lines of a codemode script's output shown under its summary."],
-			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }, "Which calls a codemode script made are listed: only the failed ones, all of them, or none."],
+			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, `${config.tools.restyle ? "gentle-pi and memory tool calls drawn as compact rows." : "gentle-pi and memory tool calls as their packages draw them."} Applies to new calls.`],
+			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Lines those rows up with Pi's own tools, one column in from the edge."],
+			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }, `Colors of tool names, paths and commands. Now: ${{ claude: "Claude Code's fixed greys", soft: "the same layout in your theme's colors", theme: "your theme's tool colors" }[config.tools.tones]}.`],
+			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row and a one-line summary. ctrl+o shows the full output."],
+			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }, `Where ctrl+o to expand appears. Now: ${{ last: "only on the latest call", all: "on every call", never: "nowhere" }[config.quiet.hint]}.`],
+			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }, "How many output lines show under a quiet tool's summary."],
+			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }, "How many lines of a codemode script's output show under its summary. 0 hides them."],
+			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }, `Which calls of a codemode script are listed. Now: ${{ summary: "none, only their count", failures: "only the failed ones", all: "all of them" }[config.quiet.codemode]}.`],
 		]],
 		["Blocks and agents", "Blocks", () => [
-			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, "minimal draws the Todos and Agents panels as flat rows; original keeps gentle-pi's panels."],
-			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks, in the theme's border color."],
+			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, `${config.blocks.minimal ? "Todos and Agents panels drawn as flat rows." : "Todos and Agents panels as gentle-pi draws them."}`],
+			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
 			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, Todos and Agents move to a column on the right and the status line to the top."],
-			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "The terminal width (in columns) at which the side column opens."],
-			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, "minimal shows a subagent's answer as one row plus its first line; applies after a restart."],
+			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
+			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
 		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
@@ -753,7 +753,7 @@ async function configureSection(ctx, name) {
 const isAsync = (fn) => fn?.constructor?.name === "AsyncFunction";
 const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }, "Puts every option back to its default and saves it."]]];
 
-/** Word-wrapped plain text: the selected option's description under the list. */
+/** Word-wrapped plain text: the selected option's caption. */
 function wrapWords(text, width) {
 	const lines = [];
 	let line = "";
@@ -796,9 +796,11 @@ async function configureTabs(ctx) {
 						"",
 						fit(` ${bar}`),
 						"",
-						...list.map(([label], i) => fit(i === row ? fg(t, "accent", ` → ${label}`) : `   ${fg(t, "text", label)}`)),
+						// The selected option's caption hangs under it, like a tool row's summary.
+						...list.flatMap(([label, , help], i) => i !== row
+							? [fit(`   ${fg(t, "text", label)}`)]
+							: [fit(fg(t, "accent", ` → ${label}`)), ...(help ? wrapWords(help, Math.max(10, w - 6)).map((line, n) => fit(`   ${fg(t, "dim", n === 0 ? "└" : " ")} ${fg(t, "muted", line)}`)) : [])]),
 						"",
-						...(list[row]?.[2] ? [...wrapWords(list[row][2], Math.max(10, w - 2)).map((line) => fit(` ${fg(t, "muted", line)}`)), ""] : []),
 						fit(` ${fg(t, "dim", "←→ tabs  ↑↓ select  enter change  esc close")}`),
 						fg(t, "border", "─".repeat(w)),
 					];

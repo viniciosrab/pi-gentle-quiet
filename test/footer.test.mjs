@@ -110,7 +110,7 @@ test("in the terminal /gentle-quiet is one screen with horizontal tabs", async (
 	assert.ok(screens[0].some((line) => line.includes("←→ tabs")), "key hints at the bottom");
 });
 
-test("the selected option's description shows under the list and follows the selection", async () => {
+test("the selected option's caption hangs under it and follows the selection", async () => {
 	writeConfig({});
 	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
 	const keys = { right: "\x1b[C", down: "\x1b[B", escape: "\x1b" };
@@ -126,14 +126,16 @@ test("the selected option's description shows under the list and follows the sel
 		component.handleInput(keys.escape);
 	});
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
-	// The description row sits between the list and the key hints; list rows start with "   " or " → ".
+	// The caption hangs right under the selected row: "   └ text", continued on "     text".
 	const help = (screen) => {
-		const line = screen[screen.findIndex((row) => row.includes("←→ tabs")) - 2] ?? "";
-		return /^ (?! |→)/.test(line) ? line.trim() : undefined;
+		const at = screen.findIndex((line) => line.startsWith(" → "));
+		const rows = [];
+		for (let i = at + 1; i < screen.length && /^ {3}[└ ] \S/.test(screen[i]); i++) rows.push(screen[i].slice(5));
+		return rows.length && screen[at + 1].startsWith("   └ ") ? rows.join(" ") : undefined;
 	};
-	assert.match(help(screens[0]), /^gentle draws this extension's status line/);
-	assert.match(help(screens[1]), /^Files and lines changed since the last commit/);
-	assert.match(help(screens[2]), /^Shows Engram memory activity/);
+	assert.equal(help(screens[0]), "Which footer shows under the editor. Now: this extension's status line.");
+	assert.equal(help(screens[1]), "Files and lines changed since the last commit, such as ±2 +3 -1.");
+	assert.equal(help(screens[2]), "Engram memory activity among the statuses, such as mem 4 results.");
 	for (const screen of screens) assert.ok(screen.every((line) => line.length <= 100), "fits the width");
 });
 
@@ -149,8 +151,7 @@ test("every option in every tab has a description", async () => {
 			do {
 				const screen = component.render(100).map(plain);
 				label = screen.find((line) => line.startsWith(" → "));
-				const line = screen[screen.findIndex((row) => row.includes("←→ tabs")) - 2] ?? "";
-				if (!/^ (?! |→)\S/.test(line)) missing.push(label);
+				if (!screen[screen.indexOf(label) + 1]?.startsWith("   └ ")) missing.push(label);
 				component.handleInput("\x1b[B");
 			} while (component.render(100).map(plain).find((line) => line.startsWith(" → ")) !== first);
 			component.handleInput("\x1b[C");
@@ -159,4 +160,26 @@ test("every option in every tab has a description", async () => {
 	});
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
 	assert.deepEqual(missing, []);
+});
+
+test("a caption follows the current value of an option that cycles", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui" });
+	const captions = [];
+	loaded.ui.custom = (factory) => new Promise((resolve) => {
+		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
+		for (let i = 0; i < 4; i++) component.handleInput("\x1b[B"); // Status line tokens
+		const caption = () => component.render(120).map(plain).find((line) => line.startsWith("   └ "));
+		captions.push(caption());
+		component.handleInput("\r");
+		setTimeout(() => {
+			captions.push(caption());
+			component.handleInput("\x1b");
+		}, 50);
+	});
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	assert.deepEqual(captions, [
+		"   └ Token counts in the status line. Now: cache reads, writes and hit rate.",
+		"   └ Token counts in the status line. Now: input and output tokens plus the cache figures.",
+	]);
 });
