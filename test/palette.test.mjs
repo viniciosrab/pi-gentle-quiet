@@ -23,7 +23,7 @@ export function commandsKey(env = process.env) {
 `);
 writeFileSync(path.join(lib, "command-palette-catalog.ts"), `
 export function buildCommandPaletteGroups(registered) {
-	const items = registered.filter((command) => command.name.startsWith("gentle:")).map((command) => ({ command: command.name, label: command.name }));
+	const items = registered.filter((command) => command.name.startsWith("gentle:")).map((command) => ({ command: command.name, label: command.name === "gentle:yolo" ? "🚀 YOLO 🔥 session permission" : command.name }));
 	return items.length ? [{ title: "Configuration", items }] : [];
 }
 `);
@@ -50,6 +50,22 @@ test("with Gentle Shell off, alt+k opens gentle-pi's command palette and runs th
 	assert.deepEqual(opened[0].palette.groups[0].items.map((item) => item.command), ["gentle:models", "gentle:doctor"]);
 	assert.equal(opened[0].options.overlay, true);
 	assert.deepEqual(sent, [["/gentle:models", { expandPromptTemplates: true }]]);
+});
+
+test("the palette labels lose their emoji", async () => {
+	shellOff();
+	let palette;
+	const custom = async (factory) => {
+		let result;
+		palette = factory(tuiStub, { fg: (_role, text) => text }, {}, (value) => (result = value));
+		palette.done({ type: "close" });
+		return result;
+	};
+	const { shortcuts, sent, ctx } = await load({ mode: "tui", custom, session: { commands: [...commands, { name: "gentle:yolo", description: "YOLO" }] } });
+	await shortcuts["alt+k"].handler(ctx);
+	assert.deepEqual(palette.groups[0].items.map((item) => item.label), ["gentle:models", "gentle:doctor", "YOLO session permission"]);
+	assert.deepEqual(palette.groups[0].items.map((item) => item.command), ["gentle:models", "gentle:doctor", "gentle:yolo"]);
+	assert.deepEqual(sent, []);
 });
 
 test("closing the palette runs nothing", async () => {

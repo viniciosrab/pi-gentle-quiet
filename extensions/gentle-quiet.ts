@@ -1290,7 +1290,11 @@ function gentleShellOff() {
 
 async function openPalette(pi, palette, ctx) {
 	if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return;
-	const groups = palette.buildCommandPaletteGroups(pi.getCommands?.() ?? [], {});
+	// Labels without emoji: gentle-pi's "🚀 YOLO 🔥 session permission" reads "YOLO session permission".
+	const groups = palette.buildCommandPaletteGroups(pi.getCommands?.() ?? [], {}).map((group) => ({
+		...group,
+		items: group.items.map((item) => (typeof item.label === "string" ? { ...item, label: clean(item.label) || item.label } : item)),
+	}));
 	if (groups.length === 0) {
 		ctx.ui.notify("No Gentle commands are registered.", "info");
 		return;
