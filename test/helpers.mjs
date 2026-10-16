@@ -82,6 +82,7 @@ export async function load({ mode = "rpc", select, input, session = {}, thinking
 		sessionManager: {
 			getCwd: () => session.cwd ?? "/tmp",
 			getEntries: () => session.entries ?? [],
+			getSessionId: () => session.id,
 			getSessionName: () => session.name,
 		},
 	};

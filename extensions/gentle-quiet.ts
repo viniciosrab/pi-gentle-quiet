@@ -27,7 +27,7 @@ import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earen
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1441,6 +1441,125 @@ function sessionTotals(ctx) {
 	return totals;
 }
 
+// ---------------------------------------------------------------------------
+// Subagent spend: each subagent is its own Pi process with its own session file, so its tokens and
+// cost never reach the main session. The main process sets SPEND_ENV to its session id; Pi passes the
+// environment on, so every subagent (and theirs) writes its own session totals, priced by its own
+// model, to gentle-quiet-spend/<main session>/<subagent session>.json. One file per subagent: no
+// two processes write the same file. The main footer adds them all to its own totals.
+// ---------------------------------------------------------------------------
+
+const SPEND_ENV = "GENTLE_QUIET_SPEND_PARENT";
+const SPEND_DIR = path.join(AGENT_DIR, "gentle-quiet-spend");
+const SPEND_KEEP_MS = 30 * 86400000; // a main session's folder outlives a restart for this long
+const TOTAL_KEYS = ["input", "output", "cacheRead", "cacheWrite", "cost"];
+const spend = { parent: undefined, root: undefined, own: undefined, stamp: undefined, totals: undefined };
+
+const spendKey = (ctx) => {
+	let id;
+	try {
+		id = ctx?.sessionManager?.getSessionId?.();
+	} catch {
+		id = undefined;
+	}
+	return String(id || `pid-${process.pid}`).replace(/[^A-Za-z0-9_-]/g, "_");
+};
+
+/** Decides once whether this process is a subagent (the variable came from a parent) or the main one. */
+function startSpend(ctx) {
+	if (spend.parent === undefined && spend.root === undefined) {
+		const inherited = process.env[SPEND_ENV];
+		if (inherited) spend.parent = inherited.replace(/[^A-Za-z0-9_-]/g, "_");
+	}
+	if (spend.parent) {
+		spend.own = spendKey(ctx);
+		return;
+	}
+	spend.root = spendKey(ctx);
+	process.env[SPEND_ENV] = spend.root;
+	spend.stamp = undefined;
+	spend.totals = undefined;
+	pruneSpend();
+}
+
+function pruneSpend() {
+	try {
+		for (const name of readdirSync(SPEND_DIR)) {
+			const dir = path.join(SPEND_DIR, name);
+			if (name !== spend.root && Date.now() - statSync(dir).mtimeMs > SPEND_KEEP_MS) rmSync(dir, { recursive: true, force: true });
+		}
+	} catch {
+		// no folder yet, or another process pruned it first
+	}
+}
+
+/** In a subagent: its session totals, written where the main process looks. */
+function shareSpend(ctx) {
+	if (!spend.parent || !spend.own) return;
+	try {
+		const totals = sessionTotals(ctx);
+		const dir = path.join(SPEND_DIR, spend.parent);
+		mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, `${spend.own}.json`);
+		const tmp = `${file}.${process.pid}.tmp`;
+		writeFileSync(tmp, JSON.stringify({ ...Object.fromEntries(TOTAL_KEYS.map((key) => [key, totals[key]])), at: Date.now() }));
+		renameSync(tmp, file);
+	} catch {
+		// best effort: the main footer keeps the last totals it read
+	}
+}
+
+/** The subagent files of the main session with a stamp that changes whenever any of them does. */
+function spendFiles() {
+	const dir = path.join(SPEND_DIR, spend.root);
+	try {
+		const names = readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
+		const stamp = names.map((name) => {
+			const stat = statSync(path.join(dir, name));
+			return `${name}:${stat.mtimeMs}:${stat.size}`;
+		}).join("|");
+		return { dir, names, stamp };
+	} catch {
+		return undefined; // no subagent wrote yet, or a file was replaced while listing
+	}
+}
+
+/** In the main process: the summed totals of its subagents, read again when one of them writes. */
+function subagentSpend() {
+	if (!spend.root) return undefined;
+	const files = spendFiles();
+	if (!files) return spend.totals;
+	if (files.stamp === spend.stamp) return spend.totals;
+	const { dir, names, stamp } = files;
+	const sum = Object.fromEntries(TOTAL_KEYS.map((key) => [key, 0]));
+	for (const name of names) {
+		try {
+			const totals = JSON.parse(readFileSync(path.join(dir, name), "utf8"));
+			for (const key of TOTAL_KEYS) if (Number.isFinite(totals?.[key])) sum[key] += totals[key];
+		} catch {
+			// a malformed file counts as nothing
+		}
+	}
+	spend.stamp = stamp;
+	spend.totals = sum;
+	return sum;
+}
+
+/** True when a subagent wrote since the footer last read their totals. */
+function spendChanged() {
+	if (!spend.root) return false;
+	const files = spendFiles();
+	return Boolean(files) && files.stamp !== spend.stamp;
+}
+
+/** The session's own totals plus its subagents'; the cache hit rate stays the session's own. */
+function footerTotals(ctx) {
+	const own = sessionTotals(ctx);
+	const others = subagentSpend();
+	if (!others) return own;
+	return { ...own, ...Object.fromEntries(TOTAL_KEYS.map((key) => [key, own[key] + others[key]])) };
+}
+
 // Pi's token format: 950, 1.2k, 50k, 2.0M, 33M.
 function formatTokens(count) {
 	if (count < 1000) return String(count);
@@ -1471,7 +1590,7 @@ function statusLineRows(t, footerData, width) {
 	} catch {
 		subscription = false;
 	}
-	const totals = sessionTotals(ctx);
+	const totals = footerTotals(ctx);
 	// Like Pi's footer: no cost for an unpriced, unknown plan; "sub" alone when a plan costs nothing per call.
 	const amount = `$${totals.cost >= 1 ? totals.cost.toFixed(2) : totals.cost.toFixed(3)}`;
 	const costText = !config.statusLine.cost ? "" : totals.cost > 0 ? join(amount, subscription && "sub") : subscription ? "sub" : "";
@@ -1654,7 +1773,7 @@ function shareUsage(provider, usage) {
 function watchUsage(tui) {
 	clearInterval(usageTimer);
 	usageTimer = setInterval(() => {
-		if (syncUsage()) tui?.requestRender?.();
+		if (syncUsage() | spendChanged()) tui?.requestRender?.();
 	}, USAGE_POLL_MS);
 	usageTimer.unref?.();
 }
@@ -2086,6 +2205,7 @@ export default async function (pi) {
 		config = loadConfig();
 		liveCtx = ctx;
 		totalsCache.count = -1;
+		startSpend(ctx);
 		mcpCache = { at: 0, cwd: undefined, value: undefined };
 		applyFooter(ctx, true);
 		refreshChanges();
@@ -2107,6 +2227,8 @@ export default async function (pi) {
 		patch(ctx);
 		applyEditor(ctx);
 	});
+	// A subagent shares its totals after every response, so the main footer follows it while it works.
+	for (const event of ["turn_end", "agent_end"]) pi.on(event, (_event, ctx) => shareSpend(ctx ?? liveCtx));
 	for (const event of ["before_agent_start", "tool_execution_end", "turn_end"]) {
 		pi.on(event, (_event, ctx) => {
 			liveCtx = ctx ?? liveCtx;

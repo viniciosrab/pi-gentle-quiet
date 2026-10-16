@@ -135,6 +135,10 @@ The default memory icon U+100000 is an outlined brain from a local `GentleBrain.
 - Providers that report every call at $0 (claude-bridge) get the API-equivalent cost of the same model
   from Pi's `anthropic` prices, the same notional figure Pi shows for other subscriptions. It is an
   estimate of what the tokens would cost on the API, not a charge.
+- The tokens and cost include the session's subagents. Each subagent is its own Pi process: it prices
+  its own responses with its own model (Claude at Claude's rates, Grok at Grok's) and writes its totals
+  to `~/.pi/agent/gentle-quiet-spend/<session>/`, which the main footer adds while they work. Folders
+  untouched for 30 days are removed. The cache hit rate stays the main session's own.
 - `claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%` (`codex …` for Codex) reads the rate-limit headers of each provider response (Claude, also through
   claude-bridge, and Codex), so it needs no credentials or extra requests. It appears after the first
   response of a session, belongs to the provider that reported it, and a window that already reset is
