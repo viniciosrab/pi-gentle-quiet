@@ -6,6 +6,9 @@ import path from "node:path";
 // extension module computes its config path.
 const agentDir = mkdtempSync(path.join(os.tmpdir(), "gentle-quiet-test-"));
 process.env.GENTLE_QUIET_TEST_AGENT_DIR = agentDir;
+// Tests run from inside Pi too, where the main session already set this for its subagents: start
+// every test file as a main process (spend-child.test.mjs sets it again on purpose).
+delete process.env.GENTLE_QUIET_SPEND_PARENT;
 export const configFile = path.join(agentDir, "gentle-quiet.json");
 
 export const readConfig = () => (existsSync(configFile) ? JSON.parse(readFileSync(configFile, "utf8")) : undefined);
