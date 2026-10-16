@@ -14,7 +14,7 @@
 //           outline in the theme's border color
 //   sidebar fullscreen terminals with 140+ columns: the status line becomes a bar on top and Agents and
 //           Todos a column on the right (Gentle Shell's layout, drawn in this style); narrower ones keep them in place
-//   quiet   read/bash/edit/write/grep/find/ls/codemode collapse to
+//   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
 //           with ctrl+o expanding to Pi's own output (execution stays Pi's)
@@ -89,7 +89,7 @@ const PROMPT_ICONS = ["❯", "›", ">", "→", "▸", "λ"];
 const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo" };
 const BLOCK_WIDGETS = new Set(["gentle-todo", "gentle-agents"]);
 // gentle-pi tools drawn without Pi's tool box (renderShell "self"); memory tools are handled apart.
-const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|codegraph|session_worktree_register)$/;
+const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|session_worktree_register)$/;
 const GLYPHS = /(?:[✿❀]|🤖|🌹)\s?/gu; // gentle-pi's card petals (CARD_GLYPH, AGENTS_GLYPH), orchestrator robot and rdd rose
 const BARS = new Set(["▎", "▌", "▍", "┃"]); // float panel accent bars
 const PATCHED = Symbol.for("gentle-quiet.patched");
@@ -869,8 +869,8 @@ async function configure(ctx) {
 // Quiet tools: Pi's own tools as a call row plus a one-line summary
 // ---------------------------------------------------------------------------
 
-// gentle-pi's background jobs (bash_background, monitor, job_stop, job_list) follow the same rows.
-const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "codemode", "bash_background", "monitor", "job_stop", "job_list"]);
+// gentle-pi's background jobs (bash_background, monitor, job_stop, job_list) and codegraph follow the same rows.
+const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "codemode", "bash_background", "monitor", "job_stop", "job_list", "codegraph"]);
 const QUIET_PREVIEWS = [0, 1, 3, 5];
 const HOME = os.homedir();
 
@@ -929,6 +929,8 @@ function quietCall(toolName, args = {}, t) {
 			return join(title("find"), accent(args.pattern ?? ""), dim(`in ${shortPath(args.path) || "."}`));
 		case "ls":
 			return join(title("ls"), accent(shortPath(args.path) || "."));
+		case "codegraph":
+			return join(title("codegraph"), accent(String(args.operation ?? "")), args.query && dim(`"${firstLine(args.query, 80)}"`));
 		case "codemode": {
 			const code = String(args.code ?? "");
 			const lines = code.split("\n").filter((line) => line.trim() !== "").length;
@@ -1058,6 +1060,25 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(firstLine(lines[0] ?? "stopped", 80)) };
 		case "job_list":
 			return { summary: ok(/^No background jobs/.test(text) ? "no jobs" : plural(lines.length, "job")) };
+		case "codegraph": {
+			// explore: "Found 78 symbols across 5 files."; query: one "kind  name" row per result.
+			const found = /Found (\d+) symbols? across (\d+) files?/.exec(text);
+			if (found) return { summary: ok(`${plural(Number(found[1]), "symbol")} · ${plural(Number(found[2]), "file")}`), preview: lines };
+			if (args.operation === "query") {
+				const results = lines.filter((line) => /^\S+ {2,}\S/.test(line)).length;
+				return { summary: ok(results ? plural(results, "result") : "no results"), preview: lines };
+			}
+			// init frames its steps ("┌  Initializing CodeGraph", "│", "◆  Indexed 42 files", "└  Done"): drop the frame.
+			const steps = lines.map((line) => line.replace(/^[\u2500-\u257f\u25a0-\u25ff]\s*/, "").trim()).filter(Boolean);
+			if (steps.some((step) => /^Already initialized/.test(step))) return { summary: ok("already initialized") };
+			const indexed = /^Indexed (\d+) files?/.exec(steps.find((step) => /^Indexed \d+ files?/.test(step)) ?? "");
+			if (indexed) {
+				const graph = steps.find((step) => /^\d+ nodes?,/.test(step));
+				return { summary: ok(join(`${plural(Number(indexed[1]), "file")} indexed`, graph && `· ${graph}`)), preview: steps };
+			}
+			const first = steps.find((step) => !/^Initializing CodeGraph$/.test(step));
+			return { summary: ok(firstLine(first ?? "done", 80)), preview: steps.filter((step) => step !== first) };
+		}
 		default:
 			return { summary: ok(lines.length ? plural(lines.length, "line") : "done"), preview: lines, keepEnd: true };
 	}
@@ -1239,6 +1260,10 @@ function quietRenderers(toolName, renderers) {
 				} catch {
 					// fall back to the summary below
 				}
+			}
+			// A tool without renderers of its own (codegraph): ctrl+o shows its whole text output.
+			if (options.expanded && !options.isPartial && typeof renderers.renderResult !== "function") {
+				return new Text(textOf(result).replace(/\s+$/, ""), 1, 0);
 			}
 			const order = orderOf(context.toolCallId, !options.isPartial);
 			return quietResultComponent(quietResultText(toolName, result, options, context, t), order);
@@ -2405,6 +2430,8 @@ export default async function (pi) {
 	if (typeof pi.registerToolRenderer === "function") {
 		pi.registerToolRenderer((toolName, next) => {
 			const renderers = next();
+			// codegraph has no renderers of its own, so it is quiet without any to wrap.
+			if (QUIET_TOOLS.has(toolName) && config.quiet.enabled) return quietRenderers(toolName, renderers ?? {});
 			if (!renderers) return renderers;
 			if (!config.tools.restyle && (toolName.startsWith("mem_") || SELF_TOOLS.test(toolName))) return renderers;
 			if (toolName.startsWith("mem_") && chrome?.humanToolName && chrome?.renderResultText) {
@@ -2412,7 +2439,6 @@ export default async function (pi) {
 			}
 			if (REVIEW_TOOLS.test(toolName)) return reviewRenderers(renderers);
 			if (SELF_TOOLS.test(toolName)) return gentleRenderers(renderers, iconGroup(toolName));
-			if (QUIET_TOOLS.has(toolName) && config.quiet.enabled) return quietRenderers(toolName, renderers);
 			return renderers;
 		});
 	}

@@ -47,6 +47,37 @@ test("expanded calls show Pi's own output on the margin, without backgrounds", a
 	assert.deepEqual(out, [" $ ls", " full", " output"]);
 });
 
+test("codegraph collapses to the operation, the query and a result count", async () => {
+	const explore = await draw("codegraph", { operation: "explore", query: "src/data/fees.ts consumers" }, text("**Exploration: src/data/fees.ts consumers**\n\nFound 78 symbols across 5 files. 1 file pinned from the query.\n\n- `Price` (src/Price.astro:1)"));
+	assert.equal(explore[0], ' codegraph explore "src/data/fees.ts consumers"');
+	assert.match(explore[1], /^ └ ✓ 78 symbols · 5 files +ctrl\+o to expand$/);
+	assert.equal(explore.length, 2);
+	const query = await draw("codegraph", { operation: "query", query: "fees", limit: 10 }, text('Search Results for "fees":\n\nfile        fees.ts\n  src/data/fees.ts:1\n\ntype_alias  PaymentMethod\n  src/data/fees.ts:3'));
+	assert.equal(query[0], ' codegraph query "fees"');
+	assert.match(query[1], /^ └ ✓ 2 results +ctrl\+o to expand$/);
+	assert.match((await draw("codegraph", { operation: "query", query: "zzz" }, text('Search Results for "zzz":\n\nNo results found.')))[1], /✓ no results/);
+	// codegraph's own framed output: "┌  Initializing CodeGraph", "│", "◆  Indexed 1 files", "└  Done".
+	const initialized = text("┌  Initializing CodeGraph\n│\n◆  Initialized in /srv/app\n│\nScanning files...\n│\n◆  Indexed 42 files\n│\n●  80 nodes, 61 edges in 166ms\n│\n└  Done\n");
+	const init = await draw("codegraph", { operation: "init" }, initialized);
+	assert.equal(init[0], " codegraph init");
+	assert.match(init[1], /^ └ ✓ 42 files indexed · 80 nodes, 61 edges in 166ms +ctrl\+o to expand$/);
+	assert.equal(init.length, 2);
+	const existing = text('┌  Initializing CodeGraph\n│\n▲  Already initialized in /srv/app\n│\n●  Use "codegraph index" to re-index or "codegraph sync" to update\n│\n└  \n');
+	assert.deepEqual(await draw("codegraph", { operation: "init" }, existing), [" codegraph init", " └ ✓ already initialized"]);
+	const failed = await draw("codegraph", { operation: "query", query: "x" }, text("codegraph: no index", { isError: true }), {}, { isError: true });
+	assert.match(failed[1], /^ └ ✗ codegraph: no index( +ctrl\+o to expand)?$/);
+});
+
+test("codegraph without renderers of its own is quiet too, and ctrl+o shows its whole output", async () => {
+	const { tool } = await load();
+	const renderers = tool("codegraph", undefined);
+	assert.equal(renderers.renderShell, "self");
+	const args = { operation: "explore", query: "q" };
+	const result = text("Found 1 symbol across 1 file.\n- `a` (a.ts:1)");
+	assert.deepEqual(lines(renderers.renderCall(args, theme)).map((line) => line.trimEnd()), [' codegraph explore "q"']);
+	assert.deepEqual(lines(renderers.renderResult(result, { expanded: true }, theme, { args, state: {} }), 70).map((line) => line.trimEnd()), [" Found 1 symbol across 1 file.", " - `a` (a.ts:1)"]);
+});
+
 test("codemode summarizes child calls and lists failures", async () => {
 	const calls = [
 		{ name: "mcp__context7__query-docs", status: "ok", durationMs: 800 },
