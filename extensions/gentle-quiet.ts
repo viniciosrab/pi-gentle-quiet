@@ -396,8 +396,8 @@ function stackRow(row, inner, t, title = false) {
 	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
 }
 
-// The scroll indicator row ("↑↓ 1-10/13 · ctrl+shift+↑/↓"): the wheel scrolls the card anyway.
-const SCROLL_ROW = /^\s*↑↓\s+\d+-\d+\/\d+/u;
+// The scroll indicator row ("↑↓ 1–10/13 · ctrl+shift+↑/↓", gentle-pi writes an en dash): the wheel scrolls the card anyway.
+const SCROLL_ROW = /^\s*↑↓\s+\d+[-–]\d+\/\d+/u;
 // Task rows reflowed so every line of a task lines up under the task's own text, past its status icon.
 // gentle-pi may already have split a long title into rows without an icon; they belong to the task above,
 // so they are joined back into its text before it is wrapped once to the box.

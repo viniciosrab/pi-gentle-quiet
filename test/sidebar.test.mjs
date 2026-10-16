@@ -140,7 +140,8 @@ test("a title gentle-pi already split is joined back and flows to the box width,
 	assert.ok(raw.every((row) => row.lastIndexOf("\x1b[29m") > row.lastIndexOf("\x1b[9m")), "the strike never runs into the border");
 });
 
-// gentle-pi's Todos card: its own ScrollView keeps the list to a few rows and adds the scroll indicator.
+// gentle-pi's Todos card: its own ScrollView keeps the list to a few rows and adds the scroll indicator,
+// written with an en dash ("1–3/12") like gentle-pi does.
 const TASKS = Array.from({ length: 12 }, (_, i) => `○ T${i + 1} task`);
 function scrollingTodo() {
 	const scroll = new ScrollView({ render: () => TASKS, invalidate() {} });
@@ -148,7 +149,7 @@ function scrollingTodo() {
 		render(width) {
 			scroll.updateLayout(TASKS.length, 3);
 			const visible = TASKS.slice(scroll.scrollTop, scroll.scrollTop + scroll.viewportHeight);
-			return ["❀ Todos  0 of 12", ...visible, `↑↓ 1-3/${TASKS.length} · ctrl+shift+↑/↓`].map((row) => `   ${row}`.padEnd(width));
+			return ["❀ Todos  0 of 12", ...visible, `↑↓ 1–3/${TASKS.length} · ctrl+shift+↑/↓`].map((row) => `   ${row}`.padEnd(width));
 		},
 	};
 }
