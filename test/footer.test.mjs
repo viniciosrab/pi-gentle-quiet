@@ -109,3 +109,54 @@ test("in the terminal /gentle-quiet is one screen with horizontal tabs", async (
 	assert.equal(readConfig().tools.tones, "theme", "and it is saved");
 	assert.ok(screens[0].some((line) => line.includes("←→ tabs")), "key hints at the bottom");
 });
+
+test("the selected option's description shows under the list and follows the selection", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
+	const keys = { right: "\x1b[C", down: "\x1b[B", escape: "\x1b" };
+	const screens = [];
+	loaded.ui.custom = (factory) => new Promise((resolve) => {
+		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
+		const view = () => component.render(100).map(plain);
+		screens.push(view());
+		component.handleInput(keys.down); // Status line changes
+		screens.push(view());
+		component.handleInput(keys.right); // Footer → Memory in footer
+		screens.push(view());
+		component.handleInput(keys.escape);
+	});
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	// The description row sits between the list and the key hints; list rows start with "   " or " → ".
+	const help = (screen) => {
+		const line = screen[screen.findIndex((row) => row.includes("←→ tabs")) - 2] ?? "";
+		return /^ (?! |→)/.test(line) ? line.trim() : undefined;
+	};
+	assert.match(help(screens[0]), /^gentle draws this extension's status line/);
+	assert.match(help(screens[1]), /^Files and lines changed since the last commit/);
+	assert.match(help(screens[2]), /^Shows Engram memory activity/);
+	for (const screen of screens) assert.ok(screen.every((line) => line.length <= 100), "fits the width");
+});
+
+test("every option in every tab has a description", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui", session: { model: { id: "m", provider: "claude-bridge" } } });
+	const missing = [];
+	loaded.ui.custom = (factory) => new Promise((resolve) => {
+		const component = factory({ requestRender() {} }, { ...theme, bg: (_name, text) => text }, {}, resolve);
+		for (let tab = 0; tab < 7; tab++) {
+			const first = component.render(100).map(plain).find((line) => line.startsWith(" → "));
+			let label = first;
+			do {
+				const screen = component.render(100).map(plain);
+				label = screen.find((line) => line.startsWith(" → "));
+				const line = screen[screen.findIndex((row) => row.includes("←→ tabs")) - 2] ?? "";
+				if (!/^ (?! |→)\S/.test(line)) missing.push(label);
+				component.handleInput("\x1b[B");
+			} while (component.render(100).map(plain).find((line) => line.startsWith(" → ")) !== first);
+			component.handleInput("\x1b[C");
+		}
+		component.handleInput("\x1b");
+	});
+	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
+	assert.deepEqual(missing, []);
+});

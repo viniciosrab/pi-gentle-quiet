@@ -664,54 +664,61 @@ async function pickIcon(ctx, title, icons, current, allowNone = true) {
 	return choice;
 }
 
-/** The menu's sections, each a list of [label, action] items built from the current config. */
+const ICON_HELP = {
+	memory: "The icon in front of memory tool calls (search, save…).",
+	todo: "The icon of the Todos block and of todo tool calls.",
+	agents: "The icon of the Agents block and of subagent tool calls.",
+	other: "The icon in front of the other gentle-pi tool calls.",
+};
+
+/** The menu's sections, each a list of [label, action, description] items built from the current config. */
 function menuSections(ctx) {
 	return [
 		["Status line", "Status", () => [
-			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }],
-			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }],
-			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }],
-			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }],
-			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }],
-			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }],
-			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }],
+			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }, "gentle draws this extension's status line under the editor; pi gives the footer back to Pi."],
+			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }, "Files and lines changed since the last commit (±2 +3 -1), updated every 2 seconds."],
+			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }, "Your Claude or Codex plan usage (5h and week windows), read from each response."],
+			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online / installed (MCP 3/3); turns yellow when one is offline."],
+			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, "cache shows cache reads, writes and hit rate; all adds input and output tokens; off hides them."],
+			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "The session's cost, subagents included."],
+			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices $0 responses (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
 			...(ctx.model?.provider ? [[`Subscription (${ctx.model.provider}): ${onOff(config.statusLine.subscriptionProviders.includes(ctx.model.provider))}`, () => {
 				const provider = ctx.model.provider;
 				const list = config.statusLine.subscriptionProviders;
 				config.statusLine.subscriptionProviders = list.includes(provider) ? list.filter((id) => id !== provider) : [...list, provider];
-			}]] : []),
+			}, "Marks the current provider as a subscription, so the status line shows sub."]] : []),
 		]],
 		["Footer statuses", "Footer", () => [
-			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }],
-			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }],
-			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }],
-			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }],
-			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }],
-			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }],
-			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }],
+			[`Memory in footer: ${onOff(config.memory.show)}`, () => { config.memory.show = !config.memory.show; }, "Shows Engram memory activity (mem 4 results) among the statuses."],
+			[`Memory label: ${shown(config.memory.label)}`, async () => { config.memory.label = await editLabel(ctx, "Memory label", config.memory.label); }, "The word in front of the memory status."],
+			[`Memory project name: ${onOff(config.memory.showProject)}`, () => { config.memory.showProject = !config.memory.showProject; }, "Adds the Engram project name to the memory status."],
+			[`Permission in footer: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "Shows the session permission mode (Perm: Yolo) among the statuses."],
+			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }, "The word in front of the permission status."],
+			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }, "hidden shows the permission status only when it is not the normal mode."],
+			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }, "gentle-pi's YOLO banner above the editor and its /yolo notification."],
 		]],
 		["Tool rows", "Tools", () => [
-			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }],
-			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }],
-			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }],
-			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }],
-			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }],
-			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }],
-			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }],
-			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }],
+			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, "quiet redraws gentle-pi and memory tool calls as compact rows; original leaves them as their packages draw them."],
+			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Puts those rows on Pi's one-column margin, lined up with Pi's own tools."],
+			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }, "claude: Claude Code's fixed greys; soft: the same layout in theme colors; theme: the theme's tool colors."],
+			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row plus a one-line summary; ctrl+o shows the full output."],
+			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }, "Where ctrl+o to expand shows: only on the latest call, on every call, or never."],
+			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }, "Output lines shown under a quiet tool's summary."],
+			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }, "Lines of a codemode script's output shown under its summary."],
+			[`Codemode detail: ${config.quiet.codemode}`, () => { config.quiet.codemode = CODEMODE_DETAILS[(CODEMODE_DETAILS.indexOf(config.quiet.codemode) + 1) % CODEMODE_DETAILS.length]; }, "Which calls a codemode script made are listed: only the failed ones, all of them, or none."],
 		]],
 		["Blocks and agents", "Blocks", () => [
-			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }],
-			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }],
-			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }],
-			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }],
-			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }],
+			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, "minimal draws the Todos and Agents panels as flat rows; original keeps gentle-pi's panels."],
+			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks, in the theme's border color."],
+			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, Todos and Agents move to a column on the right and the status line to the top."],
+			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "The terminal width (in columns) at which the side column opens."],
+			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, "minimal shows a subagent's answer as one row plus its first line; applies after a restart."],
 		]],
-		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }])],
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
-			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }],
-			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }],
-			[`Prompt icon: ${shown(config.prompt.icon)}`, async () => { config.prompt.icon = await pickIcon(ctx, "Prompt icon", PROMPT_ICONS, config.prompt.icon, false); }],
+			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }, "The prompt icon in front of what you type."],
+			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }, "The prompt icon in front of your messages in the conversation."],
+			[`Prompt icon: ${shown(config.prompt.icon)}`, async () => { config.prompt.icon = await pickIcon(ctx, "Prompt icon", PROMPT_ICONS, config.prompt.icon, false); }, "The icon used as the prompt."],
 		]],
 	];
 }
@@ -744,7 +751,21 @@ async function configureSection(ctx, name) {
 }
 
 const isAsync = (fn) => fn?.constructor?.name === "AsyncFunction";
-const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }]]];
+const RESET_TAB = ["Reset", "Reset", () => [["Reset to defaults", () => { config = structuredClone(DEFAULTS); }, "Puts every option back to its default and saves it."]]];
+
+/** Word-wrapped plain text: the selected option's description under the list. */
+function wrapWords(text, width) {
+	const lines = [];
+	let line = "";
+	for (const word of text.split(" ")) {
+		if (line && line.length + 1 + word.length > width) {
+			lines.push(line);
+			line = word;
+		} else line = line ? `${line} ${word}` : word;
+	}
+	if (line) lines.push(line);
+	return lines;
+}
 
 /**
  * The menu as one screen with horizontal tabs: ←/→ or tab switch sections, ↑/↓ pick an option,
@@ -777,6 +798,7 @@ async function configureTabs(ctx) {
 						"",
 						...list.map(([label], i) => fit(i === row ? fg(t, "accent", ` → ${label}`) : `   ${fg(t, "text", label)}`)),
 						"",
+						...(list[row]?.[2] ? [...wrapWords(list[row][2], Math.max(10, w - 2)).map((line) => fit(` ${fg(t, "muted", line)}`)), ""] : []),
 						fit(` ${fg(t, "dim", "←→ tabs  ↑↓ select  enter change  esc close")}`),
 						fg(t, "border", "─".repeat(w)),
 					];
