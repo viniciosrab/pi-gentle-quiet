@@ -95,6 +95,29 @@ test("a long Todos task wraps with its text lined up under the task's own text",
 	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
 });
 
+test("in the column the Todos rows keep one column of padding even when a row of the card sits further left", async () => {
+	const loaded = await wide();
+	const bg = (row) => `\x1b[48;5;236m${row}\x1b[49m`;
+	// gentle-pi's float card: margin, accent bar, a space, then the row; one row painted without the indent.
+	const long = "T1 Content backend: schema, Action Scheduler, Access, courses API, attachments";
+	const card = (width) => [
+		` ${bg("▎ ❀ Todos  1 of 2".padEnd(width - 2))} `,
+		` ${bg(`▎ ◐ ${long}`.padEnd(width - 2))} `,
+		` ${bg("▎ running".padEnd(width - 2))} `,
+		` ${bg("▎ ○ Short one".padEnd(width - 2))} `,
+		bg("↑↓ 1–10/13 · ctrl+shift+↑/↓".padEnd(width)),
+	];
+	loaded.ui.setWidget("gentle-todo", () => ({ render: card }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
+	const top = out.findIndex((row) => row.includes("Todos")) - 1;
+	assert.equal(out[top + 1], "│ ≡ Todos  1 of 2");
+	assert.match(out[top + 3], /^│ ◐ T1 Content backend/);
+	assert.match(out[top + 4], /^│ {3}\S/, "the long task wraps under its text");
+	assert.ok(out.some((row) => row === "│ ○ Short one"));
+});
+
 test("a task title with line breaks hangs every line under the task's text and wraps what is too long", async () => {
 	const loaded = await wide();
 	const rows = [
