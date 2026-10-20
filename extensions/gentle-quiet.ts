@@ -7,7 +7,8 @@
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
 //   footer  Pi's footer -> " ~/app · main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
-//           with the extension statuses (Gentle Shell's bar, without the brand and usage)
+//           with the extension statuses (Gentle Shell's bar, without the brand and usage);
+//           gentle-pi's "⧗ 1 job" becomes "⠋ 1 job" with Pi's braille spinner turning while jobs run
 //   model   the model and effort, dim, always at the bottom right above the editor: Pi's " ⠋ Working" row
 //           ends with "      claude-opus-5-5 · high", and while idle the same label holds that row alone
 //   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
@@ -94,7 +95,13 @@ const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolNa
 const WIDGET_GROUP = { "gentle-todo": "todo", "gentle-agents": "agents" };
 const PROMPT_ICONS = ["❯", "›", ">", "→", "▸", "λ"];
 
-const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo" };
+const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo", jobs: "gentle-jobs" };
+// The background jobs status: Pi's own Working spinner frames instead of gentle-pi's hourglass, so it
+// reads as work still running. The status line draws the current frame and redraws while jobs run.
+const JOBS_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const JOBS_SPINNER_MS = 100;
+const JOBS_LEAD = /^[⧗⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/u;
+const jobsFrame = () => JOBS_SPINNER[Math.floor(Date.now() / JOBS_SPINNER_MS) % JOBS_SPINNER.length];
 const BLOCK_WIDGETS = new Set(["gentle-todo", "gentle-agents"]);
 // gentle-pi tools drawn without Pi's tool box (renderShell "self"); memory tools are handled apart.
 const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|session_worktree_register)$/;
@@ -343,6 +350,7 @@ function rewriteStatus(key, text) {
 	if (key === KEYS.memory) return memoryStatus(text);
 	if (key === KEYS.mode) return permissionStatus(text);
 	if (key === KEYS.yolo) return config.yoloBanner ? text : undefined;
+	if (key === KEYS.jobs) return text.replace(/^⧗\s*/u, `${JOBS_SPINNER[0]} `);
 	return text;
 }
 
@@ -1802,7 +1810,10 @@ function statusLineRows(t, footerData, width) {
 		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
 		// Permission mode first, then the rest by key.
 		.sort(([a], [b]) => (a === KEYS.mode ? -1 : b === KEYS.mode ? 1 : a.localeCompare(b)))
-		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
+		.map(([key, text]) => {
+			const flat = text.replace(/[\r\n\t]/g, " ");
+			return key === KEYS.jobs ? flat.replace(JOBS_LEAD, `${jobsFrame()} `) : flat;
+		});
 
 	// Statuses sit on the left after the location, Perm first (the model closes the Working row
 	// instead). Details give way in this order: cache counters, tokens, other usage windows, change
@@ -2109,6 +2120,12 @@ function footerFactory(tui, t, footerData) {
 	// keeps it off whatever the terminal draws above Pi (herdr's tabs), one column of margin, a rule below.
 	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
 	railStatus = bar;
+	// Turns the jobs spinner: redraws only while a background job status is shown, so idle Pi stays still.
+	const spinner = setInterval(() => {
+		const jobs = footerData?.getExtensionStatuses?.()?.get?.(KEYS.jobs);
+		if (typeof jobs === "string" && jobs.trim() !== "") tui?.requestRender?.();
+	}, JOBS_SPINNER_MS);
+	spinner.unref?.();
 	return {
 		// While the side column is open the status line is the bar on top, so nothing is drawn under the
 		// editor. Collie 1.21.3 then cannot find Pi's input box (AltanS/collie#445).
@@ -2116,6 +2133,7 @@ function footerFactory(tui, t, footerData) {
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
+			clearInterval(spinner);
 			if (footerTui === tui) {
 				footerTui = undefined;
 				clearInterval(usageTimer);
@@ -2389,7 +2407,9 @@ function staleResultRenderer(entry, options = {}, t) {
 // ---------------------------------------------------------------------------
 
 const JOB_NOTICE_TYPE = "gentle-jobs.notice";
-const JOB_ICON = "⧗"; // gentle-pi's JOB_GLYPH
+// The first frame of Pi's Working spinner, like the jobs status in the status line (gentle-pi draws ⧗).
+// A notice is a past event, so it stays still.
+const JOB_ICON = JOBS_SPINNER[0];
 // "Monitor job-2 ("label") reported 2 new lines:" -> "reported 2 new lines:"
 const JOB_SUBJECT = /^(?:Monitor|Background job) \S+ \(".*?"\) /;
 

@@ -23,6 +23,18 @@ test("permission mode is capitalized with a colored mode", async () => {
 	assert.ok(painted(status["gentle:mode"], "warning", "Yolo"));
 });
 
+test("the background jobs status shows Pi's braille spinner and keeps the count", async () => {
+	const { ui, status } = await load();
+	ui.setStatus("gentle-jobs", "⧗ 1 job");
+	assert.equal(status["gentle-jobs"], "⠋ 1 job", "the stored status keeps the first frame");
+	ui.setStatus("gentle-jobs", "⧗ 3 jobs");
+	assert.equal(status["gentle-jobs"], "⠋ 3 jobs");
+	ui.setStatus("gentle-jobs", undefined);
+	assert.equal(status["gentle-jobs"], undefined, "no jobs clears the status");
+	ui.setStatus("gentle-jobs", "2 jobs");
+	assert.equal(status["gentle-jobs"], "2 jobs", "text without the hourglass is left as it is");
+});
+
 test("YOLO banner is hidden in the footer and above the editor", async () => {
 	const { ui, status, widgets } = await load();
 	ui.setStatus("gentle:yolo", "🚀 YOLO ON 🔥 — destructive confirmations remain");

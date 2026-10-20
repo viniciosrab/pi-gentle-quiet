@@ -72,6 +72,7 @@ Common choices:
 - `claude 5h 62% · week 31%`: your plan usage (Claude or Codex). It appears after the first response
   and follows subagents too.
 - `MCP 3/3`: MCP servers online / installed.
+- `⠋ 1 job`: background jobs (bash_background, monitor) still running; the spinner turns while they run.
 - `claude-opus-5-5 · high` (bottom right, above the editor): the model in use and its effort. It is
   always there: at the end of the `Working` row while Pi works, on that same row when it is idle.
 
