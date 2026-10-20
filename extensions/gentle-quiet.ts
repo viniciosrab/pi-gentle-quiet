@@ -419,6 +419,9 @@ const SCROLL_ROW = /^\s*↑↓\s+\d+[-–]\d+\/\d+/u;
 // gentle-pi may already have split a long title into rows without an icon; they belong to the task above,
 // so they are joined back into its text before it is wrapped once to the box.
 const TASK_GLYPH = /^((?:\x1b\[[0-9;:]*m)*[○◐⊘✓✕](?:\x1b\[[0-9;:]*m)*) (.*)$/su;
+// gentle-pi marks the task in progress with ◐, which JetBrains Mono lacks: the terminal borrows it from a
+// fallback font and draws it larger than ○ and ✓. ◔ is in the font and reads the same.
+const IN_PROGRESS = ["◐", "◔"];
 const LEADING_SPACE = /^((?:\x1b\[[0-9;:]*m)*)\s+/;
 const STRIKE_OFF = "\x1b[29m"; // wrapping keeps a struck-through title's style open: close it on every line
 function hangRows(rows, inner, t) {
@@ -437,7 +440,7 @@ function hangRows(rows, inner, t) {
 		const start = TASK_GLYPH.exec(row);
 		if (start) {
 			flush();
-			task = { icon: start[1], text: start[2] };
+			task = { icon: start[1].replace(...IN_PROGRESS), text: start[2] };
 		} else if (task && text.trim() !== "" && !/^\s*…\s/u.test(text)) {
 			task.text += ` ${row.replace(LEADING_SPACE, "$1")}`;
 		} else {

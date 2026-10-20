@@ -62,10 +62,24 @@ test("the column stacks Agents and Todos in the square outline, a blank row unde
 	const tops = out.flatMap((row, i) => (row.startsWith("┌") ? [i] : []));
 	assert.equal(tops.length, 2);
 	assert.match(out[tops[0] + 1], /^│ ◈ Agents {2}1 active/, "Agents first");
-	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◐ Write it"], "a blank row under the title");
+	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◔ Write it"], "a blank row under the title");
 	assert.equal(out[tops[1] + 4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
 	assert.ok(out[tops[1] - 1].startsWith("└"), "no blank row between the cards");
 	assert.ok(out.every((row) => [...row].length <= 59), "rows fit the column minus its scrollbar");
+});
+
+test("the Todos card draws the task in progress with ◔, a glyph JetBrains Mono has, keeping its color", async () => {
+	const loaded = await wide();
+	loaded.ui.setWidget("gentle-todo", () => ({ render: panel("Todos  1 of 3", "\x1b[33m◐\x1b[39m Write it", "○ Test it", "✓ Plan it") }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const raw = loaded.rail.render(60);
+	const out = raw.map(plain);
+	assert.ok(out.some((row) => row.startsWith("│ ◔ Write it")), "in progress");
+	assert.ok(out.some((row) => row.startsWith("│ ○ Test it")), "pending keeps its glyph");
+	assert.ok(out.some((row) => row.startsWith("│ ✓ Plan it")), "done keeps its glyph");
+	assert.ok(raw.some((row) => row.includes("\x1b[33m◔\x1b[39m")), "the icon keeps gentle-pi's color");
+	assert.ok(raw.filter((row) => !plain(row).includes("gentle-ai-worker")).every((row) => !row.includes("◐")), "no ◐ left for the terminal to borrow from a fallback font");
 });
 
 test("the Agents batch clock stays on the title row, right-aligned", async () => {
@@ -88,7 +102,7 @@ test("a long Todos task wraps with its text lined up under the task's own text",
 	loaded.widgets["gentle-todo"](loaded.tui, theme);
 	loaded.root[NODE]();
 	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
-	const first = out.findIndex((row) => row.startsWith("◐ T8b1"));
+	const first = out.findIndex((row) => row.startsWith("◔ T8b1"));
 	assert.ok(first > 0);
 	assert.match(out[first + 1], /^ {2}\S/, "continuation hangs under the text, past the icon");
 	assert.ok(out.some((row) => row === "○ Short one"), "other tasks are untouched");
@@ -114,7 +128,7 @@ test("in the column the Todos rows keep one column of padding even when a row of
 	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
 	const top = out.findIndex((row) => row.includes("Todos")) - 1;
 	assert.equal(out[top + 1], "│ ≡ Todos  1 of 2");
-	assert.match(out[top + 3], /^│ ◐ T1 Content backend/);
+	assert.match(out[top + 3], /^│ ◔ T1 Content backend/);
 	assert.match(out[top + 4], /^│ {3}\S/, "the long task wraps under its text");
 	assert.ok(out.some((row) => row === "│ ○ Short one"));
 });
@@ -132,7 +146,7 @@ test("a task title with line breaks hangs every line under the task's text and w
 	loaded.widgets["gentle-todo"](loaded.tui, theme);
 	loaded.root[NODE]();
 	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
-	const first = out.findIndex((row) => row.startsWith("◐ Revisar"));
+	const first = out.findIndex((row) => row.startsWith("◔ Revisar"));
 	const second = out.findIndex((row) => row.startsWith("○ Escrever"));
 	assert.ok(first > 0 && second > first);
 	assert.ok(out.slice(first + 1, second).every((row) => /^ {2}\S/.test(row)), "every continuation hangs under the text");
