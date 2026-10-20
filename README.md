@@ -82,6 +82,7 @@ Common choices:
 - Quiet rows expand with `ctrl+o`, not with a click.
 - Changing **Subagent results** applies after a restart.
 - The default memory icon needs a local `GentleBrain.ttf` font. Without it, pick another icon in **Icons**.
+- The default RDD icon needs the `GentleIcons.ttf` font from `fonts/` (`cp fonts/GentleIcons.ttf ~/.local/share/fonts/ && fc-cache -f`, then reopen the terminal). Without it, pick another icon in **Icons**.
 - The `ctx` and plan usage meters are one ring that fills in eighths, drawn with Nerd Font glyphs.
 
 ## Development

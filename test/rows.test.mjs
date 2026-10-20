@@ -12,8 +12,8 @@ test("gentle tool rows get Pi's margin and their group icon", async () => {
 	assert.equal(draw("ask_user_choice", "✿ question"), " › question");
 	// gentle-pi's orchestrator cards use a robot instead of a petal.
 	assert.equal(draw("orchestrator_list", "🤖 Discover orchestrators · Advertised sessions"), " ◈ Discover orchestrators · Advertised sessions");
-	// rdd tool rows use a rose.
-	assert.equal(draw("gentle_review", "🌹 rdd assess"), " › rdd assess");
+	// rdd tool rows use a rose; they get their own wrench icon.
+	assert.equal(draw("gentle_review", "🌹 rdd assess"), " \u{100030} rdd assess");
 });
 
 test("without gentle-engram installed, memory tools keep their own renderers", async () => {
@@ -117,15 +117,27 @@ test("rdd calls are drawn like the quiet bash row: a title line and a └ status
 	writeConfig({});
 	const { tool } = await load();
 	const rdd = tool("gentle_review", { renderCall: () => nativeCall("rdd start · risk · resilience"), renderResult: () => nativeResult("reviewing · medium · created", "          9s") });
-	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" › rdd start · risk · resilience"]);
+	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" \u{100030} rdd start · risk · resilience"]);
 	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, {})), [" └ ✓ reviewing · medium · created · 9s"]);
+});
+
+test("the rdd icon is its own Icons choice: changing it leaves the other gentle tools alone", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Icons ›$/, /^RDD icon/, /^◆$/);
+	const { tool, commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[1].items.some((item) => /^Other gentle tools icon: "›"$/.test(item)));
+	const rdd = tool("gentle_review", { renderCall: () => nativeCall("rdd start"), renderResult: () => nativeResult("reviewing") });
+	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" ◆ rdd start"]);
+	const ask = tool("ask_user_choice", { renderCall: () => row("✿ question") });
+	assert.equal(lines(ask.renderCall({}, theme))[0], " › question");
 });
 
 test("rdd results mark blocked and failed states, and a running call keeps its state in the title", async () => {
 	writeConfig({});
 	const { tool } = await load();
 	const rdd = tool("gentle_review_capture_group", { renderCall: () => nativeCall("rdd preparing · capture group"), renderResult: () => nativeResult("blocked · collect · reviewer_results_required") });
-	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" › rdd preparing · capture group"]);
+	assert.deepEqual(lines(rdd.renderCall({}, theme, {})), [" \u{100030} rdd preparing · capture group"]);
 	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, {})), [" └ ● blocked · collect · reviewer_results_required"]);
 	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, { isError: true })), [" └ ✗ blocked · collect · reviewer_results_required"]);
 });

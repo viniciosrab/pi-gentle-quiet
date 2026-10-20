@@ -19,6 +19,7 @@
 	},
 	"files": [
 		"extensions/",
+		"fonts/GentleIcons.ttf",
 		"README.md",
 		"LICENSE"
 	],

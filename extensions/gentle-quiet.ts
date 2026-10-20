@@ -53,7 +53,7 @@ const DEFAULTS = {
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
-	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", other: "›" },
+	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
 	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
@@ -82,9 +82,15 @@ const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"
 // Memory-specific choices: brain, history (recall) and database from the Nerd Font,
 // plus a plain Unicode recall arrow for fonts without Nerd Font glyphs.
 const MEMORY_ICONS = ["\u{100000}", "\u{E28C}", "\u{F09D1}", "\u{F02DA}", "\u{F01BC}", "⟲"];
-const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["other", "Other gentle tools icon"]];
+// RDD-specific choices: Octicons' thin wrench at 75% from fonts/GentleIcons.ttf (installed in ~/.local/share/fonts
+// like GentleBrain.ttf), then the full-size Nerd Font wrenches (Octicons thin line, Material outline, Material),
+// then the card icons.
+const RDD_ICONS = ["\u{100030}", "\u{F425}", "\u{F0BE0}", "\u{F05B7}", ...CARD_ICONS];
+const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"]];
 const AGENT_TOOLS = /^(subagent_.*|orchestrator_.*)$/;
-const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolName === "todo" ? "todo" : AGENT_TOOLS.test(toolName) ? "agents" : "other");
+// RDD review tools (gentle_review, capture, scope).
+const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
+const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolName === "todo" ? "todo" : AGENT_TOOLS.test(toolName) ? "agents" : REVIEW_TOOLS.test(toolName) ? "rdd" : "other");
 const WIDGET_GROUP = { "gentle-todo": "todo", "gentle-agents": "agents" };
 const PROMPT_ICONS = ["❯", "›", ">", "→", "▸", "λ"];
 
@@ -672,6 +678,7 @@ const ICON_HELP = {
 	memory: "The icon in front of memory tool calls (search, save…).",
 	todo: "The icon of the Todos block and of todo tool calls.",
 	agents: "The icon of the Agents block and of subagent tool calls.",
+	rdd: "The icon in front of RDD review tool calls (rdd start, status, capture…).",
 	other: "The icon in front of the other gentle-pi tool calls.",
 };
 
@@ -718,7 +725,7 @@ function menuSections(ctx) {
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
-		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }, "The prompt icon in front of what you type."],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }, "The prompt icon in front of your messages in the conversation."],
@@ -1397,9 +1404,8 @@ function gentleRenderers(renderers, group) {
 }
 
 // RDD review tools (gentle_review, capture, scope): gentle-pi's card text, redrawn like the quiet bash row:
-// "› rdd start · risk · resilience" and, under it, "└ ✓ reviewing · medium · created · 9s". The text
+// "􀀰 rdd start · risk · resilience" and, under it, "└ ✓ reviewing · medium · created · 9s". The text
 // comes from gentle-pi's own renderers (so its real status and wording stay), only the frame goes.
-const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
 const UNFRAMED_HINT = /\s{2,}\S.*$/; // the expand hint sits after a run of spaces
 
 /** The visible text rows of a gentle-pi card, without its accent bars, rose and padding rows. */
@@ -1432,11 +1438,11 @@ function reviewRenderers(renderers) {
 			const tones = callTones(t);
 			return liveRows(native, ([title = "rdd"]) => {
 				const [name, ...rest] = title.split(" ");
-				return [` ${tones.title(join(config.icons.other, name))} ${tones.arg(rest.join(" "))}`.trimEnd()];
+				return [` ${tones.title(join(config.icons.rdd, name))} ${tones.arg(rest.join(" "))}`.trimEnd()];
 			});
 		},
 		renderResult(result, options = {}, t, context = {}) {
-			if (options.expanded && !options.isPartial) return flattened(renderers.renderResult(result, options, t, context), toolOptions("other"));
+			if (options.expanded && !options.isPartial) return flattened(renderers.renderResult(result, options, t, context), toolOptions("rdd"));
 			const state = context.state && typeof context.state === "object" ? context.state : undefined;
 			const native = renderers.renderResult(result, options, t, { ...context, lastComponent: state?.quietResult });
 			if (state) state.quietResult = native;
