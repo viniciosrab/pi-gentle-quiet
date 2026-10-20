@@ -418,10 +418,7 @@ const SCROLL_ROW = /^\s*↑↓\s+\d+[-–]\d+\/\d+/u;
 // Task rows reflowed so every line of a task lines up under the task's own text, past its status icon.
 // gentle-pi may already have split a long title into rows without an icon; they belong to the task above,
 // so they are joined back into its text before it is wrapped once to the box.
-const TASK_GLYPH = /^((?:\x1b\[[0-9;:]*m)*[○◐⊘✓✕](?:\x1b\[[0-9;:]*m)*) (.*)$/su;
-// gentle-pi marks the task in progress with ◐, which JetBrains Mono lacks: the terminal borrows it from a
-// fallback font and draws it larger than ○ and ✓. ◔ is in the font and reads the same.
-const IN_PROGRESS = ["◐", "◔"];
+const TASK_GLYPH = /^((?:\x1b\[[0-9;:]*m)*[○◐◔⊘✓✕](?:\x1b\[[0-9;:]*m)*) (.*)$/su;
 const LEADING_SPACE = /^((?:\x1b\[[0-9;:]*m)*)\s+/;
 const STRIKE_OFF = "\x1b[29m"; // wrapping keeps a struck-through title's style open: close it on every line
 function hangRows(rows, inner, t) {
@@ -440,7 +437,7 @@ function hangRows(rows, inner, t) {
 		const start = TASK_GLYPH.exec(row);
 		if (start) {
 			flush();
-			task = { icon: start[1].replace(...IN_PROGRESS), text: start[2] };
+			task = { icon: start[1], text: start[2] };
 		} else if (task && text.trim() !== "" && !/^\s*…\s/u.test(text)) {
 			task.text += ` ${row.replace(LEADING_SPACE, "$1")}`;
 		} else {
@@ -452,19 +449,25 @@ function hangRows(rows, inner, t) {
 	return out;
 }
 
+// gentle-pi marks a task in progress and a running agent with ◐, which JetBrains Mono lacks: the terminal
+// borrows it from a fallback font and draws it larger than ○ and ✓. ◔ is in the font and reads the same.
+// Only the status icon leading a row is swapped, never a ◐ inside a title or a name.
+const IN_PROGRESS = /^((?:\s|\x1b\[[0-9;:]*m)*)◐(?=(?:\x1b\[[0-9;:]*m)* )/u;
+const inProgressIcon = (row) => row.replace(IN_PROGRESS, "$1◔");
+
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
 // (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
 // move to their own row instead of being cut off.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
-		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true }));
+		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
-	let rows = trimBlankEdges(flatten(rail.grow ? fullHeight(render) : render(), { ...options(), margin: false }));
+	let rows = trimBlankEdges(flatten(rail.grow ? fullHeight(render) : render(), { ...options(), margin: false })).map(inProgressIcon);
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.

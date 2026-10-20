@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, painted, theme } from "./helpers.mjs";
+import { load, lines, painted, theme, writeConfig } from "./helpers.mjs";
 
 // Shape of a gentle-pi float panel: background, accent bar, padding rows.
 const bg = (text) => `\x1b[48;2;20;20;20m${text}\x1b[49m`;
@@ -31,6 +31,18 @@ test("Todos block is flat, full width and inside a square border", async () => {
 	]);
 	assert.ok(!out.some((line) => /\x1b\[48/.test(line)), "no background left");
 	assert.ok(painted(out[0], "border", "┌"), "border uses the theme border color");
+});
+
+test("the Agents card under the editor draws a running agent with ◔", async () => {
+	const { component } = await widget("gentle-agents", () => ["   ❀ Agents  1 active", "   ◐ gentle-ai-worker", "   ✓ gentle-ai-explore"]);
+	assert.deepEqual(lines({ render: () => component.render(40) }, 40).slice(2, 4), ["│ ◔ gentle-ai-worker                   │", "│ ✓ gentle-ai-explore                  │"]);
+});
+
+test("without the outline the Agents card still draws a running agent with ◔", async () => {
+	writeConfig({ blocks: { border: false } });
+	const { component } = await widget("gentle-agents", () => ["   ❀ Agents  1 active", "   ◐ gentle-ai-worker"]);
+	assert.ok(component.render(40).some((row) => /^\s*◔ gentle-ai-worker/.test(row.replace(/\x1b\[[0-9;:]*m/g, ""))));
+	writeConfig({});
 });
 
 test("padding rows without a background are trimmed too; inner blank rows stay", async () => {

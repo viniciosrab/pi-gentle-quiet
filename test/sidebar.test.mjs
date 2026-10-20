@@ -79,7 +79,19 @@ test("the Todos card draws the task in progress with ◔, a glyph JetBrains Mono
 	assert.ok(out.some((row) => row.startsWith("│ ○ Test it")), "pending keeps its glyph");
 	assert.ok(out.some((row) => row.startsWith("│ ✓ Plan it")), "done keeps its glyph");
 	assert.ok(raw.some((row) => row.includes("\x1b[33m◔\x1b[39m")), "the icon keeps gentle-pi's color");
-	assert.ok(raw.filter((row) => !plain(row).includes("gentle-ai-worker")).every((row) => !row.includes("◐")), "no ◐ left for the terminal to borrow from a fallback font");
+	assert.ok(raw.every((row) => !row.includes("◐")), "no ◐ left for the terminal to borrow from a fallback font");
+});
+
+test("the Agents card draws a running agent with ◔ too, keeping its color and leaving ◐ inside a name alone", async () => {
+	const loaded = await wide();
+	loaded.ui.setWidget("gentle-agents", () => ({ render: panel("Agents  1 active", "\x1b[34m◐\x1b[39m gentle-ai-worker  map ◐ glyphs", "✓ gentle-ai-explore") }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const raw = loaded.rail.render(60);
+	const out = raw.map(plain);
+	assert.ok(out.some((row) => row.startsWith("│ ◔ gentle-ai-worker  map ◐ glyphs")), "running");
+	assert.ok(out.some((row) => row.startsWith("│ ✓ gentle-ai-explore")), "done keeps its glyph");
+	assert.ok(raw.some((row) => row.includes("\x1b[34m◔\x1b[39m")), "the icon keeps gentle-pi's color");
 });
 
 test("the Agents batch clock stays on the title row, right-aligned", async () => {
@@ -291,7 +303,7 @@ test("an agent's label and model are not cut off in the column: the details go o
 	loaded.root[NODE](); // the next layout pass reads the new card
 	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
 	const top = out.findIndex((row) => row.startsWith("┌"));
-	assert.deepEqual(out.slice(top + 1, top + 6), ["│ ◈ Agents  1 active", "│", `│ ${left}`, `│   ${right}`, out[top + 5]]);
+	assert.deepEqual(out.slice(top + 1, top + 6), ["│ ◈ Agents  1 active", "│", `│ ${left.replace("◐", "◔")}`, `│   ${right}`, out[top + 5]]);
 	assert.ok(out[top + 5].startsWith("└"));
 	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
 });
