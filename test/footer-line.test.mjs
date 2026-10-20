@@ -59,7 +59,7 @@ test("replaces Pi's footer: Perm right after the location, counters on the right
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^app · main · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx \u{F0A9F} 28% · \$1\.75 sub $/u);
+	assert.match(rows[0], /^app · main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +R50k W2\.0k CH98\.0% · ctx \u{F0A9F} 28% · \$1\.75 sub $/u);
 });
 
 test("the model and its effort are not on the status line", async () => {
@@ -166,10 +166,32 @@ test("on narrow terminals the counters give way before Perm leaves the first lin
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	const at = (width) => component.render(width).map(plain);
 	assert.equal(at(66).length, 1);
-	assert.match(at(66)[0], /^app · main · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
+	assert.match(at(66)[0], /^app · main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +ctx .* \$1\.75 sub $/);
 	const narrow = at(51);
 	assert.equal(narrow.length, 2, "statuses move to a second row only when the first line cannot hold them");
-	assert.equal(narrow[1], "Perm: Normal  ⧗ 1 job");
+	assert.match(narrow[1], /^Perm: Normal  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job$/);
+});
+
+test("the jobs spinner turns while a job runs, and the footer redraws on its own", async () => {
+	const { component, renders } = await footer({ session: { cwd: "/srv/app" } });
+	const frame = () => /([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) 1 job/.exec(plain(component.render(170)[0]))?.[1];
+	const frames = new Set([frame()]);
+	const before = renders();
+	await new Promise((resolve) => setTimeout(resolve, 350));
+	assert.ok(renders() > before, "the footer asks for redraws while the job runs");
+	for (let i = 0; i < 8; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 130));
+		frames.add(frame());
+	}
+	assert.ok(!frames.has(undefined), "every render draws a spinner frame");
+	assert.ok(frames.size > 1, "the spinner frame changes over time");
+	component.dispose();
+
+	const idle = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
+	const idleBefore = idle.renders();
+	await new Promise((resolve) => setTimeout(resolve, 350));
+	assert.ok(idle.renders() - idleBefore <= 1, "no jobs, no redraw loop");
+	idle.component.dispose();
 });
 
 test("the status line names only the working folder, under ~/ inside home, then a dot before the branch", async () => {

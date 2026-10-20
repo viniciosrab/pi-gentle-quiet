@@ -7,7 +7,8 @@
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
 //   footer  Pi's footer -> " ~/app · main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
-//           with the extension statuses (Gentle Shell's bar, without the brand and usage)
+//           with the extension statuses (Gentle Shell's bar, without the brand and usage);
+//           gentle-pi's "⧗ 1 job" becomes "⠋ 1 job" with Pi's braille spinner turning while jobs run
 //   model   the model and effort, dim, always at the bottom right above the editor: Pi's " ⠋ Working" row
 //           ends with "      claude-opus-5-5 · high", and while idle the same label holds that row alone
 //   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
@@ -53,7 +54,7 @@ const DEFAULTS = {
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
-	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", other: "›" },
+	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
 	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
@@ -82,13 +83,25 @@ const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"
 // Memory-specific choices: brain, history (recall) and database from the Nerd Font,
 // plus a plain Unicode recall arrow for fonts without Nerd Font glyphs.
 const MEMORY_ICONS = ["\u{100000}", "\u{E28C}", "\u{F09D1}", "\u{F02DA}", "\u{F01BC}", "⟲"];
-const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["other", "Other gentle tools icon"]];
+// RDD-specific choices: Octicons' thin wrench at 75% from fonts/GentleIcons.ttf (installed in ~/.local/share/fonts
+// like GentleBrain.ttf), then the full-size Nerd Font wrenches (Octicons thin line, Material outline, Material),
+// then the card icons.
+const RDD_ICONS = ["\u{100030}", "\u{F425}", "\u{F0BE0}", "\u{F05B7}", ...CARD_ICONS];
+const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"]];
 const AGENT_TOOLS = /^(subagent_.*|orchestrator_.*)$/;
-const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolName === "todo" ? "todo" : AGENT_TOOLS.test(toolName) ? "agents" : "other");
+// RDD review tools (gentle_review, capture, scope).
+const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
+const iconGroup = (toolName) => (toolName.startsWith("mem_") ? "memory" : toolName === "todo" ? "todo" : AGENT_TOOLS.test(toolName) ? "agents" : REVIEW_TOOLS.test(toolName) ? "rdd" : "other");
 const WIDGET_GROUP = { "gentle-todo": "todo", "gentle-agents": "agents" };
 const PROMPT_ICONS = ["❯", "›", ">", "→", "▸", "λ"];
 
-const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo" };
+const KEYS = { memory: "engram", mode: "gentle:mode", yolo: "gentle:yolo", jobs: "gentle-jobs" };
+// The background jobs status: Pi's own Working spinner frames instead of gentle-pi's hourglass, so it
+// reads as work still running. The status line draws the current frame and redraws while jobs run.
+const JOBS_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const JOBS_SPINNER_MS = 100;
+const JOBS_LEAD = /^[⧗⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*/u;
+const jobsFrame = () => JOBS_SPINNER[Math.floor(Date.now() / JOBS_SPINNER_MS) % JOBS_SPINNER.length];
 const BLOCK_WIDGETS = new Set(["gentle-todo", "gentle-agents"]);
 // gentle-pi tools drawn without Pi's tool box (renderShell "self"); memory tools are handled apart.
 const SELF_TOOLS = /^(todo|subagent_.*|orchestrator_.*|ask_user_.*|gentle_.*|session_worktree_register)$/;
@@ -337,6 +350,7 @@ function rewriteStatus(key, text) {
 	if (key === KEYS.memory) return memoryStatus(text);
 	if (key === KEYS.mode) return permissionStatus(text);
 	if (key === KEYS.yolo) return config.yoloBanner ? text : undefined;
+	if (key === KEYS.jobs) return text.replace(/^⧗\s*/u, `${JOBS_SPINNER[0]} `);
 	return text;
 }
 
@@ -672,6 +686,7 @@ const ICON_HELP = {
 	memory: "The icon in front of memory tool calls (search, save…).",
 	todo: "The icon of the Todos block and of todo tool calls.",
 	agents: "The icon of the Agents block and of subagent tool calls.",
+	rdd: "The icon in front of RDD review tool calls (rdd start, status, capture…).",
 	other: "The icon in front of the other gentle-pi tool calls.",
 };
 
@@ -718,7 +733,7 @@ function menuSections(ctx) {
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
-		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }, "The prompt icon in front of what you type."],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }, "The prompt icon in front of your messages in the conversation."],
@@ -1397,9 +1412,8 @@ function gentleRenderers(renderers, group) {
 }
 
 // RDD review tools (gentle_review, capture, scope): gentle-pi's card text, redrawn like the quiet bash row:
-// "› rdd start · risk · resilience" and, under it, "└ ✓ reviewing · medium · created · 9s". The text
+// "􀀰 rdd start · risk · resilience" and, under it, "└ ✓ reviewing · medium · created · 9s". The text
 // comes from gentle-pi's own renderers (so its real status and wording stay), only the frame goes.
-const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
 const UNFRAMED_HINT = /\s{2,}\S.*$/; // the expand hint sits after a run of spaces
 
 /** The visible text rows of a gentle-pi card, without its accent bars, rose and padding rows. */
@@ -1432,11 +1446,11 @@ function reviewRenderers(renderers) {
 			const tones = callTones(t);
 			return liveRows(native, ([title = "rdd"]) => {
 				const [name, ...rest] = title.split(" ");
-				return [` ${tones.title(join(config.icons.other, name))} ${tones.arg(rest.join(" "))}`.trimEnd()];
+				return [` ${tones.title(join(config.icons.rdd, name))} ${tones.arg(rest.join(" "))}`.trimEnd()];
 			});
 		},
 		renderResult(result, options = {}, t, context = {}) {
-			if (options.expanded && !options.isPartial) return flattened(renderers.renderResult(result, options, t, context), toolOptions("other"));
+			if (options.expanded && !options.isPartial) return flattened(renderers.renderResult(result, options, t, context), toolOptions("rdd"));
 			const state = context.state && typeof context.state === "object" ? context.state : undefined;
 			const native = renderers.renderResult(result, options, t, { ...context, lastComponent: state?.quietResult });
 			if (state) state.quietResult = native;
@@ -1796,7 +1810,10 @@ function statusLineRows(t, footerData, width) {
 		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
 		// Permission mode first, then the rest by key.
 		.sort(([a], [b]) => (a === KEYS.mode ? -1 : b === KEYS.mode ? 1 : a.localeCompare(b)))
-		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
+		.map(([key, text]) => {
+			const flat = text.replace(/[\r\n\t]/g, " ");
+			return key === KEYS.jobs ? flat.replace(JOBS_LEAD, `${jobsFrame()} `) : flat;
+		});
 
 	// Statuses sit on the left after the location, Perm first (the model closes the Working row
 	// instead). Details give way in this order: cache counters, tokens, other usage windows, change
@@ -2103,6 +2120,12 @@ function footerFactory(tui, t, footerData) {
 	// keeps it off whatever the terminal draws above Pi (herdr's tabs), one column of margin, a rule below.
 	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
 	railStatus = bar;
+	// Turns the jobs spinner: redraws only while a background job status is shown, so idle Pi stays still.
+	const spinner = setInterval(() => {
+		const jobs = footerData?.getExtensionStatuses?.()?.get?.(KEYS.jobs);
+		if (typeof jobs === "string" && jobs.trim() !== "") tui?.requestRender?.();
+	}, JOBS_SPINNER_MS);
+	spinner.unref?.();
 	return {
 		// While the side column is open the status line is the bar on top, so nothing is drawn under the
 		// editor. Collie 1.21.3 then cannot find Pi's input box (AltanS/collie#445).
@@ -2110,6 +2133,7 @@ function footerFactory(tui, t, footerData) {
 		invalidate() {},
 		dispose() {
 			if (typeof unsubscribe === "function") unsubscribe();
+			clearInterval(spinner);
 			if (footerTui === tui) {
 				footerTui = undefined;
 				clearInterval(usageTimer);
@@ -2383,7 +2407,9 @@ function staleResultRenderer(entry, options = {}, t) {
 // ---------------------------------------------------------------------------
 
 const JOB_NOTICE_TYPE = "gentle-jobs.notice";
-const JOB_ICON = "⧗"; // gentle-pi's JOB_GLYPH
+// The first frame of Pi's Working spinner, like the jobs status in the status line (gentle-pi draws ⧗).
+// A notice is a past event, so it stays still.
+const JOB_ICON = JOBS_SPINNER[0];
 // "Monitor job-2 ("label") reported 2 new lines:" -> "reported 2 new lines:"
 const JOB_SUBJECT = /^(?:Monitor|Background job) \S+ \(".*?"\) /;
 

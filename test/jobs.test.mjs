@@ -36,14 +36,14 @@ test("a monitor event shows the job, its label and a line count instead of a car
 	assert.ok(renderer, "job notice renderer registered");
 	const out = render(renderer, events);
 	assert.equal(out.length, 2);
-	assert.match(out[0], /^ ⧗ monitor · verify KPDL +ctrl\+o to expand$/);
+	assert.match(out[0], /^ ⠋ monitor · verify KPDL +ctrl\+o to expand$/);
 	assert.equal(out[1], " └ 2 new lines");
 });
 
 test("expanding a monitor event lists its lines on Pi's margin, cut to the width", async () => {
 	const { messageRenderers } = await load();
 	const out = render(messageRenderers[NOTICE], events, true, 40);
-	assert.equal(out[0], " ⧗ monitor · verify KPDL");
+	assert.equal(out[0], " ⠋ monitor · verify KPDL");
 	assert.equal(out[1], " └ 2 new lines");
 	assert.equal(out[2], "   key down [ KPDL ] keysyms [ Delete  …");
 	assert.equal(out[3], "   key up   [ KPDL ]");
@@ -53,7 +53,7 @@ test("expanding a monitor event lists its lines on Pi's margin, cut to the width
 test("a finished job shows its outcome painted by exit code", async () => {
 	const { messageRenderers } = await load();
 	const ok = messageRenderers[NOTICE](exited(0), { expanded: false }, theme).render(70);
-	assert.match(ok[0], /⧗ bash_background/);
+	assert.match(ok[0], /⠋ bash_background/);
 	assert.ok(painted(ok[1], "success", "✓ exited with code 0 after 12s"));
 	const failed = messageRenderers[NOTICE](exited(2), { expanded: false }, theme).render(70);
 	assert.ok(painted(failed[1], "error", "✗ exited with code 2 after 12s"));
