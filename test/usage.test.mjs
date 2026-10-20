@@ -91,7 +91,7 @@ test("narrow terminals keep only the first window before dropping the usage", as
 	assert.match(at(47), /claude 5h \u{F0AA2} 62% $/u);
 	assert.doesNotMatch(at(47), /week/);
 	assert.doesNotMatch(at(32), /claude/);
-	assert.match(at(32), /^app main +ctx/);
+	assert.match(at(32), /^app · main +ctx/);
 	assert.doesNotMatch(at(17), /claude|app/);
 });
 

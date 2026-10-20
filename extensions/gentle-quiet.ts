@@ -6,7 +6,7 @@
 //   tools   "🧠 search “x” …", "✿todo · write", "❀ agent run"
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
-//   footer  Pi's footer -> " app main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
+//   footer  Pi's footer -> " ~/app · main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
 //           with the extension statuses (Gentle Shell's bar, without the brand and usage)
 //   model   the model and effort, dim, always at the bottom right above the editor: Pi's " ⠋ Working" row
 //           ends with "      claude-opus-5-5 · high", and while idle the same label holds that row alone
@@ -882,12 +882,14 @@ const shortPath = (value) => {
 	const text = typeof value === "string" ? value : "";
 	return text.startsWith(HOME) ? `~${text.slice(HOME.length)}` : text;
 };
-// The status line names only the working folder: "~" for home, "/" for the root.
+// The status line names only the working folder: "~/name" inside home, "~" for home, "/" for the root.
 const folderName = (value) => {
 	const text = typeof value === "string" ? value : "";
 	if (!text) return "";
-	if (path.resolve(text) === path.resolve(HOME)) return "~";
-	return path.basename(text) || text;
+	const full = path.resolve(text);
+	if (full === path.resolve(HOME)) return "~";
+	const name = path.basename(full) || full;
+	return full.startsWith(`${path.resolve(HOME)}${path.sep}`) ? `~/${name}` : name;
 };
 const firstLine = (value, max = 100) => {
 	const lines = String(value ?? "").split("\n");
@@ -1755,12 +1757,11 @@ function statusLineRows(t, footerData, width) {
 	const counts = changes?.files
 		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
 		: "";
-	const location = (withCounts) => join(
-		cwd && fg(t, "muted", cwd),
+	const location = (withCounts) => [cwd && fg(t, "muted", cwd), join(
 		branch && fg(t, "text", branch),
 		changes?.files ? fg(t, "warning", `±${changes.files}`) : "",
 		withCounts && counts,
-	);
+	)].filter(Boolean).join(sep);
 	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
 	// "cache" mode keeps the hit rate when the terminal narrows; "all" keeps ↑ ↓ instead.
 	const tokens = (withCache) => {
