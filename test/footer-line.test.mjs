@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { Loader } from "@earendil-works/pi-tui";
 import { load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
 // A real git repo with one committed file, then one edited file and one new file.
@@ -53,22 +54,130 @@ async function footer(options = {}) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
 
-test("replaces Pi's footer: Perm right after the model and effort, counters on the right", async () => {
+test("replaces Pi's footer: Perm right after the location, counters on the right", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^\/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx ▰▰▱▱▱▱▱▱ 28% · \$1\.75 sub $/);
+	assert.match(rows[0], /^app main · Perm: Normal · ⧗ 1 job +R50k W2\.0k CH98\.0% · ctx \u{F0A9F} 28% · \$1\.75 sub $/u);
+});
+
+test("the model and its effort are not on the status line", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" } });
+	for (const width of [200, 170, 120, 80, 50]) {
+		const rows = component.render(width).map(plain).join("\n");
+		assert.doesNotMatch(rows, /claude-opus-5-5|medium/, `at ${width} columns`);
+	}
+});
+
+// Pi's working row: a WorkingStatusIndicator, a Loader of kind "working".
+const loader = (kind, message = "Working") => Object.assign(new Loader(undefined, (s) => s, (s) => s, message), { kind });
+
+test("the model and its effort close the Working row, right-aligned and dim", async () => {
+	await footer({ session: { cwd: "/srv/app" } });
+	const row = loader("working").render(80)[1];
+	assert.match(plain(row), /^ ⠋ Working +claude-opus-5-5 · medium $/);
+	assert.equal([...plain(row)].length, 80);
+	assert.ok(painted(row, "dim", "claude-opus-5-5 · medium"));
+});
+
+test("a model without reasoning closes the Working row with its name alone", async () => {
+	await footer({ session: { model: { id: "gpt-x", reasoning: false } } });
+	assert.match(plain(loader("working").render(60)[1]), /^ ⠋ Working +gpt-x $/);
+});
+
+test("other loaders, a too narrow row and a disabled status line keep Pi's row", async () => {
+	await footer({ session: { cwd: "/srv/app" } });
+	assert.equal(loader("compaction", "Compacting").render(80)[1], ` ⠋ Compacting${" ".repeat(67)}`);
+	assert.equal(loader("working").render(30)[1], ` ⠋ Working${" ".repeat(20)}`);
+	await footer({ config: { statusLine: { enabled: false } } });
+	assert.equal(loader("working").render(80)[1], ` ⠋ Working${" ".repeat(70)}`);
+});
+
+// While idle the model stays on the Working row's screen row: a widget above the editor.
+const modelWidget = (loaded) => {
+	let renders = 0;
+	const factory = loaded.widgets["gentle-quiet:model"];
+	const component = typeof factory === "function" ? factory({ requestRender: () => renders++ }, theme) : undefined;
+	return { component, renders: () => renders };
+};
+
+test("while idle the model stays where the Working row ends, right-aligned and dim", async () => {
+	const loaded = await footer({ session: { cwd: "/srv/app" } });
+	const { component } = modelWidget(loaded);
+	assert.ok(component, "model widget installed");
+	const rows = component.render(80);
+	assert.equal(rows.length, 2);
+	assert.equal(rows[1], "");
+	assert.match(plain(rows[0]), /^ +claude-opus-5-5 · medium $/);
+	assert.equal([...plain(rows[0])].length, 80);
+	assert.ok(painted(rows[0], "dim", "claude-opus-5-5 · medium"));
+	const working = plain(loader("working").render(80)[1]);
+	assert.equal(plain(rows[0]).lastIndexOf("medium"), working.lastIndexOf("medium"), "same column as on the Working row");
+});
+
+test("while Pi works or compacts the model widget steps aside for the Working row", async () => {
+	const loaded = await footer({ session: { cwd: "/srv/app" } });
+	const { component, renders } = modelWidget(loaded);
+	await loaded.emit("agent_start");
+	assert.deepEqual(component.render(80), []);
+	assert.ok(renders() > 0, "asks for a redraw");
+	await loaded.emit("agent_end");
+	assert.match(plain(component.render(80)[0]), /claude-opus-5-5 · medium $/);
+	await loaded.emit("session_before_compact");
+	assert.deepEqual(component.render(80), []);
+	await loaded.emit("session_compact");
+	assert.equal(component.render(80).length, 2);
+	await loaded.emit("session_before_compact");
+	await loaded.emit("session_compact_failed");
+	assert.equal(component.render(80).length, 2);
+	// A compaction mid-run ends while the run goes on: the Working row is still there.
+	await loaded.emit("agent_start");
+	await loaded.emit("session_before_compact");
+	await loaded.emit("session_compact");
+	assert.deepEqual(component.render(80), []);
+	await loaded.emit("agent_end");
+	// A new session starts idle even if the last one ended mid-run.
+	await loaded.emit("agent_start");
+	await loaded.emit("session_start");
+	assert.equal(component.render(80).length, 2);
+});
+
+test("the model widget follows model and thinking changes", async () => {
+	const loaded = await footer({ session: { cwd: "/srv/app" } });
+	const { component, renders } = modelWidget(loaded);
+	loaded.ctx.model = { id: "gpt-x", reasoning: false };
+	await loaded.emit("model_select");
+	assert.match(plain(component.render(80)[0]), /^ +gpt-x $/);
+	const before = renders();
+	await loaded.emit("thinking_level_select");
+	assert.ok(renders() > before, "asks for a redraw");
+});
+
+test("a disabled status line or a too narrow row leave no model widget", async () => {
+	const loaded = await footer({ session: { cwd: "/srv/app" } });
+	assert.deepEqual(modelWidget(loaded).component.render(20), []);
+	const off = await footer({ config: { statusLine: { enabled: false } } });
+	const { component } = modelWidget(off);
+	assert.ok(!component || component.render(80).length === 0);
 });
 
 test("on narrow terminals the counters give way before Perm leaves the first line", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	const at = (width) => component.render(width).map(plain);
-	assert.equal(at(105).length, 1);
-	assert.match(at(105)[0], /^\/srv\/app main · claude-opus-5-5 · medium · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
-	const narrow = at(90);
+	assert.equal(at(66).length, 1);
+	assert.match(at(66)[0], /^app main · Perm: Normal · ⧗ 1 job +ctx .* \$1\.75 sub $/);
+	const narrow = at(51);
 	assert.equal(narrow.length, 2, "statuses move to a second row only when the first line cannot hold them");
 	assert.equal(narrow[1], "Perm: Normal  ⧗ 1 job");
+});
+
+test("the status line names only the working folder, not its whole path", async () => {
+	const at = async (cwd) => plain((await footer({ session: { cwd }, statuses: {} })).component.render(170)[0]);
+	assert.match(await at(path.join(os.homedir(), ".herdr/worktrees/membero/worktree-quiet-field-5095")), /^worktree-quiet-field-5095 main +/);
+	assert.match(await at("/srv/app/"), /^app main +/);
+	assert.match(await at(os.homedir()), /^~ main +/);
+	assert.match(await at("/"), /^\/ main +/);
 });
 
 test("token counters come from every usage Pi records, like Pi's footer", async () => {
@@ -107,20 +216,31 @@ test("files changed by another process (a subagent) show up without any event in
 
 test("the context gauge turns warning at 80% and error at 95%", async () => {
 	const warn = (await footer({ session: { usage: { percent: 85 } } })).component.render(120)[0];
-	assert.ok(painted(warn, "warning", "▰▰▰▰▰▰▰"));
+	assert.ok(painted(warn, "warning", "\u{F0AA4}"));
 	const full = (await footer({ session: { usage: { percent: 97 } } })).component.render(120)[0];
-	assert.ok(painted(full, "error", "▰▰▰▰▰▰▰▰"));
+	assert.ok(painted(full, "error", "\u{F0AA5}"));
 });
 
-test("API-key models show plain cost; models without reasoning show no effort", async () => {
+test("the context gauge is one ring that fills in eighths: empty at 0%, full at 100%", async () => {
+	const at = async (percent) => (await footer({ session: { usage: { percent } }, statuses: {} })).component.render(160)[0];
+	const empty = await at(0);
+	assert.match(plain(empty), /ctx \u{F0766} 0%/u);
+	assert.ok(painted(empty, "border", "\u{F0766}"));
+	assert.match(plain(await at(50)), /ctx \u{F0AA1} 50%/u);
+	const full = await at(100);
+	assert.match(plain(full), /ctx \u{F0AA5} 100%/u);
+	assert.ok(painted(full, "error", "\u{F0AA5}"));
+});
+
+test("API-key models show plain cost", async () => {
 	const line = plain((await footer({ session: { subscription: false, model: { id: "gpt-x", reasoning: false } }, statuses: {}, config: { statusLine: { tokens: "all" } } })).component.render(160)[0]);
-	assert.match(line, / gpt-x +↑1\.2k .* ctx .* \$1\.75 $/);
+	assert.match(line, / main +↑1\.2k .* ctx .* \$1\.75 $/);
 });
 
 test("narrow terminals drop details before the context and cost", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/a-long-project-name" } });
 	const line = plain(component.render(46)[0]);
-	assert.ok(line.length <= 46);
+	assert.ok([...line].length <= 46);
 	assert.match(line, /ctx .* 28%/);
 });
 
@@ -130,7 +250,7 @@ test("Status line options: changes and cost can be hidden", async () => {
 	await settle();
 	const line = plain(component.render(200)[0]);
 	assert.doesNotMatch(line, /±|\$/);
-	assert.match(line, / main · claude/);
+	assert.match(line, / main · Perm: Normal/);
 });
 
 test("Status line: pi restores Pi's own footer right away and is saved", async () => {
@@ -150,17 +270,17 @@ test("with the status line off, the footer is left to Pi", async () => {
 test("narrow terminals drop the cache details, then the tokens, before context and cost", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {}, config: { statusLine: { tokens: "all" } } });
 	const at = (width) => plain(component.render(width)[0]);
-	assert.match(at(110), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
-	assert.match(at(100), /medium +↑1\.2k ↓300 · ctx/, "cache goes first, effort stays");
-	assert.doesNotMatch(at(100), /R50k/);
-	assert.doesNotMatch(at(80), /↑/);
-	assert.match(at(80), /medium +ctx .* \$1\.75 sub $/);
+	assert.match(at(71), /↑1\.2k ↓300 R50k W2\.0k CH98\.0% · ctx/);
+	assert.match(at(61), /main +↑1\.2k ↓300 · ctx/, "cache goes first, the location stays");
+	assert.doesNotMatch(at(61), /R50k/);
+	assert.doesNotMatch(at(41), /↑/);
+	assert.match(at(41), /main +ctx .* \$1\.75 sub $/);
 });
 
 test("Status line tokens can be turned off", async () => {
 	const line = plain((await footer({ config: { statusLine: { tokens: false } }, statuses: {} })).component.render(160)[0]);
 	assert.doesNotMatch(line, /↑|↓|CH/);
-	assert.match(line, /ctx ▰/);
+	assert.match(line, /ctx \u{F0A9F}/u);
 });
 
 test("by default the counters show only the cache: R, W and the hit rate", async () => {
@@ -171,8 +291,8 @@ test("by default the counters show only the cache: R, W and the hit rate", async
 
 test("in cache mode a narrow terminal keeps the hit rate after R and W go", async () => {
 	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
-	assert.match(plain(component.render(88)[0]), /medium +CH98\.0% · ctx/);
-	assert.doesNotMatch(plain(component.render(88)[0]), /R50k/);
+	assert.match(plain(component.render(49)[0]), /main +CH98\.0% · ctx/);
+	assert.doesNotMatch(plain(component.render(49)[0]), /R50k/);
 });
 
 test("Status line tokens cycles cache → all → off and is saved", async () => {
@@ -203,13 +323,13 @@ const unpriced = (extra = {}) => ({
 test("a zero cost without a known subscription is hidden, like Pi's own footer", async () => {
 	const line = plain((await footer({ session: unpriced(), statuses: {} })).component.render(160)[0]);
 	assert.doesNotMatch(line, /\$/);
-	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% $/);
+	assert.match(line, /ctx \u{F0A9F} 28% $/u);
 });
 
 test("a provider marked as subscription shows sub instead of $0.000", async () => {
 	const config = { statusLine: { subscriptionProviders: ["claude-bridge"] } };
 	const line = plain((await footer({ session: unpriced(), statuses: {}, config })).component.render(160)[0]);
-	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% · sub $/);
+	assert.match(line, /ctx \u{F0A9F} 28% · sub $/u);
 	assert.doesNotMatch(line, /\$0/);
 });
 
@@ -238,7 +358,7 @@ test("an unpriced provider gets the API-equivalent cost from the same Anthropic 
 	// 1M input × $4 + 100k output × $20 + 10M cache read × $0.2 + 200k cache write × $5 = 4 + 2 + 2 + 1 = $9.00
 	const session = bridged({ input: 1_000_000, output: 100_000, cacheRead: 10_000_000, cacheWrite: 200_000 });
 	const line = plain((await footer({ session, statuses: {}, config: subscribed })).component.render(160)[0]);
-	assert.match(line, /ctx ▰▰▱▱▱▱▱▱ 28% · \$9\.00 sub $/);
+	assert.match(line, /ctx \u{F0A9F} 28% · \$9\.00 sub $/u);
 });
 
 test("price tiers apply like Pi's own cost calculation", async () => {
@@ -266,10 +386,4 @@ test("Estimated cost can be turned off in the menu", async () => {
 	assert.ok(seen[1].items.includes("Estimated cost (unpriced providers): on"));
 	assert.equal(readConfig().statusLine.estimateCost, false);
 	assert.match(plain(component.render(160)[0]), /28% · sub $/);
-});
-
-test("the effort is painted muted, like Pi's own footer, not in a syntax color", async () => {
-	const { component } = await footer({ session: { cwd: "/srv/app" } });
-	const row = component.render(170)[0];
-	assert.ok(painted(row, "muted", "medium"));
 });

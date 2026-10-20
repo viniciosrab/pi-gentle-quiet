@@ -34,6 +34,18 @@ export class Text {
 	invalidate() {}
 }
 
+// Like Pi's: a blank row, then " <spinner> <message>" padded to the width.
+export class Loader extends Text {
+	constructor(ui, spinnerColorFn, messageColorFn, message = "Loading...") {
+		super("", 1);
+		this.message = message;
+		this.text = `⠋ ${message}`;
+	}
+	render(width) {
+		return ["", ...super.render(width).map((line) => line + " ".repeat(Math.max(0, width - visibleWidth(line))))];
+	}
+}
+
 // Raw key sequences; matchesKey compares them directly.
 export const Key = { left: "\x1b[D", right: "\x1b[C", up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", tab: "\t", shift: (key) => (key === "tab" ? "\x1b[Z" : `S-${key}`) };
 export const matchesKey = (data, key) => data === key;
