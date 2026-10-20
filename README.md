@@ -10,7 +10,9 @@ same; only how it is drawn changes.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, Todos and Agents move to
   the right and the status line moves to the top. The Todos card shows every task.
-- **One status line** with your folder, branch, changed lines, model, context, cost and plan usage.
+- **One status line** with your folder, branch, changed lines, context, cost and plan usage. The
+  model and its effort stay at the bottom right above the editor at all times, dimmed: at the end
+  of the `Working` row while Pi works, and on that same row when it is idle.
 - **A `❯` prompt** and one-row user messages, like Claude Code.
 - **Gentle Shell's `alt+k` command menu** (models, profiles, persona, review mode, doctor…), without
   turning Gentle Shell back on.
@@ -65,10 +67,13 @@ Common choices:
   while a subagent works.
 - `$1.75`: cost of the session, **including its subagents**, each priced by its own model.
   On subscriptions that report $0 (claude-bridge), it is an estimate at Anthropic API prices, not a charge.
+- `ctx 󰪟 28%`: how full the context window is. The ring fills in eighths and turns yellow at 80%, red at 95%.
 - `sub`: the model runs on a subscription.
 - `claude 5h 62% · week 31%`: your plan usage (Claude or Codex). It appears after the first response
   and follows subagents too.
 - `MCP 3/3`: MCP servers online / installed.
+- `claude-opus-5-5 · high` (bottom right, above the editor): the model in use and its effort. It is
+  always there: at the end of the `Working` row while Pi works, on that same row when it is idle.
 
 ## Limits
 
@@ -77,6 +82,7 @@ Common choices:
 - Quiet rows expand with `ctrl+o`, not with a click.
 - Changing **Subagent results** applies after a restart.
 - The default memory icon needs a local `GentleBrain.ttf` font. Without it, pick another icon in **Icons**.
+- The `ctx` and plan usage meters are one ring that fills in eighths, drawn with Nerd Font glyphs.
 
 ## Development
 

@@ -6,8 +6,10 @@
 //   tools   "🧠 search “x” …", "✿todo · write", "❀ agent run"
 //                                         -> " 󰧑 search “x”", " ≡ todo · write", " ◈ agent run"
 //           (Pi's one-column margin; memory rows drawn like Pi's own tool rows)
-//   footer  Pi's footer -> " ~/app main ±2 +3 -1 · model · effort      ctx ▰▰▱▱▱▱▱▱ 28% · $1.75 sub"
-//           plus the extension statuses row (Gentle Shell's bar, without the brand and usage)
+//   footer  Pi's footer -> " app main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
+//           with the extension statuses (Gentle Shell's bar, without the brand and usage)
+//   model   the model and effort, dim, always at the bottom right above the editor: Pi's " ⠋ Working" row
+//           ends with "      claude-opus-5-5 · high", and while idle the same label holds that row alone
 //   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
@@ -880,6 +882,13 @@ const shortPath = (value) => {
 	const text = typeof value === "string" ? value : "";
 	return text.startsWith(HOME) ? `~${text.slice(HOME.length)}` : text;
 };
+// The status line names only the working folder: "~" for home, "/" for the root.
+const folderName = (value) => {
+	const text = typeof value === "string" ? value : "";
+	if (!text) return "";
+	if (path.resolve(text) === path.resolve(HOME)) return "~";
+	return path.basename(text) || text;
+};
 const firstLine = (value, max = 100) => {
 	const lines = String(value ?? "").split("\n");
 	const head = lines[0].length > max ? `${lines[0].slice(0, max - 1)}…` : lines[0];
@@ -1448,6 +1457,7 @@ function reviewRenderers(renderers) {
 const GAUGE_CELLS = 8;
 let liveCtx; // latest context, so the footer reads the current session and model
 let footerTui; // the TUI that renders our footer, to redraw after a git refresh
+let footerTheme; // the theme Pi gave the footer, for the model on the Working row
 let footerInstalled = false;
 const changesByCwd = new Map(); // cwd -> { files, added, deleted }
 let changesTimer;
@@ -1512,11 +1522,15 @@ function refreshChanges(delay = 0) {
 	changesTimer.unref?.();
 }
 
+// One ring that fills in eighths, like Claude's context meter: the Nerd Font circle outline
+// when empty, then circle_slice_1 (U+F0A9E) through circle_slice_8 (U+F0AA5, a full disc).
+const GAUGE_EMPTY = "\u{F0766}";
+const GAUGE_SLICE_0 = 0xf0a9d;
 function gauge(percent, t) {
 	const value = Math.max(0, Math.min(100, percent ?? 0));
 	const filled = Math.round((value / 100) * GAUGE_CELLS);
 	const tone = percent === null || percent === undefined ? "dim" : percent >= 95 ? "error" : percent >= 80 ? "warning" : "accent";
-	return `${filled ? fg(t, tone, "▰".repeat(filled)) : ""}${fg(t, "border", "▱".repeat(GAUGE_CELLS - filled))}`;
+	return filled ? fg(t, tone, String.fromCodePoint(GAUGE_SLICE_0 + filled)) : fg(t, "border", GAUGE_EMPTY);
 }
 
 /** Session usage totals counted the way Pi's own footer counts them. */
@@ -1721,16 +1735,10 @@ function formatTokens(count) {
 function statusLineRows(t, footerData, width) {
 	const ctx = liveCtx;
 	const sep = ` ${fg(t, "dim", "·")} `;
-	const cwd = shortPath(ctx?.sessionManager?.getCwd?.() ?? "");
+	const cwd = folderName(ctx?.sessionManager?.getCwd?.() ?? "");
 	const branch = footerData?.getGitBranch?.();
 	const changes = config.statusLine.changes ? changesByCwd.get(ctx?.sessionManager?.getCwd?.()) : undefined;
 	const model = ctx?.model;
-	let effort;
-	try {
-		effort = model?.reasoning ? ctx?.thinkingLevel ?? piThinking?.() : undefined;
-	} catch {
-		effort = undefined;
-	}
 	const usage = ctx?.getContextUsage?.();
 	const percent = typeof usage?.percent === "number" ? usage.percent : null;
 	let subscription = false;
@@ -1753,9 +1761,6 @@ function statusLineRows(t, footerData, width) {
 		changes?.files ? fg(t, "warning", `±${changes.files}`) : "",
 		withCounts && counts,
 	);
-	const modelText = (withEffort) => model?.id
-		? join(fg(t, "text", model.id), withEffort && effort && `${fg(t, "dim", "·")} ${fg(t, "muted", effort)}`)
-		: "";
 	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
 	// "cache" mode keeps the hit rate when the terminal narrows; "all" keeps ↑ ↓ instead.
 	const tokens = (withCache) => {
@@ -1774,7 +1779,7 @@ function statusLineRows(t, footerData, width) {
 		if ((withCache || mode === "cache") && cached && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
 	};
-	// Gentle Shell's usage bar: "claude 5h ▰▰▰▰▰▱▱▱ 62% · week 31%". The first window gets the
+	// Gentle Shell's usage bar: "claude 5h 󰪢 62% · week 31%". The first window gets the
 	// same meter as ctx; the others are text.
 	const plan = config.statusLine.usage ? currentUsage(ctx) : { name: "", windows: [] };
 	const usageText = (all) => {
@@ -1792,20 +1797,19 @@ function statusLineRows(t, footerData, width) {
 		.sort(([a], [b]) => (a === KEYS.mode ? -1 : b === KEYS.mode ? 1 : a.localeCompare(b)))
 		.map(([, text]) => text.replace(/[\r\n\t]/g, " "));
 
-	// Statuses sit on the left after the model, Perm first. Details give way in
-	// this order: cache counters, tokens, change counts; then the statuses move
-	// to their own row, then effort, model and location go. Context and cost stay.
+	// Statuses sit on the left after the location, Perm first (the model closes the Working row
+	// instead). Details give way in this order: cache counters, tokens, other usage windows, change
+	// counts; then the statuses move to their own row, then the usage and the location go.
+	// Context and cost stay.
 	const stages = [
-		{ inline: true, effort: true, counts: true, cache: true, tokens: true, usage: "all", model: true, location: true },
-		{ inline: true, effort: true, counts: true, cache: false, tokens: true, usage: "all", model: true, location: true },
-		{ inline: true, effort: true, counts: true, cache: false, tokens: false, usage: "all", model: true, location: true },
-		{ inline: true, effort: true, counts: true, cache: false, tokens: false, usage: "first", model: true, location: true },
-		{ inline: true, effort: true, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
-		{ inline: false, effort: true, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: "first", model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: true, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: false, location: true },
-		{ inline: false, effort: false, counts: false, cache: false, tokens: false, usage: false, model: false, location: false },
+		{ inline: true, counts: true, cache: true, tokens: true, usage: "all", location: true },
+		{ inline: true, counts: true, cache: false, tokens: true, usage: "all", location: true },
+		{ inline: true, counts: true, cache: false, tokens: false, usage: "all", location: true },
+		{ inline: true, counts: true, cache: false, tokens: false, usage: "first", location: true },
+		{ inline: true, counts: false, cache: false, tokens: false, usage: "first", location: true },
+		{ inline: false, counts: false, cache: false, tokens: false, usage: "first", location: true },
+		{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: true },
+		{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: false },
 	];
 	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
@@ -1815,7 +1819,6 @@ function statusLineRows(t, footerData, width) {
 	for (const stage of stages) {
 		const left = [
 			stage.location && location(stage.counts),
-			stage.model && modelText(stage.effort),
 			stage.inline && statusText,
 		].filter(Boolean).join(sep);
 		const right = [stage.tokens && tokens(stage.cache), contextText, costText && fg(t, "text", costText), stage.usage && usageText(stage.usage === "all")].filter(Boolean).join(sep);
@@ -1834,6 +1837,73 @@ function statusLineRows(t, footerData, width) {
 
 let piThinking; // pi.getThinkingLevel, bound at load
 let piApi; // the extension API, for the MCP tool and server lists
+
+// Pi's "⠋ Working" row is a Loader of kind "working": the model and its effort close it, right-aligned
+// and dim. The prototype is patched once per Pi process and outlives /reload, so the patch reads the
+// label through a global slot that every load of this module points at its own function.
+const WORKING_PATCHED = Symbol.for("gentle-quiet.workingPatched");
+const WORKING_MODEL = Symbol.for("gentle-quiet.workingModel");
+
+/** "claude-opus-5-5 · high" in dim; "" while the status line is off or no model is known. */
+function workingModel() {
+	const model = liveCtx?.model;
+	if (!config.statusLine.enabled || !footerTheme || !model?.id) return "";
+	let effort;
+	try {
+		effort = model.reasoning ? liveCtx?.thinkingLevel ?? piThinking?.() : undefined;
+	} catch {
+		effort = undefined;
+	}
+	return fg(footerTheme, "dim", effort ? `${model.id} · ${effort}` : model.id);
+}
+
+function patchWorkingRow() {
+	globalThis[WORKING_MODEL] = workingModel;
+	const proto = PiTui.Loader?.prototype;
+	if (typeof proto?.render !== "function" || proto[WORKING_PATCHED]) return;
+	const original = proto.render;
+	proto[WORKING_PATCHED] = original;
+	proto.render = function render(width) {
+		const rows = original.call(this, width);
+		try {
+			const label = this?.kind === "working" ? globalThis[WORKING_MODEL]?.() : "";
+			if (!label || rows?.length !== 2) return rows;
+			const left = rows[1].trimEnd();
+			const gap = width - 1 - visibleWidth(left) - visibleWidth(label);
+			if (gap < 2) return rows;
+			return [rows[0], `${left}${" ".repeat(gap)}${label} `];
+		} catch {
+			return rows; // Pi's row as it was
+		}
+	};
+}
+
+// While idle, fullscreen Pi drops the Working row and keeps only the blank spacer above the editor, so
+// a widget of [label row, ""] puts the model on that same screen row; while Pi works it draws nothing.
+const MODEL_WIDGET = "gentle-quiet:model";
+// A run or a compaction (which can also happen mid-run) is on, so Pi shows its Working or Compacting row.
+const busy = { running: false, compacting: false };
+let modelTui; // the TUI that renders the model widget
+
+function setBusy(kind, value) {
+	busy[kind] = value;
+	modelTui?.requestRender?.();
+}
+
+function modelWidget(tui) {
+	modelTui = tui;
+	return {
+		render(width) {
+			const label = busy.running || busy.compacting || !config.statusLine.enabled ? "" : workingModel();
+			const gap = width - 1 - visibleWidth(label);
+			return label && gap >= 0 ? [`${" ".repeat(gap)}${label} `, ""] : [];
+		},
+		invalidate() {},
+		dispose() {
+			if (modelTui === tui) modelTui = undefined;
+		},
+	};
+}
 
 // ---------------------------------------------------------------------------
 // Plan usage: 5h / week windows from rate-limit response headers
@@ -2023,6 +2093,7 @@ function refreshMcp(ctx) {
 
 function footerFactory(tui, t, footerData) {
 	footerTui = tui;
+	footerTheme = t;
 	watchUsage(tui);
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
 	refreshChanges();
@@ -2052,6 +2123,8 @@ function footerFactory(tui, t, footerData) {
 function applyFooter(ctx, force = false) {
 	const ui = ctx?.ui;
 	if (ctx?.mode !== "tui" || typeof ui?.setFooter !== "function") return;
+	patchWorkingRow();
+	ui.setWidget?.(MODEL_WIDGET, config.statusLine.enabled ? modelWidget : undefined);
 	if (config.statusLine.enabled && (force || !footerInstalled)) {
 		ui.setFooter(footerFactory);
 		footerInstalled = true;
@@ -2356,6 +2429,7 @@ export default async function (pi) {
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
 		liveCtx = ctx;
+		busy.running = busy.compacting = false;
 		totalsCache.count = -1;
 		startSpend(ctx);
 		mcpCache = { at: 0, cwd: undefined, value: undefined };
@@ -2379,6 +2453,17 @@ export default async function (pi) {
 		patch(ctx);
 		applyEditor(ctx);
 	});
+	// The model widget gives way to Pi's Working and Compacting rows, and follows /model and effort changes.
+	pi.on("agent_start", () => setBusy("running", true));
+	pi.on("agent_end", () => setBusy("running", false));
+	pi.on("session_before_compact", () => setBusy("compacting", true));
+	for (const event of ["session_compact", "session_compact_failed"]) pi.on(event, () => setBusy("compacting", false));
+	for (const event of ["model_select", "thinking_level_select"]) {
+		pi.on(event, (_event, ctx) => {
+			liveCtx = ctx ?? liveCtx;
+			modelTui?.requestRender?.();
+		});
+	}
 	// A subagent shares its totals after every response, so the main footer follows it while it works.
 	for (const event of ["turn_end", "agent_end"]) pi.on(event, (_event, ctx) => shareSpend(ctx ?? liveCtx));
 	for (const event of ["before_agent_start", "tool_execution_end", "turn_end"]) {
