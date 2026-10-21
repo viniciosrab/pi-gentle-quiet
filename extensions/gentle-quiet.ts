@@ -410,7 +410,15 @@ function stackRow(row, inner, t, title = false) {
 	}
 	// The details line up under the name, past the status icon and however many spaces follow it.
 	const indent = Math.min(8, /^\s*\S+\s+/.exec(text.slice(0, gap.index))?.[0].length ?? 2);
-	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
+	return [...hangUnder(left, inner, indent), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
+}
+
+// A row too long for the box goes on under its name, `indent` columns in, instead of being cut off.
+function hangUnder(row, inner, indent) {
+	const trimmed = row.replace(/(?:\s|\x1b\[[0-9;:]*m)+$/u, (tail) => tail.replace(/\s+/gu, ""));
+	if (visibleWidth(trimmed) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return [truncateToWidth(trimmed, inner, "…")];
+	const [first, ...rest] = PiTui.wrapTextWithAnsi(trimmed, inner);
+	return [first, ...PiTui.wrapTextWithAnsi(rest.join(" "), inner - indent).map((line) => `${" ".repeat(indent)}${line}`)];
 }
 
 // The scroll indicator row ("↑↓ 1–10/13 · ctrl+shift+↑/↓", gentle-pi writes an en dash): the wheel scrolls the card anyway.
@@ -455,23 +463,34 @@ function hangRows(rows, inner, t) {
 const IN_PROGRESS = /^((?:\s|\x1b\[[0-9;:]*m)*)◐(?=(?:\x1b\[[0-9;:]*m)* )/u;
 const inProgressIcon = (row) => row.replace(IN_PROGRESS, "$1◔");
 
+// gentle-pi leaves two spaces between an agent's status icon and its name, the title only one: the name
+// would start a column past the title's "Agents". One space puts it, and the details under it, in line.
+const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–](?:\x1b\[[0-9;:]*m)*) {2,}(?=\S|\x1b)/u;
+const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
+
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
 // (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
 // move to their own row instead of being cut off.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
-		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
+		const rows = trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
+		return rail.agents ? rows.map(agentGap) : rows;
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
-	let rows = trimBlankEdges(flatten(rail.grow ? fullHeight(render) : render(), { ...options(), margin: false })).map(inProgressIcon);
+	// A long Todos list ends in gentle-pi's scroll row, drawn at column 0 outside the panel: it goes before
+	// flatten(), or it shrinks the shared indent to nothing and every task keeps a space no task row matches.
+	const raw = rail.grow ? fullHeight(render) : render();
+	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
+	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
+	if (rail.agents) rows = rows.map(agentGap);
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
-	if (rail.hang) rows = hangRows(rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))).map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
+	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
@@ -498,10 +517,10 @@ function fullHeight(render) {
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, agents: key === "gentle-agents", stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { hang: key === "gentle-todo" }));
+			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},

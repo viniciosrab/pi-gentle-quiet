@@ -38,6 +38,19 @@ test("the Agents card under the editor draws a running agent with ◔", async ()
 	assert.deepEqual(lines({ render: () => component.render(40) }, 40).slice(2, 4), ["│ ◔ gentle-ai-worker                   │", "│ ✓ gentle-ai-explore                  │"]);
 });
 
+test("the Agents card under the editor starts an agent's name in the column of its title", async () => {
+	const { component } = await widget("gentle-agents", () => ["   ❀ Agents  2 active", "   ◐  gentle-ai-worker  variant A", "   ✓  gentle-ai-explore"]);
+	assert.deepEqual(lines({ render: () => component.render(40) }, 40).slice(1, 4), ["│ ◈ Agents  2 active                   │", "│ ◔ gentle-ai-worker  variant A        │", "│ ✓ gentle-ai-explore                  │"]);
+});
+
+test("without the outline an agent's name still starts in the column of its title", async () => {
+	writeConfig({ blocks: { border: false } });
+	const { component } = await widget("gentle-agents", () => ["   ❀ Agents  1 active", "   ◐  gentle-ai-worker"]);
+	const rows = component.render(40).map((row) => row.replace(/\x1b\[[0-9;:]*m/g, ""));
+	assert.equal(rows.find((row) => row.includes("gentle-ai-worker")).indexOf("gentle-ai-worker"), rows[0].indexOf("Agents"));
+	writeConfig({});
+});
+
 test("without the outline the Agents card still draws a running agent with ◔", async () => {
 	writeConfig({ blocks: { border: false } });
 	const { component } = await widget("gentle-agents", () => ["   ❀ Agents  1 active", "   ◐ gentle-ai-worker"]);

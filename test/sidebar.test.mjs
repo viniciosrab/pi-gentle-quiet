@@ -107,6 +107,25 @@ test("the Agents batch clock stays on the title row, right-aligned", async () =>
 	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
 });
 
+test("a long Todos list still wraps and hangs its tasks when gentle-pi adds its unindented scroll row", async () => {
+	const loaded = await wide();
+	// gentle-pi's float card as Pi draws it: a margin, the accent bar, a padded body, then the scroll row at column 0.
+	const bar = (text, width) => ` \x1b[48;2;44;44;44m\x1b[38;2;149;149;149m▎\x1b[39m ${text}${" ".repeat(Math.max(0, width - 4 - text.length))}\x1b[49m `;
+	const long = "Rodar checagens automáticas (PHPUnit, PHPStan, PHPCS, Vitest, typecheck, build, dependências) · preparando o job";
+	loaded.ui.setWidget("gentle-todo", () => ({
+		render: (width) => [bar("", width), bar("❀ Todos  1 of 12", width), bar("", width), bar(`\x1b[39m\x1b[38;2;157;157;157m◐\x1b[39m ${long}`, width), bar("\x1b[39mem background", width), bar("\x1b[39m○ Auditar PHP: autenticação, papéis, área, privacidade, migrações (A1)", width), bar("", width), "↑↓ 1–13/13 · ctrl+shift+↑/↓", ""],
+	}));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◔ Rodar checagens"));
+	assert.ok(first > 0, "the task keeps its icon at the left edge");
+	assert.deepEqual(out.slice(first + 1, first + 3).map((row) => /^ {2}\S/.test(row)), [true, true], "the title, its note and gentle-pi's own continuation hang under the text");
+	assert.match(out[first + 2], /em background$/, "gentle-pi's continuation joins the task");
+	assert.ok(out[first + 3].startsWith("○ Auditar PHP: autenticação"), "the next task starts at the left edge");
+	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
+});
+
 test("a long Todos task wraps with its text lined up under the task's own text", async () => {
 	const loaded = await wide();
 	const long = "T8b1 Home parity part 1: nav/hero/price/integration/panel worker running and then some more words to wrap";
@@ -348,6 +367,35 @@ test("the wheel over the Todos card reaches it", async () => {
 	assert.equal(mouse("wheel", 8, { wheelDelta: 3 })?.handled, true);
 	assert.equal(seen[0].type, "wheel");
 	assert.equal(seen[0].wheelDelta, 3);
+});
+
+test("an agent's long description goes on under its name instead of being cut off", async () => {
+	const loaded = await wide();
+	const left = "◐  gentle-ai-explore  Auditar conteúdo, acesso e comentários do aluno na área de membros";
+	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  1 active", `   ${left}${" ".repeat(Math.max(3, width - 6 - left.length))}14s`] }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◔ gentle-ai-explore  Auditar"));
+	assert.ok(first > 0);
+	assert.deepEqual(out.slice(first, first + 3), ["◔ gentle-ai-explore  Auditar conteúdo, acesso e", "  comentários do aluno na área de membros", "  14s"], "the rest of the description, then the details, under the name");
+	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
+});
+
+test("an agent's name and details start in the column of the Agents title, past gentle-pi's double gap", async () => {
+	const loaded = await wide();
+	const left = "\x1b[34m◐\x1b[39m  gentle-ai-worker  variant A Atelier";
+	const right = "claude-opus-5-5 · medium · 507k · 3m46s";
+	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  3 active", `   ${left}${" ".repeat(Math.max(3, width - 5 - plain(left).length - right.length))}${right}`] }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows();
+	const title = out.find((row) => row.includes("Agents  3 active"));
+	const name = out.find((row) => row.includes("gentle-ai-worker"));
+	const details = out[out.indexOf(name) + 1];
+	assert.equal(name.indexOf("gentle-ai-worker"), title.indexOf("Agents"));
+	assert.equal(details.indexOf("claude-opus-5-5"), title.indexOf("Agents"));
+	assert.equal(name.indexOf("◔"), title.indexOf("◈"), "the status icon stays under the title icon");
 });
 
 test("an agent's details line up under its name, however far the name sits from the icon", async () => {
