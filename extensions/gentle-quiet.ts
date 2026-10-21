@@ -410,7 +410,15 @@ function stackRow(row, inner, t, title = false) {
 	}
 	// The details line up under the name, past the status icon and however many spaces follow it.
 	const indent = Math.min(8, /^\s*\S+\s+/.exec(text.slice(0, gap.index))?.[0].length ?? 2);
-	return [truncateToWidth(left, inner, "…"), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
+	return [...hangUnder(left, inner, indent), `${" ".repeat(indent)}${fg(t, "muted", truncateToWidth(right, inner - indent, "…"))}`];
+}
+
+// A row too long for the box goes on under its name, `indent` columns in, instead of being cut off.
+function hangUnder(row, inner, indent) {
+	const trimmed = row.replace(/(?:\s|\x1b\[[0-9;:]*m)+$/u, (tail) => tail.replace(/\s+/gu, ""));
+	if (visibleWidth(trimmed) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return [truncateToWidth(trimmed, inner, "…")];
+	const [first, ...rest] = PiTui.wrapTextWithAnsi(trimmed, inner);
+	return [first, ...PiTui.wrapTextWithAnsi(rest.join(" "), inner - indent).map((line) => `${" ".repeat(indent)}${line}`)];
 }
 
 // The scroll indicator row ("↑↓ 1–10/13 · ctrl+shift+↑/↓", gentle-pi writes an en dash): the wheel scrolls the card anyway.

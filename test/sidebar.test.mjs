@@ -369,6 +369,19 @@ test("the wheel over the Todos card reaches it", async () => {
 	assert.equal(seen[0].wheelDelta, 3);
 });
 
+test("an agent's long description goes on under its name instead of being cut off", async () => {
+	const loaded = await wide();
+	const left = "◐  gentle-ai-explore  Auditar conteúdo, acesso e comentários do aluno na área de membros";
+	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  1 active", `   ${left}${" ".repeat(Math.max(3, width - 6 - left.length))}14s`] }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◔  gentle-ai-explore  Auditar"));
+	assert.ok(first > 0);
+	assert.deepEqual(out.slice(first, first + 3), ["◔  gentle-ai-explore  Auditar conteúdo, acesso e", "   comentários do aluno na área de membros", "   14s"], "the rest of the description, then the details, under the name");
+	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
+});
+
 test("an agent's details line up under its name, however far the name sits from the icon", async () => {
 	for (const icon of ["◐ ", "◐  "]) {
 		const loaded = await wide();
