@@ -463,13 +463,19 @@ function hangRows(rows, inner, t) {
 const IN_PROGRESS = /^((?:\s|\x1b\[[0-9;:]*m)*)◐(?=(?:\x1b\[[0-9;:]*m)* )/u;
 const inProgressIcon = (row) => row.replace(IN_PROGRESS, "$1◔");
 
+// gentle-pi leaves two spaces between an agent's status icon and its name, the title only one: the name
+// would start a column past the title's "Agents". One space puts it, and the details under it, in line.
+const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–](?:\x1b\[[0-9;:]*m)*) {2,}(?=\S|\x1b)/u;
+const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
+
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
 // (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
 // move to their own row instead of being cut off.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
-		return trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
+		const rows = trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
+		return rail.agents ? rows.map(agentGap) : rows;
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
@@ -480,6 +486,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	const raw = rail.grow ? fullHeight(render) : render();
 	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
 	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
+	if (rail.agents) rows = rows.map(agentGap);
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
@@ -510,10 +517,10 @@ function fullHeight(render) {
 // drawn there instead (see railBlocks) and leaves its own place empty.
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, agents: key === "gentle-agents", stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { hang: key === "gentle-todo" }));
+			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},

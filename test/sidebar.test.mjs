@@ -376,10 +376,26 @@ test("an agent's long description goes on under its name instead of being cut of
 	loaded.widgets["gentle-agents"](loaded.tui, theme);
 	loaded.root[NODE]();
 	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
-	const first = out.findIndex((row) => row.startsWith("◔  gentle-ai-explore  Auditar"));
+	const first = out.findIndex((row) => row.startsWith("◔ gentle-ai-explore  Auditar"));
 	assert.ok(first > 0);
-	assert.deepEqual(out.slice(first, first + 3), ["◔  gentle-ai-explore  Auditar conteúdo, acesso e", "   comentários do aluno na área de membros", "   14s"], "the rest of the description, then the details, under the name");
+	assert.deepEqual(out.slice(first, first + 3), ["◔ gentle-ai-explore  Auditar conteúdo, acesso e", "  comentários do aluno na área de membros", "  14s"], "the rest of the description, then the details, under the name");
 	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
+});
+
+test("an agent's name and details start in the column of the Agents title, past gentle-pi's double gap", async () => {
+	const loaded = await wide();
+	const left = "\x1b[34m◐\x1b[39m  gentle-ai-worker  variant A Atelier";
+	const right = "claude-opus-5-5 · medium · 507k · 3m46s";
+	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  3 active", `   ${left}${" ".repeat(Math.max(3, width - 5 - plain(left).length - right.length))}${right}`] }));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows();
+	const title = out.find((row) => row.includes("Agents  3 active"));
+	const name = out.find((row) => row.includes("gentle-ai-worker"));
+	const details = out[out.indexOf(name) + 1];
+	assert.equal(name.indexOf("gentle-ai-worker"), title.indexOf("Agents"));
+	assert.equal(details.indexOf("claude-opus-5-5"), title.indexOf("Agents"));
+	assert.equal(name.indexOf("◔"), title.indexOf("◈"), "the status icon stays under the title icon");
 });
 
 test("an agent's details line up under its name, however far the name sits from the icon", async () => {
