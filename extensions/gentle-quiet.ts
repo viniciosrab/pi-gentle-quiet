@@ -467,11 +467,15 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
 	// A stacked panel renders wide so it still lists everything before its rows are split.
 	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
-	let rows = trimBlankEdges(flatten(rail.grow ? fullHeight(render) : render(), { ...options(), margin: false })).map(inProgressIcon);
+	// A long Todos list ends in gentle-pi's scroll row, drawn at column 0 outside the panel: it goes before
+	// flatten(), or it shrinks the shared indent to nothing and every task keeps a space no task row matches.
+	const raw = rail.grow ? fullHeight(render) : render();
+	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
+	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
 	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
-	if (rail.hang) rows = hangRows(rows.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))).map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
+	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }

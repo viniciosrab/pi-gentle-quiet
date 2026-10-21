@@ -107,6 +107,25 @@ test("the Agents batch clock stays on the title row, right-aligned", async () =>
 	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
 });
 
+test("a long Todos list still wraps and hangs its tasks when gentle-pi adds its unindented scroll row", async () => {
+	const loaded = await wide();
+	// gentle-pi's float card as Pi draws it: a margin, the accent bar, a padded body, then the scroll row at column 0.
+	const bar = (text, width) => ` \x1b[48;2;44;44;44m\x1b[38;2;149;149;149m▎\x1b[39m ${text}${" ".repeat(Math.max(0, width - 4 - text.length))}\x1b[49m `;
+	const long = "Rodar checagens automáticas (PHPUnit, PHPStan, PHPCS, Vitest, typecheck, build, dependências) · preparando o job";
+	loaded.ui.setWidget("gentle-todo", () => ({
+		render: (width) => [bar("", width), bar("❀ Todos  1 of 12", width), bar("", width), bar(`\x1b[39m\x1b[38;2;157;157;157m◐\x1b[39m ${long}`, width), bar("\x1b[39mem background", width), bar("\x1b[39m○ Auditar PHP: autenticação, papéis, área, privacidade, migrações (A1)", width), bar("", width), "↑↓ 1–13/13 · ctrl+shift+↑/↓", ""],
+	}));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	const first = out.findIndex((row) => row.startsWith("◔ Rodar checagens"));
+	assert.ok(first > 0, "the task keeps its icon at the left edge");
+	assert.deepEqual(out.slice(first + 1, first + 3).map((row) => /^ {2}\S/.test(row)), [true, true], "the title, its note and gentle-pi's own continuation hang under the text");
+	assert.match(out[first + 2], /em background$/, "gentle-pi's continuation joins the task");
+	assert.ok(out[first + 3].startsWith("○ Auditar PHP: autenticação"), "the next task starts at the left edge");
+	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
+});
+
 test("a long Todos task wraps with its text lined up under the task's own text", async () => {
 	const loaded = await wide();
 	const long = "T8b1 Home parity part 1: nav/hero/price/integration/panel worker running and then some more words to wrap";
