@@ -50,7 +50,7 @@ test("the status line is the original bar, full width, set off by a blank row ab
 	const out = bar.render(180).map(plain);
 	assert.equal(out.length, 3);
 	assert.equal(out[0], "", "keeps the bar off what the terminal draws above Pi");
-	assert.match(out[1], /^ app · main +ctx .* 28%/);
+	assert.match(out[1], /^ app · \u{E725} main +ctx .* 28%/u);
 	assert.doesNotMatch(out[1], /claude-opus-5-5/, "the model closes the Working row instead");
 	assert.ok([...out[1]].length <= 180 && [...out[1]].length >= 179, "spans the terminal");
 	assert.equal(out[2], "─".repeat(180));

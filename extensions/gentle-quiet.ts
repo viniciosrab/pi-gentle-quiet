@@ -54,7 +54,7 @@ const DEFAULTS = {
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
-	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›" },
+	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›", branch: "\u{E725}" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows.
 	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
@@ -87,7 +87,9 @@ const MEMORY_ICONS = ["\u{100000}", "\u{E28C}", "\u{F09D1}", "\u{F02DA}", "\u{F0
 // like GentleBrain.ttf), then the full-size Nerd Font wrenches (Octicons thin line, Material outline, Material),
 // then the card icons.
 const RDD_ICONS = ["\u{100030}", "\u{F425}", "\u{F0BE0}", "\u{F05B7}", ...CARD_ICONS];
-const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"]];
+// Branch choices: Nerd Font git branch (Devicons, Octicons, Powerline), then a plain Unicode one.
+const BRANCH_ICONS = ["\u{E725}", "\u{F418}", "\u{E0A0}", "⎇"];
+const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"], ["branch", "Branch icon"]];
 const AGENT_TOOLS = /^(subagent_.*|orchestrator_.*)$/;
 // RDD review tools (gentle_review, capture, scope).
 const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
@@ -713,6 +715,7 @@ const ICON_HELP = {
 	agents: "The icon of the Agents block and of subagent tool calls.",
 	rdd: "The icon in front of RDD review tool calls (rdd start, status, capture…).",
 	other: "The icon in front of the other gentle-pi tool calls.",
+	branch: "The icon in front of the git branch in the status line.",
 };
 
 /** The menu's sections, each a list of [label, action, description] items built from the current config. */
@@ -760,7 +763,7 @@ function menuSections(ctx) {
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
-		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : group === "branch" ? BRANCH_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }, "The prompt icon in front of what you type."],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }, "The prompt icon in front of your messages in the conversation."],
@@ -1799,7 +1802,7 @@ function statusLineRows(t, footerData, width) {
 		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
 		: "";
 	const location = (withCounts) => [cwd && fg(t, "muted", cwd), join(
-		branch && fg(t, "text", branch),
+		branch && fg(t, "text", join(config.icons.branch, branch)),
 		changes?.files ? fg(t, "warning", `±${changes.files}`) : "",
 		withCounts && counts,
 	)].filter(Boolean).join(sep);

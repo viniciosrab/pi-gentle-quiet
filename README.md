@@ -64,6 +64,7 @@ Common choices:
 
 ## Reading the status line
 
+- ` main`: the git branch. **Icons** → Branch icon picks another glyph or none.
 - `±2 +3 -1`: files and lines changed since the last commit. Updates every 2 seconds, including
   while a subagent works.
 - `$1.75`: cost of the session, **including its subagents**, each priced by its own model.

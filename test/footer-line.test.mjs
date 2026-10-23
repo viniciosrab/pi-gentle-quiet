@@ -59,7 +59,7 @@ test("replaces Pi's footer: Perm right after the location, counters on the right
 	assert.ok(component, "footer installed");
 	const rows = component.render(170).map(plain);
 	assert.equal(rows.length, 1, "statuses share the line when they fit");
-	assert.match(rows[0], /^app · main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +R50k W2\.0k CH98\.0% · ctx \u{F0A9F} 28% · \$1\.75 sub $/u);
+	assert.match(rows[0], /^app · \u{E725} main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +R50k W2\.0k CH98\.0% · ctx \u{F0A9F} 28% · \$1\.75 sub $/u);
 });
 
 test("the model and its effort are not on the status line", async () => {
@@ -166,7 +166,7 @@ test("on narrow terminals the counters give way before Perm leaves the first lin
 	const { component } = await footer({ session: { cwd: "/srv/app" } });
 	const at = (width) => component.render(width).map(plain);
 	assert.equal(at(66).length, 1);
-	assert.match(at(66)[0], /^app · main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +ctx .* \$1\.75 sub $/);
+	assert.match(at(66)[0], /^app · \u{E725} main · Perm: Normal · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job +ctx .* \$1\.75 sub $/u);
 	const narrow = at(51);
 	assert.equal(narrow.length, 2, "statuses move to a second row only when the first line cannot hold them");
 	assert.match(narrow[1], /^Perm: Normal  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job$/);
@@ -196,10 +196,10 @@ test("the jobs spinner turns while a job runs, and the footer redraws on its own
 
 test("the status line names only the working folder, under ~/ inside home, then a dot before the branch", async () => {
 	const at = async (cwd) => plain((await footer({ session: { cwd }, statuses: {} })).component.render(170)[0]);
-	assert.match(await at(path.join(os.homedir(), ".herdr/worktrees/membero/worktree-quiet-field-5095")), /^~\/worktree-quiet-field-5095 · main +/);
-	assert.match(await at("/srv/app/"), /^app · main +/);
-	assert.match(await at(os.homedir()), /^~ · main +/);
-	assert.match(await at("/"), /^\/ · main +/);
+	assert.match(await at(path.join(os.homedir(), ".herdr/worktrees/membero/worktree-quiet-field-5095")), /^~\/worktree-quiet-field-5095 · \u{E725} main +/u);
+	assert.match(await at("/srv/app/"), /^app · \u{E725} main +/u);
+	assert.match(await at(os.homedir()), /^~ · \u{E725} main +/u);
+	assert.match(await at("/"), /^\/ · \u{E725} main +/u);
 });
 
 test("token counters come from every usage Pi records, like Pi's footer", async () => {
@@ -408,4 +408,28 @@ test("Estimated cost can be turned off in the menu", async () => {
 	assert.ok(seen[1].items.includes("Estimated cost (unpriced providers): on"));
 	assert.equal(readConfig().statusLine.estimateCost, false);
 	assert.match(plain(component.render(160)[0]), /28% · sub $/);
+});
+
+test("the branch has a git branch icon in front, in the branch's color", async () => {
+	const { component } = await footer({ session: { cwd: "/srv/app" }, statuses: {} });
+	const row = component.render(170)[0];
+	assert.match(plain(row), /^app · \u{E725} main +/u);
+	assert.ok(painted(row, "text", "\u{E725} main"), "icon and name in the text role");
+});
+
+test("the branch icon is an Icons choice: another glyph or none, saved", async () => {
+	const { select, seen } = picker(/^Icons ›$/, /^Branch icon/, /^none$/);
+	const { component, commands, ctx } = await footer({ session: { cwd: "/srv/app" }, statuses: {}, load: { select } });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[1].items.includes('Branch icon: "\u{E725}"'));
+	assert.deepEqual(seen[2].items, ["\u{E725}", "\u{F418}", "\u{E0A0}", "⎇", "none", "custom…"]);
+	assert.equal(readConfig().icons.branch, "");
+	assert.match(plain(component.render(170)[0]), /^app · main +/);
+});
+
+test("no branch, no icon", async () => {
+	writeConfig({});
+	const loaded = await load({ mode: "tui", session: session({ cwd: "/srv/app" }) });
+	const component = loaded.footer()({ requestRender() {} }, theme, { ...footerData({}), getGitBranch: () => null });
+	assert.doesNotMatch(plain(component.render(170)[0]), /\u{E725}/u);
 });

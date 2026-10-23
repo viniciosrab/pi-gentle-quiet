@@ -77,7 +77,7 @@ test("MCP sits with the statuses: after Perm on the left, and on the second row 
 	const loaded = await load({ mode: "tui", session: { cwd: "/srv/app", model: { id: "claude-opus-5-5", reasoning: true }, usage: { percent: 28 }, tools: ["mcp__codegraph__q"] } });
 	const data = { ...footerData, getExtensionStatuses: () => new Map([["gentle:mode", "Perm: Normal"]]) };
 	const component = loaded.footer()({ requestRender() {} }, theme, data);
-	assert.match(plain(component.render(200)[0]), /^app · main · Perm: Normal · MCP 1\/3 /);
+	assert.match(plain(component.render(200)[0]), /^app · \u{E725} main · Perm: Normal · MCP 1\/3 /u);
 	const narrow = component.render(33).map(plain);
 	assert.equal(narrow.length, 2);
 	assert.equal(narrow[1], "Perm: Normal  MCP 1/3");
