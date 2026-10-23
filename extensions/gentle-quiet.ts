@@ -70,8 +70,8 @@ const DEFAULTS = {
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
 	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
 	// mcp: "MCP online/installed" among the statuses.
-	// usage: plan windows (5h / week) from the provider's rate-limit response headers.
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, subscriptionProviders: [] },
+	// usage: plan windows (5h / week) from the provider's rate-limit response headers; usageWeek: false drops the week window.
+	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	// Status, Agents and Todos in a column beside the conversation once the fullscreen terminal
@@ -722,7 +722,9 @@ function menuSections(ctx) {
 			[`Status line: ${config.statusLine.enabled ? "gentle" : "pi"}`, () => { config.statusLine.enabled = !config.statusLine.enabled; }, `Which footer shows under the editor. Now: ${config.statusLine.enabled ? "this extension's status line" : "Pi's own footer"}.`],
 			[`Status line changes: ${onOff(config.statusLine.changes)}`, () => { config.statusLine.changes = !config.statusLine.changes; }, "Files and lines changed since the last commit, such as ±2 +3 -1."],
 			[`Status line usage: ${onOff(config.statusLine.usage)}`, () => { config.statusLine.usage = !config.statusLine.usage; }, "Your Claude or Codex plan usage for the 5-hour and weekly windows."],
+			[`Status line weekly usage: ${onOff(config.statusLine.usageWeek)}`, () => { config.statusLine.usageWeek = !config.statusLine.usageWeek; }, "The weekly window of your plan usage, such as week 27%. Off keeps only the 5-hour one."],
 			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online out of those installed, such as MCP 3/3."],
+			[`Status line permission: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "The session's permission mode, such as Perm: Yolo. The same setting as Footer → Permission in footer."],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, `Token counts in the status line. Now: ${{ cache: "cache reads, writes and hit rate", all: "input and output tokens plus the cache figures", off: "hidden" }[config.statusLine.tokens]}.`],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "What the session has cost so far, subagents included."],
 			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
@@ -1819,14 +1821,15 @@ function statusLineRows(t, footerData, width) {
 		if ((withCache || mode === "cache") && cached && totals.cacheHit !== undefined) parts.push(`CH${totals.cacheHit.toFixed(1)}%`);
 		return parts.length ? fg(t, "dim", parts.join(" ")) : "";
 	};
-	// Gentle Shell's usage bar: "claude 5h 󰪢 62% · week 31%". The first window gets the
-	// same meter as ctx; the others are text.
+	// Gentle Shell's usage bar: "claude 5h 󰪢 62% · week 󰪟 31%". Every window gets the
+	// same meter as ctx.
 	const plan = config.statusLine.usage ? currentUsage(ctx) : { name: "", windows: [] };
+	if (!config.statusLine.usageWeek) plan.windows = plan.windows.filter((window) => window.label !== "week");
 	const usageText = (all) => {
 		const [first, ...rest] = plan.windows;
 		if (!first) return "";
 		const head = [fg(t, "muted", plan.name), first.label && fg(t, "muted", first.label), gauge(first.percent, t), fg(t, "text", `${Math.round(first.percent)}%`)].filter(Boolean).join(" ");
-		const tail = all ? rest.map((window) => `${fg(t, "muted", "·")} ${fg(t, "muted", window.label)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`) : [];
+		const tail = all ? rest.map((window) => `${fg(t, "muted", "·")} ${fg(t, "muted", window.label)} ${gauge(window.percent, t)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`) : [];
 		return [head, ...tail].join(" ");
 	};
 	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
