@@ -75,6 +75,23 @@ test("/gentle-quiet toggles an option, redraws the footer and saves it", async (
 	assert.equal(readConfig().permissions.hideWhenNormal, true);
 });
 
+test("the Status tab hides the permission status too, sharing the Footer tab's setting", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Status line ›$/, /^Status line permission/);
+	const { ui, status, commands, ctx } = await load({ select });
+	ui.setStatus("gentle:mode", "Permissions: YOLO");
+	assert.equal(plain(status["gentle:mode"]), "Perm: Yolo");
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[1].items.includes("Status line permission: on"));
+	assert.equal(status["gentle:mode"], undefined, "Perm: Yolo hidden right away");
+	assert.equal(readConfig().permissions.show, false, "the same setting as Footer → Permission in footer");
+	const footer = picker(/^Footer statuses ›$/);
+	const again = await load({ select: footer.select });
+	await again.commands["gentle-quiet"].handler("", again.ctx);
+	assert.ok(footer.seen[1].items.includes("Permission in footer: off"));
+	writeConfig({});
+});
+
 test("/gentle-quiet groups its options in sections; Back returns to them and Reset stays at the top", async () => {
 	writeConfig({ yoloBanner: true });
 	const { select, seen } = picker(/^Tool rows ›$/, /^← Back$/, /^Reset to defaults$/);
@@ -176,7 +193,7 @@ test("the description follows the selection across tabs", async () => {
 });
 
 test("a description follows the current value of an option that cycles", async () => {
-	const screens = await menu([KEY.down, KEY.down, KEY.down, KEY.down, "view", KEY.enter, "wait", "view"]);
+	const screens = await menu([...Array(6).fill(KEY.down), "view", KEY.enter, "wait", "view"]);
 	assert.deepEqual(screens.map(description), [
 		"Token counts in the status line. Now: cache reads, writes and hit rate.",
 		"Token counts in the status line. Now: input and output tokens plus the cache figures.",
@@ -184,7 +201,7 @@ test("a description follows the current value of an option that cycles", async (
 });
 
 test("a long description wraps under the list within the width", async () => {
-	const [screen] = await menu([...Array(6).fill(KEY.down), "view"], 60);
+	const [screen] = await menu([...Array(8).fill(KEY.down), "view"], 60);
 	const rows = screen.map(plain);
 	assert.equal(description(screen), "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge.");
 	assert.ok(screen.filter((line) => painted(line, "dim")).length > 2, "wrapped over several rows");

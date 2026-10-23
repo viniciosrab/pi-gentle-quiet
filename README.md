@@ -56,6 +56,7 @@ Common choices:
 | Want to… | Go to |
 |---|---|
 | Hide the cost, tokens, changed lines or plan usage | **Status** |
+| Hide the weekly plan usage (`week 31%`) or `Perm: Yolo` | **Status** → Status line weekly usage, Status line permission |
 | Show `sub` for a plan Pi cannot detect (claude-bridge) | **Status** → Subscription |
 | Use your theme's colors instead of Claude Code's greys | **Tools** → Tool call tones |
 | Turn off the side column | **Blocks** → Side column |
@@ -69,8 +70,8 @@ Common choices:
   On subscriptions that report $0 (claude-bridge), it is an estimate at Anthropic API prices, not a charge.
 - `ctx 󰪟 28%`: how full the context window is. The ring fills in eighths and turns yellow at 80%, red at 95%.
 - `sub`: the model runs on a subscription.
-- `claude 5h 62% · week 31%`: your plan usage (Claude or Codex). It appears after the first response
-  and follows subagents too.
+- `claude 5h 󰪢 62% · week 󰪟 31%`: your plan usage (Claude or Codex), each window with its own ring. It appears after the first response
+  and follows subagents too. **Status** → Status line weekly usage off keeps only the 5h window.
 - `MCP 3/3`: MCP servers online / installed.
 - `⠋ 1 job`: background jobs (bash_background, monitor) still running; the spinner turns while they run.
 - `claude-opus-5-5 · high` (bottom right, above the editor): the model in use and its effort. It is
