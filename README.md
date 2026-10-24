@@ -56,7 +56,7 @@ Common choices:
 | Want to… | Go to |
 |---|---|
 | Hide the cost, tokens, changed lines or plan usage | **Status** |
-| Hide the weekly plan usage (`week 31%`), the context tokens (`56k/200k`), the cache timer (`⧗ 4m`) or `Perm: Yolo` | **Status** → Status line weekly usage, Status line context tokens, Status line cache timer, Status line permission |
+| Hide the weekly plan usage (`week 31%`), the context tokens (`56k/200k`) or `Perm: Yolo` | **Status** → Status line weekly usage, Status line context tokens, Status line permission |
 | Show `sub` for a plan Pi cannot detect (claude-bridge) | **Status** → Subscription |
 | Use your theme's colors instead of Claude Code's greys | **Tools** → Tool call tones |
 | Turn off the side column | **Blocks** → Side column |
@@ -72,10 +72,6 @@ Common choices:
 - `ctx 󰪟 28% 56k/200k`: how full the context window is, then the tokens in use out of the window
   (`?` right after a compaction). The ring fills in eighths and turns yellow at 80%, red at 95%.
   **Status** → Status line context tokens off keeps only the percent.
-- `⧗ 4m`: minutes the prompt cache stays warm, counted from the last response that read or wrote it;
-  green while warm, `⧗ cold` in the accent color once it expired. Inferred like Collie's chip: providers
-  do not report it. **Status** → Status line cache timer cycles the TTL: 5m (default, the shortest any
-  provider documents, so it goes cold early rather than late), 1h, off.
 - `sub`: the model runs on a subscription.
 - `claude 5h 󰪢 62% · week 󰪟 31%`: your plan usage (Claude or Codex), each window with its own ring. It appears after the first response
   and follows subagents too. **Status** → Status line weekly usage off keeps only the 5h window.
