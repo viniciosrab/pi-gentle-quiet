@@ -433,3 +433,14 @@ test("no branch, no icon", async () => {
 	const component = loaded.footer()({ requestRender() {} }, theme, { ...footerData({}), getGitBranch: () => null });
 	assert.doesNotMatch(plain(component.render(170)[0]), /\u{E725}/u);
 });
+
+test("the context shows the tokens in use out of the window, and the option hides them", async () => {
+	const usage = { percent: 18, tokens: 180_000, contextWindow: 1_000_000 };
+	const shown = plain((await footer({ session: { usage }, statuses: {} })).component.render(160)[0]);
+	assert.match(shown, /ctx \u{F0A9E} 18% 180k\/1\.0M · /u);
+	const unknown = plain((await footer({ session: { usage: { percent: null, tokens: null, contextWindow: 200_000 } }, statuses: {} })).component.render(160)[0]);
+	assert.match(unknown, /ctx \S+ \?% \?\/200k · /u);
+	const off = plain((await footer({ session: { usage }, statuses: {}, config: { statusLine: { contextTokens: false } } })).component.render(160)[0]);
+	assert.match(off, /ctx \u{F0A9E} 18% · /u);
+	assert.doesNotMatch(off, /180k/);
+});
