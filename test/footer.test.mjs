@@ -201,7 +201,7 @@ test("a description follows the current value of an option that cycles", async (
 });
 
 test("a long description wraps under the list within the width", async () => {
-	const [screen] = await menu([...Array(9).fill(KEY.down), "view"], 60);
+	const [screen] = await menu([...Array(10).fill(KEY.down), "view"], 60);
 	const rows = screen.map(plain);
 	assert.equal(description(screen), "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge.");
 	assert.ok(screen.filter((line) => painted(line, "dim")).length > 2, "wrapped over several rows");
