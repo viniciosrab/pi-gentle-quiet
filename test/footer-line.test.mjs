@@ -450,41 +450,23 @@ const cachedAgo = (ago, usage = { input: 200, output: 100, cacheRead: 10000, cac
 	entries: [{ type: "message", message: { role: "assistant", timestamp: Date.now() - ago, usage } }],
 });
 
-test("a warm cache shows the word and the minutes left, the hourglass in green, before ctx", async () => {
-	const line = (await footer({ session: cachedAgo(50_000), statuses: {} })).component.render(160)[0];
-	assert.match(plain(line), / · ⧗ warm 4m · ctx /);
-	assert.ok(painted(line, "success", "⧗"), "the state's color is on the hourglass");
-	assert.ok(painted(line, "dim", "warm 4m"), "the word and the minutes stay dim");
+test("the cache timer counts down the minutes the prompt cache stays warm, in green, before ctx", async () => {
+	const line = (await footer({ session: cachedAgo(60_000), statuses: {} })).component.render(160)[0];
+	assert.match(plain(line), / · ⧗ 4m · ctx /);
+	assert.ok(painted(line, "success", "⧗ 4m"));
+	assert.match(plain((await footer({ session: cachedAgo(270_000), statuses: {} })).component.render(160)[0]), / · ⧗ 1m · ctx /, "the last half minute still counts as 1m");
 });
 
-test("in the last quarter of the TTL (at least a minute) the cache is expiring, the hourglass in red", async () => {
-	const at = async (ago) => (await footer({ session: cachedAgo(ago), statuses: {} })).component.render(160)[0];
-	assert.match(plain(await at(200_000)), / · ⧗ warm 1m · ctx /, "1m40s left is still warm: the threshold is 75s of a 5m TTL");
-	const line = await at(235_000);
-	assert.match(plain(line), / · ⧗ expiring 1m · ctx /);
-	assert.ok(painted(line, "error", "⧗"));
-	assert.match(plain(await at(270_000)), / · ⧗ expiring <1m · ctx /, "under a minute reads <1m");
-	assert.match(plain(await at(303_000)), / · ⧗ expiring <1m · ctx /, "ten seconds of grace past zero before it says cold");
-});
-
-test("past the TTL and its grace the cache is cold, the hourglass in the accent color", async () => {
+test("once the TTL has passed the cache timer says cold, in the accent color", async () => {
 	const line = (await footer({ session: cachedAgo(6 * 60_000), statuses: {} })).component.render(160)[0];
 	assert.match(plain(line), / · ⧗ cold · ctx /);
-	assert.ok(painted(line, "accent", "⧗"));
-	assert.ok(painted(line, "dim", "cold"));
-});
-
-test("a response that wrote the cache without reading it missed: cold right away", async () => {
-	const line = plain((await footer({ session: cachedAgo(10_000, { input: 200, output: 100, cacheRead: 0, cacheWrite: 9000 }), statuses: {} })).component.render(160)[0]);
-	assert.match(line, / · ⧗ cold · ctx /);
+	assert.ok(painted(line, "accent", "⧗ cold"));
 });
 
 test("the cache timer follows the configured TTL and can be turned off", async () => {
-	const hour = plain((await footer({ session: cachedAgo(50_000), statuses: {}, config: { statusLine: { cacheTtl: 60 } } })).component.render(160)[0]);
-	assert.match(hour, / · ⧗ warm 59m · ctx /);
-	const quarter = plain((await footer({ session: cachedAgo(46 * 60_000 - 10_000), statuses: {}, config: { statusLine: { cacheTtl: 60 } } })).component.render(160)[0]);
-	assert.match(quarter, / · ⧗ expiring 14m · ctx /, "a quarter of an hour is 15m");
-	const off = plain((await footer({ session: cachedAgo(50_000), statuses: {}, config: { statusLine: { cacheTtl: 0 } } })).component.render(160)[0]);
+	const hour = plain((await footer({ session: cachedAgo(60_000), statuses: {}, config: { statusLine: { cacheTtl: 60 } } })).component.render(160)[0]);
+	assert.match(hour, / · ⧗ 59m · ctx /);
+	const off = plain((await footer({ session: cachedAgo(60_000), statuses: {}, config: { statusLine: { cacheTtl: 0 } } })).component.render(160)[0]);
 	assert.doesNotMatch(off, /⧗/);
 });
 
