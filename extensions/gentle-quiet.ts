@@ -71,7 +71,7 @@ const DEFAULTS = {
 	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
 	// mcp: "MCP online/installed" among the statuses.
 	// cacheTtl: minutes the prompt cache stays warm after a response that used it (5 or 60, 0 for off);
-	// the status line counts them down as "⧗ 4m" and says "⧗ cold" after. Inferred, like Collie's chip.
+	// the status line shows "⧗ warm 4m", "⧗ expiring 1m" or "⧗ cold". Inferred, like Collie's chip.
 	// contextTokens: the tokens in use out of the context window next to the ctx percent, such as 180k/1.0M.
 	// usage: plan windows (5h / week) from the provider's rate-limit response headers; usageWeek: false drops the week window.
 	statusLine: { enabled: true, changes: true, contextTokens: true, cacheTtl: 5, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
@@ -732,7 +732,7 @@ function menuSections(ctx) {
 			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online out of those installed, such as MCP 3/3."],
 			[`Status line permission: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "The session's permission mode, such as Perm: Yolo. The same setting as Footer → Permission in footer."],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, `Token counts in the status line. Now: ${{ cache: "cache reads, writes and hit rate", all: "input and output tokens plus the cache figures", off: "hidden" }[config.statusLine.tokens]}.`],
-			[`Status line cache timer: ${cacheTtlLabel(config.statusLine.cacheTtl)}`, () => { config.statusLine.cacheTtl = CACHE_TTLS[(CACHE_TTLS.indexOf(config.statusLine.cacheTtl) + 1) % CACHE_TTLS.length]; }, `How long the prompt cache stays warm after a response, counted down before ctx (⧗ 4m, then ⧗ cold). Inferred from the last response, not reported by the provider. Now: ${{ 5: "5 minutes, the shortest TTL providers document", 60: "1 hour", 0: "hidden" }[config.statusLine.cacheTtl]}.`],
+			[`Status line cache timer: ${cacheTtlLabel(config.statusLine.cacheTtl)}`, () => { config.statusLine.cacheTtl = CACHE_TTLS[(CACHE_TTLS.indexOf(config.statusLine.cacheTtl) + 1) % CACHE_TTLS.length]; }, `How long the prompt cache stays warm after a response, shown before ctx as ⧗ warm 4m, ⧗ expiring 1m or ⧗ cold. Inferred from the last response, not reported by the provider. Now: ${{ 5: "5 minutes, the shortest TTL providers document", 60: "1 hour", 0: "hidden" }[config.statusLine.cacheTtl]}.`],
 			[`Status line context tokens: ${onOff(config.statusLine.contextTokens)}`, () => { config.statusLine.contextTokens = !config.statusLine.contextTokens; }, "The tokens in use out of the model's context window next to the ctx percent, such as 180k/1.0M."],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "What the session has cost so far, subagents included."],
 			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
@@ -1778,7 +1778,13 @@ function footerTotals(ctx) {
 const CACHE_TTLS = [5, 60, 0];
 const cacheTtlLabel = (minutes) => (minutes === 0 ? "off" : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`);
 
-/** "4m" while the prompt cache is warm, "cold" after; "" before a response that used the cache. */
+// Collie's cache chip rule (bridge/cache/engine.ts, web/src/lib/cache-view.ts): expiring once at most
+// a quarter of the TTL is left (never less than a minute); cold ten seconds past zero, so a redraw
+// that lands right at the crossing does not flip it; cold at once when the last response missed.
+const CACHE_GRACE_MS = 10_000;
+const CACHE_TONES = { warm: "success", expiring: "error", cold: "accent" };
+
+/** "warm 4m", "expiring <1m" or "cold"; "" before a response that used the cache. */
 function cacheLeft(ctx) {
 	const ttl = CACHE_TTLS.includes(config.statusLine.cacheTtl) ? config.statusLine.cacheTtl : DEFAULTS.statusLine.cacheTtl;
 	if (!ttl) return "";
@@ -1787,17 +1793,23 @@ function cacheLeft(ctx) {
 		const message = entries[i]?.type === "message" ? entries[i].message : undefined;
 		if (message?.role !== "assistant" || !message.usage) continue;
 		const at = Number.isFinite(message.timestamp) ? message.timestamp : Date.parse(entries[i].timestamp ?? "");
-		if (!Number.isFinite(at) || !(message.usage.cacheRead > 0 || message.usage.cacheWrite > 0)) return "";
+		const read = message.usage.cacheRead || 0;
+		const wrote = message.usage.cacheWrite || 0;
+		if (!Number.isFinite(at) || !(read > 0 || wrote > 0)) return "";
+		if (read === 0) return "cold"; // wrote without reading: that response missed the cache
 		const left = at + ttl * 60_000 - Date.now();
-		return left > 0 ? `${Math.ceil(left / 60_000)}m` : "cold";
+		if (left <= -CACHE_GRACE_MS) return "cold";
+		const minutes = Math.floor(Math.max(0, left) / 60_000);
+		const state = left <= Math.max(60_000, ttl * 60_000 * 0.25) ? "expiring" : "warm";
+		return `${state} ${minutes < 1 ? "<1m" : `${minutes}m`}`;
 	}
 	return "";
 }
 
-/** The countdown in green while the cache is warm, in the accent color once it went cold. */
+/** The hourglass carries the state's color, like Collie's chip; the word and the minutes stay dim. */
 function cacheTimer(ctx, t) {
 	const left = cacheLeft(ctx);
-	return left && fg(t, left === "cold" ? "accent" : "success", `⧗ ${left}`);
+	return left && `${fg(t, CACHE_TONES[left.split(" ")[0]], "⧗")} ${fg(t, "dim", left)}`;
 }
 
 // Pi's token format: 950, 1.2k, 50k, 2.0M, 33M.
