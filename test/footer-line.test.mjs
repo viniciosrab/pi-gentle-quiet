@@ -444,3 +444,49 @@ test("the context shows the tokens in use out of the window, and the option hide
 	assert.match(off, /ctx \u{F0A9E} 18% · /u);
 	assert.doesNotMatch(off, /180k/);
 });
+
+// The latest response, `ago` ms before now, read or wrote the prompt cache.
+const cachedAgo = (ago, usage = { input: 200, output: 100, cacheRead: 10000, cacheWrite: 0 }) => ({
+	entries: [{ type: "message", message: { role: "assistant", timestamp: Date.now() - ago, usage } }],
+});
+
+test("the cache timer counts down the minutes the prompt cache stays warm, in green, before ctx", async () => {
+	const line = (await footer({ session: cachedAgo(60_000), statuses: {} })).component.render(160)[0];
+	assert.match(plain(line), / · ⧗ 4m · ctx /);
+	assert.ok(painted(line, "success", "⧗ 4m"));
+	assert.match(plain((await footer({ session: cachedAgo(270_000), statuses: {} })).component.render(160)[0]), / · ⧗ 1m · ctx /, "the last half minute still counts as 1m");
+});
+
+test("once the TTL has passed the cache timer says cold, in the accent color", async () => {
+	const line = (await footer({ session: cachedAgo(6 * 60_000), statuses: {} })).component.render(160)[0];
+	assert.match(plain(line), / · ⧗ cold · ctx /);
+	assert.ok(painted(line, "accent", "⧗ cold"));
+});
+
+test("the cache timer follows the configured TTL and can be turned off", async () => {
+	const hour = plain((await footer({ session: cachedAgo(60_000), statuses: {}, config: { statusLine: { cacheTtl: 60 } } })).component.render(160)[0]);
+	assert.match(hour, / · ⧗ 59m · ctx /);
+	const off = plain((await footer({ session: cachedAgo(60_000), statuses: {}, config: { statusLine: { cacheTtl: 0 } } })).component.render(160)[0]);
+	assert.doesNotMatch(off, /⧗/);
+});
+
+test("no cache timer before a response that used the cache", async () => {
+	const none = plain((await footer({ session: cachedAgo(60_000, { input: 900, output: 100, cacheRead: 0, cacheWrite: 0 }), statuses: {} })).component.render(160)[0]);
+	assert.doesNotMatch(none, /⧗/);
+	const fresh = plain((await footer({ session: { entries: [] }, statuses: {} })).component.render(160)[0]);
+	assert.doesNotMatch(fresh, /⧗/);
+});
+
+test("Status line cache timer cycles 5m → 1h → off and is saved", async () => {
+	const timer = /^Status line cache timer/;
+	const { select, seen } = picker(/^Status line ›$/, timer, timer, timer);
+	const { commands, ctx } = await footer({ load: { select }, session: cachedAgo(60_000), statuses: {} });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(seen.slice(1, 5).map(({ items }) => items.find((item) => timer.test(item))), [
+		"Status line cache timer: 5m",
+		"Status line cache timer: 1h",
+		"Status line cache timer: off",
+		"Status line cache timer: 5m",
+	]);
+	assert.equal(readConfig().statusLine.cacheTtl, 5);
+});
