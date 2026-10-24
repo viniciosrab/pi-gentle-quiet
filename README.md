@@ -56,7 +56,7 @@ Common choices:
 | Want to… | Go to |
 |---|---|
 | Hide the cost, tokens, changed lines or plan usage | **Status** |
-| Hide the weekly plan usage (`week 31%`) or `Perm: Yolo` | **Status** → Status line weekly usage, Status line permission |
+| Hide the weekly plan usage (`week 31%`), the context tokens (`56k/200k`) or `Perm: Yolo` | **Status** → Status line weekly usage, Status line context tokens, Status line permission |
 | Show `sub` for a plan Pi cannot detect (claude-bridge) | **Status** → Subscription |
 | Use your theme's colors instead of Claude Code's greys | **Tools** → Tool call tones |
 | Turn off the side column | **Blocks** → Side column |
@@ -69,7 +69,9 @@ Common choices:
   while a subagent works.
 - `$1.75`: cost of the session, **including its subagents**, each priced by its own model.
   On subscriptions that report $0 (claude-bridge), it is an estimate at Anthropic API prices, not a charge.
-- `ctx 󰪟 28%`: how full the context window is. The ring fills in eighths and turns yellow at 80%, red at 95%.
+- `ctx 󰪟 28% 56k/200k`: how full the context window is, then the tokens in use out of the window
+  (`?` right after a compaction). The ring fills in eighths and turns yellow at 80%, red at 95%.
+  **Status** → Status line context tokens off keeps only the percent.
 - `sub`: the model runs on a subscription.
 - `claude 5h 󰪢 62% · week 󰪟 31%`: your plan usage (Claude or Codex), each window with its own ring. It appears after the first response
   and follows subagents too. **Status** → Status line weekly usage off keeps only the 5h window.

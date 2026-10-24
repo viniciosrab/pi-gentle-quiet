@@ -70,8 +70,9 @@ const DEFAULTS = {
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
 	// estimateCost: API-equivalent cost for zero-priced responses (claude-bridge), from Anthropic prices.
 	// mcp: "MCP online/installed" among the statuses.
+	// contextTokens: the tokens in use out of the context window next to the ctx percent, such as 180k/1.0M.
 	// usage: plan windows (5h / week) from the provider's rate-limit response headers; usageWeek: false drops the week window.
-	statusLine: { enabled: true, changes: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
+	statusLine: { enabled: true, changes: true, contextTokens: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	// Status, Agents and Todos in a column beside the conversation once the fullscreen terminal
@@ -729,6 +730,7 @@ function menuSections(ctx) {
 			[`Status line MCP: ${onOff(config.statusLine.mcp)}`, () => { config.statusLine.mcp = !config.statusLine.mcp; }, "MCP servers online out of those installed, such as MCP 3/3."],
 			[`Status line permission: ${onOff(config.permissions.show)}`, () => { config.permissions.show = !config.permissions.show; }, "The session's permission mode, such as Perm: Yolo. The same setting as Footer → Permission in footer."],
 			[`Status line tokens: ${config.statusLine.tokens}`, () => { config.statusLine.tokens = TOKEN_MODES[(TOKEN_MODES.indexOf(config.statusLine.tokens) + 1) % TOKEN_MODES.length]; }, `Token counts in the status line. Now: ${{ cache: "cache reads, writes and hit rate", all: "input and output tokens plus the cache figures", off: "hidden" }[config.statusLine.tokens]}.`],
+			[`Status line context tokens: ${onOff(config.statusLine.contextTokens)}`, () => { config.statusLine.contextTokens = !config.statusLine.contextTokens; }, "The tokens in use out of the model's context window next to the ctx percent, such as 180k/1.0M."],
 			[`Status line cost: ${onOff(config.statusLine.cost)}`, () => { config.statusLine.cost = !config.statusLine.cost; }, "What the session has cost so far, subagents included."],
 			[`Estimated cost (unpriced providers): ${onOff(config.statusLine.estimateCost)}`, () => { config.statusLine.estimateCost = !config.statusLine.estimateCost; }, "Prices responses billed at $0 (claude-bridge) at the same model's Anthropic API rates. An estimate, not a charge."],
 			...(ctx.model?.provider ? [[`Subscription (${ctx.model.provider}): ${onOff(config.statusLine.subscriptionProviders.includes(ctx.model.provider))}`, () => {
@@ -1835,7 +1837,10 @@ function statusLineRows(t, footerData, width) {
 		const tail = all ? rest.map((window) => `${fg(t, "muted", "·")} ${fg(t, "muted", window.label)} ${gauge(window.percent, t)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`) : [];
 		return [head, ...tail].join(" ");
 	};
-	const contextText = `${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
+	// Like Pi's footer: "?" for the tokens in use while they are unknown (right after a compaction).
+	const window = config.statusLine.contextTokens && typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : 0;
+	const used = typeof usage?.tokens === "number" ? formatTokens(usage.tokens) : "?";
+	const contextText = join(`${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`, window && fg(t, "dim", `${used}/${formatTokens(window)}`));
 
 	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
 		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
