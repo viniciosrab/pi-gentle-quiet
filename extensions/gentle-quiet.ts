@@ -704,6 +704,17 @@ for (const [name, framed] of Object.entries(ownFraming)) {
 	}
 	proto[BOX_MARGIN_PATCHED] = true;
 }
+// Pi's "auto" scrollbar shows while scrolling and paints over the content's last column, the end of a
+// tool box or of a user message bar. Like "always", it gets a column of its own, at the right edge.
+const SCROLLBAR_COLUMN_PATCHED = Symbol.for("gentle-quiet.scrollbarColumn");
+const scrollProto = PiTui.ScrollView?.prototype;
+if (typeof scrollProto?.getContentWidth === "function" && !scrollProto[SCROLLBAR_COLUMN_PATCHED]) {
+	const contentWidth = scrollProto.getContentWidth;
+	scrollProto.getContentWidth = function (width) {
+		return this.scrollbar === "auto" && width > 1 ? width - 1 : contentWidth.call(this, width);
+	};
+	scrollProto[SCROLLBAR_COLUMN_PATCHED] = true;
+}
 let previousEditor;
 let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
 

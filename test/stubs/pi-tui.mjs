@@ -56,9 +56,11 @@ export class ScrollView {
 		this.content = content;
 		this.options = options;
 		this.scrollTop = 0;
+		this.scrollbar = options.scrollbar ?? "auto";
 	}
+	// Like Pi's: only an "always" scrollbar keeps a column of its own; "auto" paints over the content's last column.
 	getContentWidth(width) {
-		return width - 1;
+		return this.scrollbar === "always" && width > 1 ? width - 1 : width;
 	}
 	render(width) {
 		return this.content.render(width);

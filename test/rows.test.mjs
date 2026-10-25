@@ -164,3 +164,12 @@ test("Tool rows margin off leaves boxed tool calls and custom messages in Pi's c
 	assert.deepEqual(new CustomMessageComponent().render(6), ["", "######"]);
 	writeConfig({});
 });
+
+test("the auto scrollbar gets a column of its own, so it never paints over a tool row's last column", async () => {
+	await load();
+	const { ScrollView } = await import("@earendil-works/pi-tui");
+	assert.equal(new ScrollView({}, { scrollbar: "auto" }).getContentWidth(80), 79);
+	assert.equal(new ScrollView({}, { scrollbar: "always" }).getContentWidth(80), 79, "always already had it");
+	assert.equal(new ScrollView({}, { scrollbar: "hidden" }).getContentWidth(80), 80, "no scrollbar, no column");
+	assert.equal(new ScrollView({}, { scrollbar: "auto" }).getContentWidth(1), 1);
+});
