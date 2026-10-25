@@ -7,6 +7,12 @@ same; only how it is drawn changes.
 ## What you get
 
 - **Quiet tool rows.** Each call is one row plus a one-line result. `ctrl+o` shows the full output.
+  Calls and messages Pi still draws in a background box start at the same column as these rows, not at the user message's.
+- **Web calls without the box.** pi-web-access's `fetch`, `search`, `get_content` and `source_check` keep their own
+  call row, at the same column as the other tool rows, behind Claude Code's status dot: grey and blinking while the call
+  runs, then a fixed green when it ends or red when it fails, whatever the theme. Under it, one line that changes while
+  the call runs, like Claude Code (pi-web-access's progress, or "Fetching…"), then its status line, such as
+  `2/2 queries, 6 sources`. `ctrl+o` shows pi-web-access's full output.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, Todos and Agents move to
   the right and the status line moves to the top. The Todos card shows every task.

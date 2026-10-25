@@ -37,3 +37,35 @@ export class UserMessageComponent {
 		this.children = [{ text: this.text, paddingX: this.outputPad, paddingY: 1, cachedText: this.text }];
 	}
 }
+
+/** A tool call: Pi's background box fills every column; renderShell "self" leaves the framing to the tool. */
+export class ToolExecutionComponent {
+	constructor(toolDefinition) {
+		this.toolDefinition = toolDefinition;
+	}
+	hasRendererDefinition() {
+		return this.toolDefinition !== undefined;
+	}
+	getRenderShell() {
+		return this.toolDefinition?.renderShell ?? "default";
+	}
+	render(width) {
+		return ["", "#".repeat(width)];
+	}
+	handleMouse(event) {
+		return event;
+	}
+}
+
+/** A custom message: Pi's background box unless a registered renderer returned its own component. */
+export class CustomMessageComponent {
+	constructor(customComponent) {
+		this.customComponent = customComponent;
+	}
+	render(width) {
+		return ["", "#".repeat(width)];
+	}
+	handleMouse(event) {
+		return event;
+	}
+}
