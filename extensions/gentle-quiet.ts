@@ -21,17 +21,22 @@
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
 //           with ctrl+o expanding to Pi's own output (execution stays Pi's)
+//   web     pi-web-access's calls keep their own rows, without the box, behind Claude Code's dot (grey blinking while
+//           running, green when done, red on failure):
+//             " ● fetch https://example.com"
+//             "   └ Example (6152 chars)"
+//           one line that changes while the call runs, like Claude Code; ctrl+o shows pi-web-access's full output
 //   prompt  "❯ " flush with the margin before the input and sent user messages (from pi-pretty,
 //           without its rounded borders, so the editor stays native)
 // Neither package offers display options, so this rewrites their UI writes.
 // @ts-nocheck
 
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -62,6 +67,8 @@ const DEFAULTS = {
 	// "soft" uses the theme's toolTitle for the name and muted for the path, without bold.
 	tools: { restyle: true, margin: true, tones: "claude" },
 	// Pi's own tools collapsed to a call row and a one-line summary; ctrl+o expands to Pi's full output.
+	// pi-web-access's web calls lose the box: Claude Code's fixed green/red status dot and one line that changes
+	// while the call runs, like Claude Code; ctrl+o shows pi-web-access's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
 	// codemodeOutput: lines of the script's own output shown under a codemode summary.
@@ -671,13 +678,6 @@ if (typeof userProto?.rebuild === "function" && !userProto[USER_ROWS_PATCHED]) {
 	};
 	userProto[USER_ROWS_PATCHED] = true;
 }
-let previousEditor;
-let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
-
-// Pi drops custom editors when it resets extension UI (session switch, resume,
-// fork, /reload), so this checks the editor actually in place every time.
-function applyEditor(ctx) {
-	const ui = ctx?.ui;
 // Tool calls and custom messages Pi draws in its background box (fetch, MCP tools, gentle-pi's
 // [gentle-pi.review-preflight]): the box starts at Pi's one-column margin, where the quiet tool rows
 // start, instead of in column 0 with the sent user messages. Rows that frame themselves (renderShell
@@ -704,6 +704,13 @@ for (const [name, framed] of Object.entries(ownFraming)) {
 	}
 	proto[BOX_MARGIN_PATCHED] = true;
 }
+let previousEditor;
+let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
+
+// Pi drops custom editors when it resets extension UI (session switch, resume,
+// fork, /reload), so this checks the editor actually in place every time.
+function applyEditor(ctx) {
+	const ui = ctx?.ui;
 	if (ctx?.mode !== "tui" || typeof ui?.setEditorComponent !== "function") return;
 	const current = typeof ui.getEditorComponent === "function" ? ui.getEditorComponent() : installedOn === ui ? promptEditorFactory : undefined;
 	if (config.prompt.editor && current !== promptEditorFactory) {
@@ -779,7 +786,7 @@ function menuSections(ctx) {
 			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, `${config.tools.restyle ? "gentle-pi and memory tool calls drawn as compact rows." : "gentle-pi and memory tool calls as their packages draw them."} Applies to new calls.`],
 			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Lines those rows and Pi's boxed tool calls up with Pi's own tools, one column in from the edge."],
 			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }, `Colors of tool names, paths and commands. Now: ${{ claude: "Claude Code's fixed greys", soft: "the same layout in your theme's colors", theme: "your theme's tool colors" }[config.tools.tones]}.`],
-			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row and a one-line summary. ctrl+o shows the full output."],
+			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row and a one-line summary; web calls (fetch, search…) without the box, as one line that changes while the call runs, like Claude Code, behind a fixed green/red dot. ctrl+o shows the full output."],
 			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }, `Where ctrl+o to expand appears. Now: ${{ last: "only on the latest call", all: "on every call", never: "nowhere" }[config.quiet.hint]}.`],
 			[`Quiet preview lines: ${config.quiet.preview}`, () => { config.quiet.preview = QUIET_PREVIEWS[(QUIET_PREVIEWS.indexOf(config.quiet.preview) + 1) % QUIET_PREVIEWS.length]; }, "How many output lines show under a quiet tool's summary."],
 			[`Codemode output lines: ${config.quiet.codemodeOutput}`, () => { config.quiet.codemodeOutput = CODEMODE_OUTPUTS[(CODEMODE_OUTPUTS.indexOf(config.quiet.codemodeOutput) + 1) % CODEMODE_OUTPUTS.length]; }, "How many lines of a codemode script's output show under its summary. 0 hides them."],
@@ -950,6 +957,8 @@ async function configure(ctx) {
 // gentle-pi's background jobs (bash_background, monitor, job_stop, job_list) and codegraph follow the same rows.
 const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "codemode", "bash_background", "monitor", "job_stop", "job_list", "codegraph"]);
 const QUIET_PREVIEWS = [0, 1, 3, 5];
+// The link from a call to its result rows, on every tool row.
+const LINK = "└";
 const HOME = os.homedir();
 
 const shortPath = (value) => {
@@ -1172,7 +1181,7 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 }
 
 function quietResultText(toolName, result, options, context, t) {
-	const prefix = fg(t, "dim", "└");
+	const prefix = fg(t, "dim", LINK);
 	if (options.isPartial) {
 		const runningCalls = toolName === "codemode" ? codemodeCalls(result).length : 0;
 		const running = fg(t, "dim", runningCalls ? `running… ${plural(runningCalls, "call")}` : "running…");
@@ -1329,6 +1338,124 @@ function padded(component, { diff = false } = {}) {
 	});
 }
 
+// pi-web-access's calls: its own call row behind Claude Code's dot (grey and blinking while it runs, then green, or red when it fails), then
+// one line that changes while the call runs, like Claude Code; ctrl+o shows pi-web-access's full output. No background box.
+const WEB_TOOLS = new Set(["web_search", "fetch_content", "get_search_content", "source_check"]);
+// What a running call says when pi-web-access draws no progress, like Claude Code's "Fetching…".
+const WEB_RUNNING = { web_search: "Searching…", source_check: "Searching…", fetch_content: "Fetching…", get_search_content: "Reading…" };
+// Claude Code's tool dot: grey and blinking every 600 ms while the call runs, green when it ends, red when it fails.
+// Fixed truecolor, as in Claude Code: a monochrome theme paints success and error grey.
+const WEB_BLINK_MS = 600;
+const WEB_GREEN = (text) => `\x1b[38;2;78;186;101m${text}\x1b[39m`;
+const WEB_RED = (text) => `\x1b[38;2;255;107;128m${text}\x1b[39m`;
+const webDot = (t, status) => {
+	if (status === "error") return WEB_RED("●");
+	if (status !== "running") return WEB_GREEN("●");
+	return Math.floor(Date.now() / WEB_BLINK_MS) % 2 ? " " : fg(t, "dim", "●");
+};
+const withoutBackground = (line) => (line.includes("\x1b[") ? tokens(line).map((tok) => (tok.esc ? stripBackground(tok.esc) : tok.ch)).join("") : line);
+// Drops `count` leading spaces of a row, keeping its colors.
+const dedent = (row, count) => {
+	let left = count;
+	return tokens(row).map((tok) => (tok.ch === " " && left > 0 ? (left--, "") : ((left = tok.ch === undefined ? left : 0), tok.esc ?? tok.ch))).join("");
+};
+const nativeLines = (component, width) => (component && typeof component.render === "function" ? component.render(width).map(withoutBackground) : []);
+
+function webRenderers(toolName, renderers) {
+	const setStatus = (state, status, context) => {
+		if (!state) return;
+		state.webStatus = status;
+		if (status !== "running") {
+			clearInterval(state.webBlink);
+			state.webBlink = undefined;
+		} else if (!state.webBlink) {
+			// Pi redraws a call only when it changes: repaint while the dot blinks.
+			state.webBlink = setInterval(() => {
+				const tui = footerTui ?? modelTui;
+				if (tui?.requestRender) tui.requestRender();
+				else context.invalidate?.();
+			}, WEB_BLINK_MS);
+			state.webBlink.unref?.();
+		}
+	};
+	return {
+		...renderers,
+		renderShell: "self", // no tool background box; the rows carry Pi's margin themselves
+		renderCall(args, t, context = {}) {
+			const state = context.state && typeof context.state === "object" ? context.state : undefined;
+			const initial = context.isPartial ? "running" : context.isError ? "error" : "done";
+			if (state && (state.webStatus === undefined || context.isPartial === false)) setStatus(state, initial, context);
+			let native;
+			try {
+				native = renderers.renderCall?.(args, t, context);
+			} catch {
+				native = undefined;
+			}
+			return {
+				render(width) {
+					const rows = nativeLines(native, Math.max(1, width - 3));
+					const dot = webDot(t, state?.webStatus ?? initial);
+					// Rows under the call (search's queries, fetch's URLs) get the link under the tool name, like the result row.
+					const link = fg(t, "dim", LINK);
+					return (rows.length ? rows : [""]).map((row, i) => truncateToWidth(i === 0 ? ` ${dot} ${row}` : `   ${link} ${dedent(row, plainText(row).length - plainText(row).trimStart().length)}`, width, "…"));
+				},
+				invalidate() {
+					native?.invalidate?.();
+				},
+			};
+		},
+		renderResult(result, options = {}, t, context = {}) {
+			const state = context.state && typeof context.state === "object" ? context.state : undefined;
+			const isError = Boolean(context.isError || result?.isError);
+			setStatus(state, options.isPartial ? "running" : isError ? "error" : "done", context);
+			let native;
+			try {
+				native = renderers.renderResult?.(result, options, t, { ...context, lastComponent: state?.quietNative });
+				if (state) state.quietNative = native;
+			} catch {
+				native = undefined;
+			}
+			const prefix = fg(t, "dim", LINK);
+			if (!options.expanded || options.isPartial) {
+				// One line under the call: pi-web-access's first row (its progress while running, its status line when
+				// done), so it changes as the call goes, like Claude Code. The dot carries the status.
+				const order = orderOf(context.toolCallId, !options.isPartial);
+				const fallback = () => firstLine(outputLines(textOf(result))[0] ?? "done", 100);
+				return {
+					render(width) {
+						const first = nativeLines(native, Math.max(1, width - 6)).find((row) => plainText(row).trim() !== "");
+						const row = first && dedent(first, plainText(first).length - plainText(first).trimStart().length);
+						let line;
+						if (options.isPartial) line = fg(t, "dim", row ?? WEB_RUNNING[toolName] ?? "running…");
+						else if (isError) line = WEB_RED(first ? plainText(first).trim() : fallback());
+						else line = row ?? fg(t, "dim", fallback());
+						return quietResultComponent({ summary: `  ${prefix} ${line}`, hint: options.isPartial ? "" : expandHint(t), rest: [] }, order).render(width);
+					},
+					invalidate() {
+						native?.invalidate?.();
+					},
+				};
+			}
+			// ctrl+o: pi-web-access's expanded rows hang under the call without its background.
+			// Blank rows inside stay blank, so its spacing is kept.
+			return {
+				render(width) {
+					const rows = nativeLines(native, Math.max(1, width - 6));
+					while (rows.length && plainText(rows[0]).trim() === "") rows.shift();
+					while (rows.length && plainText(rows.at(-1)).trim() === "") rows.pop();
+					if (!rows.length) rows.push(fg(t, "dim", firstLine(outputLines(textOf(result))[0] ?? "done", 100)));
+					// The indent every row shares (web_search's " 3 sources") goes; nested indents stay.
+					const indent = Math.min(...rows.filter((row) => plainText(row).trim() !== "").map((row) => plainText(row).length - plainText(row).trimStart().length));
+					return rows.map((row, i) => (i > 0 && plainText(row).trim() === "" ? "" : truncateToWidth(`   ${i === 0 ? prefix : " "} ${dedent(row, indent)}`, width, "…")));
+				},
+				invalidate() {
+					native?.invalidate?.();
+				},
+			};
+		},
+	};
+}
+
 function quietRenderers(toolName, renderers) {
 	return {
 		...renderers,
@@ -1457,7 +1584,7 @@ function memoryRenderers(chrome, toolName, renderers) {
 			if (options.isPartial) line = fg(t, "dim", status);
 			else if (status.startsWith("✗")) line = fg(t, "error", status);
 			else line = join(fg(t, "success", "✓"), fg(t, "dim", status.replace(/^✓\s*/, "")));
-			return flattened(new Text([`${fg(t, "dim", "└")} ${line}`, ...body].join("\n"), 0, 0), toolOptions("memory"));
+			return flattened(new Text([`${fg(t, "dim", LINK)} ${line}`, ...body].join("\n"), 0, 0), toolOptions("memory"));
 		},
 	};
 }
@@ -1519,7 +1646,7 @@ function reviewRenderers(renderers) {
 				const failed = context.isError || /^(failed|error)\b/i.test(summary);
 				const mark = failed ? fg(t, "error", "✗") : /^blocked\b/i.test(summary) ? fg(t, "warning", "●") : options.isPartial ? fg(t, "dim", "…") : fg(t, "success", "✓");
 				const tone = failed ? "error" : "dim";
-				return [` ${fg(t, "dim", "└")} ${mark} ${fg(t, tone, join(summary, clock && `· ${clock}`))}`];
+				return [` ${fg(t, "dim", LINK)} ${mark} ${fg(t, tone, join(summary, clock && `· ${clock}`))}`];
 			});
 		},
 	};
@@ -2429,7 +2556,7 @@ function agentResultRenderer(message, options = {}, t) {
 			const left = ` ${head}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
 			const top = hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…");
-			return summary ? [top, truncateToWidth(` ${fg(t, "dim", "└")} ${fg(t, "dim", summary)}`, width, "…")] : [top];
+			return summary ? [top, truncateToWidth(` ${fg(t, "dim", LINK)} ${fg(t, "dim", summary)}`, width, "…")] : [top];
 		},
 		invalidate() {},
 	};
@@ -2448,7 +2575,7 @@ function staleResultRenderer(entry, options = {}, t) {
 	const taskId = clean(String(data.taskId ?? ""));
 	const label = clean(String(data.label ?? ""));
 	const head = join(fg(t, "toolTitle", bold(t, join(config.icons.agents, agent))), fg(t, "dim", "·"), fg(t, "warning", "stale"));
-	const summary = `${fg(t, "dim", "└")} ${fg(t, "dim", `${status} ${age} ago while the orchestrator was busy`)}`;
+	const summary = `${fg(t, "dim", LINK)} ${fg(t, "dim", `${status} ${age} ago while the orchestrator was busy`)}`;
 	const detail = `Not replayed here; read it with subagent_result ${taskId}${label ? ` (${label})` : ""}.`;
 	return {
 		render(width) {
@@ -2490,7 +2617,7 @@ function jobNoticeRenderer(message, options = {}, t) {
 	else if (details.status === "exited" && details.exitCode === 0) summary = fg(t, "success", `✓ ${outcome}`);
 	else if (details.status === "stopped" || details.event === "timeout") summary = fg(t, "warning", outcome);
 	else summary = fg(t, "error", `✗ ${outcome}`);
-	const prefix = `${fg(t, "dim", "└")} ${summary}`;
+	const prefix = `${fg(t, "dim", LINK)} ${summary}`;
 	const rows = body.filter((line) => line.trim() !== "");
 	return {
 		render(width) {
@@ -2610,6 +2737,7 @@ export default async function (pi) {
 			// codegraph has no renderers of its own, so it is quiet without any to wrap.
 			if (QUIET_TOOLS.has(toolName) && config.quiet.enabled) return quietRenderers(toolName, renderers ?? {});
 			if (!renderers) return renderers;
+			if (WEB_TOOLS.has(toolName) && config.quiet.enabled) return webRenderers(toolName, renderers);
 			if (!config.tools.restyle && (toolName.startsWith("mem_") || SELF_TOOLS.test(toolName))) return renderers;
 			if (toolName.startsWith("mem_") && chrome?.humanToolName && chrome?.renderResultText) {
 				return memoryRenderers(chrome, toolName, renderers);
