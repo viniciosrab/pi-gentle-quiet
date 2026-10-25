@@ -141,3 +141,26 @@ test("rdd results mark blocked and failed states, and a running call keeps its s
 	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, {})), [" └ ● blocked · collect · reviewer_results_required"]);
 	assert.deepEqual(lines(rdd.renderResult({}, { expanded: false }, theme, { isError: true })), [" └ ✗ blocked · collect · reviewer_results_required"]);
 });
+
+test("boxed tool calls and custom messages start at the margin, not in the user message column", async () => {
+	writeConfig({});
+	await load();
+	const { ToolExecutionComponent, CustomMessageComponent } = await import("@earendil-works/pi-coding-agent");
+	const fetch = new ToolExecutionComponent({ renderCall() {} });
+	assert.deepEqual(fetch.render(6), ["", " #####"]);
+	assert.deepEqual(fetch.handleMouse({ x: 3, y: 1, width: 6 }), { x: 2, y: 1, width: 5 });
+	assert.equal(fetch.handleMouse({ x: 0, y: 1, width: 6 }), undefined, "the margin column is not the box");
+	assert.deepEqual(new CustomMessageComponent().render(6), ["", " #####"]);
+	// Rows that carry the margin themselves stay where they are.
+	assert.deepEqual(new ToolExecutionComponent({ renderShell: "self" }).render(6), ["", "######"]);
+	assert.deepEqual(new CustomMessageComponent({ render: () => [] }).render(6), ["", "######"]);
+});
+
+test("Tool rows margin off leaves boxed tool calls and custom messages in Pi's column", async () => {
+	writeConfig({ tools: { margin: false } });
+	await load();
+	const { ToolExecutionComponent, CustomMessageComponent } = await import("@earendil-works/pi-coding-agent");
+	assert.deepEqual(new ToolExecutionComponent({ renderCall() {} }).render(6), ["", "######"]);
+	assert.deepEqual(new CustomMessageComponent().render(6), ["", "######"]);
+	writeConfig({});
+});

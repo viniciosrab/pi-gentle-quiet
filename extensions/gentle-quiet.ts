@@ -31,6 +31,7 @@ import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -56,7 +57,7 @@ const DEFAULTS = {
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
 	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›", branch: "\u{E725}" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
-	// margin: Pi's one-column margin for those rows.
+	// margin: Pi's one-column margin for those rows, and for the tool calls and messages Pi draws in a background box.
 	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
 	// "soft" uses the theme's toolTitle for the name and muted for the path, without bold.
 	tools: { restyle: true, margin: true, tones: "claude" },
@@ -677,6 +678,32 @@ let installedOn; // the UI our editor was last installed on, for hosts without g
 // fork, /reload), so this checks the editor actually in place every time.
 function applyEditor(ctx) {
 	const ui = ctx?.ui;
+// Tool calls and custom messages Pi draws in its background box (fetch, MCP tools, gentle-pi's
+// [gentle-pi.review-preflight]): the box starts at Pi's one-column margin, where the quiet tool rows
+// start, instead of in column 0 with the sent user messages. Rows that frame themselves (renderShell
+// "self", a registered message renderer) already carry the margin and stay as they are.
+const BOX_MARGIN_PATCHED = Symbol.for("gentle-quiet.boxMargin");
+const ownFraming = {
+	ToolExecutionComponent: (component) => component.hideComponent || (component.hasRendererDefinition?.() && component.getRenderShell?.() === "self"),
+	CustomMessageComponent: (component) => !!component.customComponent,
+};
+for (const [name, framed] of Object.entries(ownFraming)) {
+	const proto = PiCodingAgent[name]?.prototype;
+	if (typeof proto?.render !== "function" || proto[BOX_MARGIN_PATCHED]) continue;
+	const { render, handleMouse } = proto;
+	const shifted = (component, width) => width > 1 && globalThis[CURRENT_CONFIG]?.()?.tools?.margin && !framed(component);
+	proto.render = function (width) {
+		if (!shifted(this, width)) return render.call(this, width);
+		return render.call(this, width - 1).map((line) => (line ? ` ${line}` : line));
+	};
+	if (typeof handleMouse === "function") {
+		proto.handleMouse = function (event) {
+			if (!shifted(this, event?.width)) return handleMouse.call(this, event);
+			return event.x < 1 ? undefined : handleMouse.call(this, { ...event, x: event.x - 1, width: event.width - 1 });
+		};
+	}
+	proto[BOX_MARGIN_PATCHED] = true;
+}
 	if (ctx?.mode !== "tui" || typeof ui?.setEditorComponent !== "function") return;
 	const current = typeof ui.getEditorComponent === "function" ? ui.getEditorComponent() : installedOn === ui ? promptEditorFactory : undefined;
 	if (config.prompt.editor && current !== promptEditorFactory) {
@@ -750,7 +777,7 @@ function menuSections(ctx) {
 		]],
 		["Tool rows", "Tools", () => [
 			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, `${config.tools.restyle ? "gentle-pi and memory tool calls drawn as compact rows." : "gentle-pi and memory tool calls as their packages draw them."} Applies to new calls.`],
-			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Lines those rows up with Pi's own tools, one column in from the edge."],
+			[`Tool row margin: ${onOff(config.tools.margin)}`, () => { config.tools.margin = !config.tools.margin; }, "Lines those rows and Pi's boxed tool calls up with Pi's own tools, one column in from the edge."],
 			[`Tool call tones: ${config.tools.tones}`, () => { config.tools.tones = TONE_MODES[(TONE_MODES.indexOf(config.tools.tones) + 1) % TONE_MODES.length]; }, `Colors of tool names, paths and commands. Now: ${{ claude: "Claude Code's fixed greys", soft: "the same layout in your theme's colors", theme: "your theme's tool colors" }[config.tools.tones]}.`],
 			[`Quiet tools (new calls): ${onOff(config.quiet.enabled)}`, () => { config.quiet.enabled = !config.quiet.enabled; }, "Pi's own tools (read, bash, edit…) as a call row and a one-line summary. ctrl+o shows the full output."],
 			[`Expand hint: ${config.quiet.hint}`, () => { config.quiet.hint = HINT_MODES[(HINT_MODES.indexOf(config.quiet.hint) + 1) % HINT_MODES.length]; }, `Where ctrl+o to expand appears. Now: ${{ last: "only on the latest call", all: "on every call", never: "nowhere" }[config.quiet.hint]}.`],
