@@ -113,7 +113,9 @@ async function repoPin(host, read, profiles) {
 /**
  * What the PROF tab shows, or why it cannot:
  *   { state: "ok", names, session, default, repo, shown, orchestrator: { model, thinking } | undefined,
- *     rows: [{ agent, model, thinking }] }
+ *     rows: [{ agent, model, thinking }], configs: { [name]: saved routing }, view(config) }
+ * where view(config) is { orchestrator, rows } for any routing (a profile with staged edits), read by gentle-pi's
+ * readers as the shown one is. view is a function, so it is left out of a JSON comparison.
  *   { state: "message", message }
  * Never throws.
  */
@@ -140,6 +142,7 @@ export async function loadProfiles(host) {
 		// gentle-pi's launch precedence: the session's binding, then the repository's pin, then the default.
 		const shown = session ?? repo ?? byDefault ?? names[0];
 		const config = shown === undefined ? {} : profiles[shown] ?? {};
+		const view = (routing) => ({ orchestrator: read.readProfileOrchestrator(routing ?? {}), rows: read.profileRoutingRows(routing ?? {}) ?? [] });
 		return {
 			state: "ok",
 			names,
@@ -149,6 +152,8 @@ export async function loadProfiles(host) {
 			shown,
 			orchestrator: read.readProfileOrchestrator(config),
 			rows: read.profileRoutingRows(config) ?? [],
+			configs: Object.fromEntries(names.map((name) => [name, profiles[name] ?? {}])),
+			view,
 		};
 	};
 	const timedOut = { state: "message", message: "Profiles did not load in time" };
@@ -187,17 +192,51 @@ async function exportsOf(lib, files) {
 }
 
 const errorText = (error) => String(error?.message ?? error);
+const copy = (config) => JSON.parse(JSON.stringify(config ?? {}));
+
+/**
+ * One edit to a staged routing, as gentle-pi's screen makes it in its draft (setModel, setThinking): { model } or
+ * { thinking } for one agent (or the orchestrator); undefined is inherit, "leave untouched" for the orchestrator,
+ * which drops its entry. An agent with nothing set stays as {}. Returns { config } (a new routing) or { error }.
+ */
+export function stageEdit(config, key, change) {
+	const next = copy(config);
+	const entry = { ...(next[key] ?? {}) };
+	if (own(change, "thinking")) {
+		if (key === ORCHESTRATOR && !entry.model) return { error: "Pick a model for the orchestrator first; its effort follows the model." };
+		if (change.thinking === undefined) delete entry.thinking;
+		else entry.thinking = change.thinking;
+	}
+	if (own(change, "model")) {
+		if (change.model === undefined) delete entry.model;
+		else entry.model = change.model;
+	}
+	if (key === ORCHESTRATOR && !entry.model) delete next[key];
+	else next[key] = entry.model || entry.thinking ? entry : {};
+	return { config: next };
+}
+
+/** gentle-pi's screen's unsaved count: each model and each effort that differs from the saved profile. */
+export function changeCount(saved, draft) {
+	if (!draft) return 0;
+	let count = 0;
+	for (const key of new Set([...Object.keys(saved ?? {}), ...Object.keys(draft)])) {
+		for (const field of ["model", "thinking"]) if ((saved?.[key]?.[field] ?? undefined) !== (draft[key]?.[field] ?? undefined)) count += 1;
+	}
+	return count;
+}
 
 /**
  * gentle-pi's profile editing for the PROF tab, or undefined when this gentle-pi does not export what it
  * needs (or Gentle Shell is on, host.gentleShellOff() false): the tab then runs /gentle:profiles. Never throws.
  *
- *   use(name)                 gentle-pi's "Use in this session": binds the profile's routing to this session
- *                             (bindSessionProfile) and moves the live session to its orchestrator, if it has one.
- *   set(name, key, change)    one agent's (or the orchestrator's) { model } or { thinking } in the saved profile,
- *                             written as gentle-pi's Save does (updateProfile, writeProfilesFileSync); undefined
- *                             is inherit ("leave untouched" for the orchestrator, which drops its entry). When
- *                             this session uses that profile it takes the saved routing too, as Use does.
+ *   save(name, config)        gentle-pi's Save: the staged routing written into the profile (updateProfile,
+ *                             writeProfilesFileSync). When this session uses that profile it takes the saved
+ *                             routing too, and moves to the orchestrator when that changed.
+ *   use(name, config)         gentle-pi's "Use in this session": a staged routing that differs from the saved one is
+ *                             saved first, as its screen does ("what you see is what the session uses"); then the
+ *                             routing is bound to this session (bindSessionProfile) and the live session moves to
+ *                             its orchestrator, if it has one.
  *   models()                  Pi's available models as provider/model, sorted, as gentle-pi's picker lists them.
  *   efforts(model)            the effort levels for `model`: the ones Pi's catalog says it supports, or all.
  * Each edit resolves to { ok, message }.
@@ -254,45 +293,37 @@ export async function profileEditor(host) {
 			const orchestrator = w.readProfileOrchestrator?.(snapshot);
 			return moveLive && orchestrator ? switchLive(orchestrator) : "";
 		};
+		const differs = (a, b) => JSON.stringify(w.normalizeModelConfig(a) ?? {}) !== JSON.stringify(w.normalizeModelConfig(b) ?? {});
+		const write = (file, current, name, config) => w.writeProfilesFileSync(file, w.updateProfile(current, name, w.normalizeModelConfig(config) ?? {}));
 		return {
-			async use(name) {
-				try {
-					const id = sessionId();
-					if (!id) return { ok: false, message: `This Pi session has no id to bind "${name}" to.` };
-					const { store: file } = store();
-					if (!own(file.profiles, name)) return { ok: false, message: `No profile named "${name}".` };
-					const note = await bind(id, name, file.profiles[name], true);
-					return { ok: true, message: `This session now uses "${name}".${note}` };
-				} catch (error) {
-					return { ok: false, message: `"${name}" was not used: ${errorText(error)}` };
-				}
-			},
-			async set(name, key, change) {
+			async save(name, config) {
 				try {
 					const { file, store: current } = store();
 					if (!own(current.profiles, name)) return { ok: false, message: `No profile named "${name}".` };
-					const config = w.normalizeModelConfig(current.profiles[name]) ?? {};
-					const entry = { ...(config[key] ?? {}) };
-					if (own(change, "thinking")) {
-						if (key === ORCHESTRATOR && !entry.model) return { ok: false, message: "Pick a model for the orchestrator first; its effort follows the model." };
-						if (change.thinking === undefined) delete entry.thinking;
-						else entry.thinking = change.thinking;
-					}
-					if (own(change, "model")) {
-						if (change.model === undefined) delete entry.model;
-						else entry.model = change.model;
-					}
-					// gentle-pi's editor drops an orchestrator left untouched and keeps an agent with nothing set as {}.
-					if (key === ORCHESTRATOR && !entry.model) delete config[key];
-					else config[key] = entry.model || entry.thinking ? entry : {};
-					w.writeProfilesFileSync(file, w.updateProfile(current, name, config));
+					const was = current.profiles[name];
+					if (!differs(config, was)) return { ok: true, message: "Nothing to save." };
+					write(file, current, name, config);
 					const id = sessionId();
 					const bound = id && w.readSessionProfileBinding(id)?.name === name;
-					const note = bound ? await bind(id, name, config, key === ORCHESTRATOR) : "";
-					const what = own(change, "model") ? `model ${change.model ?? (key === ORCHESTRATOR ? "leave untouched" : "inherit")}` : `effort ${change.thinking ?? "inherit"}`;
-					return { ok: true, message: `Saved "${name}": ${key} ${what}.${note}` };
+					const moved = differs({ [ORCHESTRATOR]: config?.[ORCHESTRATOR] }, { [ORCHESTRATOR]: was?.[ORCHESTRATOR] });
+					const note = bound ? await bind(id, name, config, moved) : "";
+					return { ok: true, message: `Saved "${name}".${note}` };
 				} catch (error) {
 					return { ok: false, message: `"${name}" was not saved: ${errorText(error)}` };
+				}
+			},
+			async use(name, config) {
+				try {
+					const id = sessionId();
+					if (!id) return { ok: false, message: `This Pi session has no id to bind "${name}" to.` };
+					const { file, store: current } = store();
+					if (!own(current.profiles, name)) return { ok: false, message: `No profile named "${name}".` };
+					const saved = config !== undefined && differs(config, current.profiles[name]);
+					if (saved) write(file, current, name, config);
+					const note = await bind(id, name, saved ? config : current.profiles[name], true);
+					return { ok: true, message: `${saved ? `Saved "${name}". ` : ""}This session now uses "${name}".${note}` };
+				} catch (error) {
+					return { ok: false, message: `"${name}" was not used: ${errorText(error)}` };
 				}
 			},
 			async models() {

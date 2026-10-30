@@ -488,7 +488,7 @@ test("render never throws and keeps every row within the width, down to a narrow
 	tab.dispose?.();
 });
 
-test("in gentle-quiet's column: a click on a profile uses it in this session; the title still runs /gentle:profiles", async () => {
+test("in gentle-quiet's column: a click on a profile selects it, Use binds it; the title still runs /gentle:profiles", async () => {
 	const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 	const agentDir = path.dirname(configFile);
 	const libDir = path.join(agentDir, "npm/node_modules/gentle-pi/lib");
@@ -511,12 +511,18 @@ test("in gentle-quiet's column: a click on a profile uses it in this session; th
 	const content = () => side().entries.at(-1).component;
 	content().render(60);
 	await settle();
-	const out = content().render(60).map(plain);
+	let out = content().render(60).map(plain);
 	assert.match(out[1], /^│ Profiles/);
 	const at = rowIndex(out, /\[★ 2: Max\]/);
 	assert.ok(at > 0, out.join("\n"));
 	const click = (y, x) => content().handleMouse({ type: "click", button: "left", x, y, width: 60, height: 38, screenX: 120 + x, screenY: y + 2 });
 	assert.equal(click(at, out[at].indexOf("Balanced"))?.handled, true);
+	await settle();
+	assert.equal(bindings().get("column-1"), undefined, "a chip only selects");
+	out = content().render(60).map(plain);
+	const buttons = rowIndex(out, /\[ Use in this session \]/);
+	assert.ok(buttons > 0, out.join("\n"));
+	assert.equal(click(buttons, out[buttons].indexOf("Use in this session"))?.handled, true);
 	await settle();
 	assert.equal(bindings().get("column-1")?.name, "Balanced");
 	assert.deepEqual(loaded.sent, [], "gentle-pi's screen stays closed");
@@ -525,10 +531,11 @@ test("in gentle-quiet's column: a click on a profile uses it in this session; th
 	bindings().delete("column-1");
 });
 
-// ---- Editing in the column, through gentle-pi's own writers (T24) ----
+// ---- Editing in the column, through gentle-pi's own writers (T24), staged until Save as in its screen (T25) ----
 
 const stored = (env) => JSON.parse(readFileSync(path.join(env.configHome, "profiles.json"), "utf8"));
 const storeText = (env) => readFileSync(path.join(env.configHome, "profiles.json"), "utf8");
+const writes = () => globalThis.profileWrites ?? 0;
 const KEYS = { up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", backspace: "\x7f" };
 /** The picker's rows, plain, at `width`. */
 const pickerRows = (picker, width = 55) => picker.render(width).map(plain);
@@ -538,34 +545,238 @@ const pickRow = (picker, label, width = 55) => {
 	assert.ok(y > 0, `${label} in the picker`);
 	return picker.handleMouse({ type: "click", button: "left", x: 6, y, width, height: 20 });
 };
+/** A left click on the first row reading `label` (a button, a chip), in its middle. */
+const press = (tab, rows, label) => {
+	const out = rows();
+	const y = out.findIndex((row) => row.includes(label));
+	assert.ok(y >= 0, `${label} on the card:\n${out.join("\n")}`);
+	return tab.handleClick(y, "left", out[y].indexOf(label) + Math.floor(label.length / 2));
+};
+/** Opens the picker on `agent`'s model and picks `model` (staged). */
+async function pickModel(tab, rows, calls, agent, current, model) {
+	const out = rows();
+	const at = rowIndex(out, new RegExp(`${agent} `));
+	assert.equal(tab.handleClick(at, "left", out[at].indexOf(current)), true);
+	await settle();
+	assert.equal(pickRow(calls.component(), model)?.handled, true);
+	await settle();
+}
 
-test("a click on a profile uses it in this session, as gentle-pi's Use in this session, without its screen", async () => {
+test("a click on a profile selects the one shown in the card: nothing is bound or written", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, draw, calls } = await opened(env);
+	assert.equal(tab.handleClick(3, "left", rows()[3].indexOf("Balanced")), true);
+	await settle();
+	assert.equal(bindings().get("s1"), undefined, "not bound: Use in this session does that");
+	assert.deepEqual(calls.sent, [], "gentle-pi's screen is not opened");
+	assert.deepEqual(calls.setModel, []);
+	const out = rows();
+	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]", "the marks stay where they are");
+	const raw = draw();
+	assert.ok(raw[3].includes(theme.bold("[○ 1: Balanced]")) && painted(raw[3], "muted", "Max"), "the selected chip in accent bold");
+	assert.ok(out.some((row) => /gentle-ai-worker +gpt-5\.5 \(medium\)/.test(row)), "the roster is the selected profile's");
+	assert.ok(!out.some((row) => /jd-judge-a/.test(row)));
+	assert.equal(storeText(env), before);
+});
+
+test("the button row under the routing, as gentle-pi's screen: Use in this session, Make default, Save dim until an edit", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { rows, draw } = await opened(env);
+	const out = rows();
+	const at = rowIndex(out, /\[ Use in this session \]/);
+	assert.ok(at > rowIndex(out, /review-risk/), "under the routing");
+	assert.equal(out[at], "│ [ Use in this session ]  [ Make default ]  [ Save ]");
+	assert.equal(out[at - 1], "│", "a blank row above it");
+	const raw = draw();
+	assert.ok(painted(raw[at], "accent", "[ Use in this session ]") && painted(raw[at], "accent", "[ Make default ]"));
+	assert.ok(painted(raw[at], "dim", "[ Save ]"), "nothing to save: dim");
+	assert.ok(!out.some((row) => /unsaved/.test(row)));
+});
+
+test("the button row wraps to two rows when the column is too narrow", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env, {}, 40);
+	const out = rows();
+	const at = rowIndex(out, /\[ Use in this session \]/);
+	assert.equal(out[at], "│ [ Use in this session ]");
+	assert.equal(out[at + 1], "│ [ Make default ]  [ Save ]");
+	assert.ok(out.every((row) => [...row].length <= 40));
+	// The second row's buttons are where they are drawn.
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	const startWrites = writes();
+	assert.equal(tab.handleClick(at + 1, "left", out[at + 1].indexOf("[ Save ]") + 2), true);
+	await settle();
+	assert.equal(writes(), startWrites + 1);
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+});
+
+test("model and effort edits are staged: nothing is written until Save, which writes once and clears the unsaved state", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, draw, calls } = await opened(env);
+	const startWrites = writes();
+	await pickModel(tab, rows, calls, "gentle-ai-explore", "claude-sonnet-5-5", "xai/grok-4.7");
+	assert.equal(calls.done.length, 1, "the picker closed");
+	let out = rows();
+	assert.ok(out.some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), "the card shows the edit");
+	assert.equal(storeText(env), before, "nothing written yet");
+	// An effort click is staged as well.
+	const saved = { ...thinkingSupport };
+	thinkingSupport.load = async () => ({ getSupportedThinkingLevels: () => ["off", "low", "medium", "high"] });
+	try {
+		const judge = rowIndex(rows(), /jd-judge-a/);
+		assert.equal(tab.handleClick(judge, "left", rows()[judge].lastIndexOf("(high)") + 1), true);
+		await settle();
+	} finally {
+		Object.assign(thinkingSupport, saved);
+	}
+	out = rows();
+	assert.ok(out.some((row) => /jd-judge-a +claude-opus-5-5 \(inherit\)$/.test(row)), out.join("\n"));
+	assert.equal(storeText(env), before, "still nothing written");
+	assert.equal(writes(), startWrites);
+	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max •] [○ 3: Low]", "the chip says it has unsaved edits");
+	assert.ok(out.some((row) => /● 2 unsaved/.test(row)), "the count, as gentle-pi's footer");
+	let raw = draw();
+	const explore = rowIndex(out, /gentle-ai-explore/);
+	assert.ok(painted(raw[explore], "warning", "grok-4.7"), "a changed value in warning");
+	assert.ok(painted(raw[3], "warning", "•"));
+	const buttons = rowIndex(out, /\[ Save \]/);
+	assert.ok(!painted(raw[buttons], "dim", "[ Save ]"), "Save is live");
+	assert.equal(press(tab, rows, "[ Save ]"), true);
+	await settle();
+	assert.equal(writes(), startWrites + 1, "written once");
+	const file = stored(env);
+	assert.deepEqual(file.profiles.Max["gentle-ai-explore"], { model: "xai/grok-4.7", thinking: "medium" });
+	assert.deepEqual(file.profiles.Max["jd-judge-a"], { model: "claude-bridge/claude-opus-5-5" });
+	assert.deepEqual(file.profiles.Balanced, STORE.profiles.Balanced, "the other profiles untouched");
+	assert.equal(file.active, "Max");
+	out = rows();
+	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]", "no unsaved mark");
+	assert.ok(!out.some((row) => /unsaved/.test(row)));
+	raw = draw();
+	assert.ok(painted(raw[rowIndex(out, /\[ Save \]/)], "dim", "[ Save ]"), "dim again");
+	assert.ok(out.some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), "read back from gentle-pi");
+	assert.ok(calls.notices.some(([text]) => /Saved "Max"/.test(text)));
+});
+
+test("Save with nothing staged writes nothing and says so", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	const startWrites = writes();
+	assert.equal(press(tab, rows, "[ Save ]"), true);
+	await settle();
+	assert.equal(writes(), startWrites);
+	assert.equal(storeText(env), before);
+	assert.ok(calls.notices.some(([text]) => text === "Nothing to save."));
+});
+
+test("Use in this session binds the selected profile and moves the session to its orchestrator", async () => {
 	bindings().delete("s1");
 	const env = install({ lib: EDIT_LIB });
 	const before = storeText(env);
 	const { tab, rows, calls } = await opened(env);
-	let out = rows();
-	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
+	tab.handleClick(3, "left", rows()[3].indexOf("Balanced"));
+	await settle();
+	assert.equal(press(tab, rows, "[ Use in this session ]"), true);
 	await settle();
 	assert.equal(bindings().get("s1")?.name, "Balanced");
 	assert.deepEqual(bindings().get("s1").modelProfiles, STORE.profiles.Balanced, "the profile's routing, as a snapshot");
-	assert.deepEqual(calls.sent, [], "gentle-pi's screen is not opened");
 	assert.deepEqual(calls.setModel, [], "no orchestrator in Balanced: this session keeps its model");
-	out = rows();
-	assert.equal(out[3], "│ [◉ 1: Balanced] [★ 2: Max] [○ 3: Low]", "◉ follows, read again from gentle-pi");
-	assert.ok(out.some((row) => /gentle-ai-worker +gpt-5\.5 \(medium\)/.test(row)), "the roster is the session's profile");
-	// Max carries an orchestrator: this session moves to it, as gentle-pi's Use does.
-	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Max")), true);
+	assert.equal(rows()[3], "│ [◉ 1: Balanced] [★ 2: Max] [○ 3: Low]", "◉ follows, read again from gentle-pi");
+	tab.handleClick(3, "left", rows()[3].indexOf("Max"));
+	await settle();
+	press(tab, rows, "[ Use in this session ]");
 	await settle();
 	assert.equal(bindings().get("s1")?.name, "Max");
 	assert.deepEqual(calls.setModel.map((model) => `${model.provider}/${model.id}`), ["claude-bridge/claude-opus-5-5"]);
 	assert.deepEqual(calls.thinking, ["high"]);
 	assert.equal(rows()[3], "│ [○ 1: Balanced] [◉★ 2: Max] [○ 3: Low]");
 	assert.equal(storeText(env), before, "nothing shared is written");
+	assert.deepEqual(calls.sent, []);
 	bindings().delete("s1");
 });
 
-test("a right click on a profile is left alone: Make default stays in gentle-pi's screen", async () => {
+test("Use in this session with staged edits saves them first, as gentle-pi's screen does, then binds what is shown", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const startWrites = writes();
+	await pickModel(tab, rows, calls, "review-risk", "grok", "openai/gpt-5.5");
+	assert.equal(press(tab, rows, "[ Use in this session ]"), true);
+	await settle();
+	assert.equal(writes(), startWrites + 1, "saved once");
+	assert.deepEqual(stored(env).profiles.Max["review-risk"], { model: "openai/gpt-5.5" });
+	assert.equal(bindings().get("s1")?.name, "Max");
+	assert.deepEqual(bindings().get("s1").modelProfiles["review-risk"], { model: "openai/gpt-5.5" }, "the session takes what is shown");
+	assert.ok(!rows().some((row) => /unsaved/.test(row)));
+	assert.ok(calls.notices.some(([text]) => /Saved "Max"\. This session now uses "Max"/.test(text)));
+	bindings().delete("s1");
+});
+
+test("Make default: gentle-pi keeps it in its screen, so staged edits are saved and /gentle:profiles opens", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const startWrites = writes();
+	assert.equal(press(tab, rows, "[ Make default ]"), true);
+	await settle();
+	assert.equal(writes(), startWrites, "nothing to save: nothing written");
+	assert.deepEqual(calls.sent, [["/gentle:profiles", { expandPromptTemplates: true }]]);
+	assert.ok(calls.notices.some(([text]) => /Make default/.test(text) && /"Max"/.test(text)));
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	press(tab, rows, "[ Make default ]");
+	await settle();
+	assert.equal(writes(), startWrites + 1, "the edits saved first, as gentle-pi's Make default does");
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	assert.equal(stored(env).active, "Max", "the default itself is left to gentle-pi");
+	assert.equal(calls.sent.length, 2);
+});
+
+test("switching profiles with staged edits asks as gentle-pi's screen: Save and switch, Discard, Stay", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	const startWrites = writes();
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleClick(3, "left", rows()[3].indexOf("Balanced"));
+	await settle();
+	let out = rows();
+	assert.ok(out.some((row) => row === "│ Max has 1 unsaved change."), out.join("\n"));
+	assert.ok(out.some((row) => row === "│ [ Save and switch ]  [ Discard ]  [ Stay ]"));
+	assert.ok(out.some((row) => /custom +grok-4\.7/.test(row)), "still on Max");
+	// Stay: back to Max, the edit kept.
+	press(tab, rows, "[ Stay ]");
+	await settle();
+	out = rows();
+	assert.ok(!out.some((row) => /unsaved change\./.test(row)));
+	assert.ok(out.some((row) => /custom +grok-4\.7/.test(row)) && out.some((row) => /● 1 unsaved/.test(row)));
+	// Discard: on to Balanced, the edit dropped.
+	tab.handleClick(3, "left", rows()[3].indexOf("Balanced"));
+	await settle();
+	press(tab, rows, "[ Discard ]");
+	await settle();
+	out = rows();
+	assert.ok(out.some((row) => /gentle-ai-worker/.test(row)), "Balanced shown");
+	assert.equal(storeText(env), before);
+	tab.handleClick(3, "left", rows()[3].indexOf("Max"));
+	await settle();
+	assert.ok(rows().some((row) => /custom +inherit \(inherit\)$/.test(row)), "Max's edit was discarded");
+	// Save and switch: written once, then Balanced.
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleClick(3, "left", rows()[3].indexOf("Low"));
+	await settle();
+	press(tab, rows, "[ Save and switch ]");
+	await settle();
+	assert.equal(writes(), startWrites + 1);
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	out = rows();
+	assert.ok(out.some((row) => /◆ orchestrator +leave untouched$/.test(row)) && out.some((row) => row === "│ no subagents routed"), "Low shown");
+	assert.ok(!out.some((row) => /unsaved/.test(row)));
+});
+
+test("a right click on a profile is left alone", async () => {
 	const env = install({ lib: EDIT_LIB });
 	const before = storeText(env);
 	const { tab, rows, calls } = await opened(env);
@@ -576,8 +787,9 @@ test("a right click on a profile is left alone: Make default stays in gentle-pi'
 	assert.deepEqual(calls.sent, []);
 });
 
-test("a click on an agent's model opens a picker of Pi's models by the row; choosing one saves it for that agent only", async () => {
+test("a click on an agent's model opens a picker of Pi's models by the row; the choice is staged for that agent only", async () => {
 	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
 	const { tab, rows, calls } = await opened(env);
 	const out = rows();
 	const at = rowIndex(out, /gentle-ai-explore/);
@@ -606,17 +818,14 @@ test("a click on an agent's model opens a picker of Pi's models by the row; choo
 	assert.equal(pickRow(picker, "xai/grok-4.7")?.handled, true);
 	await settle();
 	assert.equal(calls.done.length, 1, "the picker closed");
-	const saved = stored(env);
-	assert.deepEqual(saved.profiles.Max["gentle-ai-explore"], { model: "xai/grok-4.7", thinking: "medium" });
-	const { "gentle-ai-explore": _, ...others } = saved.profiles.Max;
-	const { "gentle-ai-explore": __, ...was } = STORE.profiles.Max;
-	assert.deepEqual(others, was, "the other agents untouched");
-	assert.deepEqual(saved.profiles.Balanced, STORE.profiles.Balanced, "the other profiles untouched");
-	assert.equal(saved.active, "Max");
-	assert.ok(rows().some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), "the card reads it back");
+	assert.equal(storeText(env), before, "staged, not written");
+	const shownRows = rows();
+	assert.ok(shownRows.some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)));
+	assert.ok(shownRows.some((row) => /jd-judge-a +claude-opus-5-5 \(high\)/.test(row)), "the other agents untouched");
+	assert.ok(shownRows.some((row) => /● 1 unsaved/.test(row)));
 });
 
-test("the orchestrator's model picker: the keyboard moves and picks, and leave untouched removes it", async () => {
+test("the orchestrator's model picker: the keyboard moves and picks, and leave untouched removes it on Save", async () => {
 	const env = install({ lib: EDIT_LIB });
 	const { tab, rows, calls } = await opened(env);
 	const out = rows();
@@ -629,6 +838,10 @@ test("the orchestrator's model picker: the keyboard moves and picks, and leave u
 	picker.handleInput(KEYS.enter);
 	await settle();
 	assert.equal(calls.done.length, 1);
+	assert.ok(rows().some((row) => /◆ orchestrator +leave untouched$/.test(row)));
+	assert.deepEqual(stored(env).profiles.Max.orchestrator, MAX.orchestrator, "not yet written");
+	press(tab, rows, "[ Save ]");
+	await settle();
 	assert.equal(stored(env).profiles.Max.orchestrator, undefined);
 	assert.ok(rows().some((row) => /◆ orchestrator +leave untouched$/.test(row)));
 });
@@ -653,7 +866,7 @@ test("the picker filters as you type and keeps within the terminal", async () =>
 	assert.equal(listed.length, 4);
 });
 
-test("Esc or a click outside closes the picker and saves nothing", async () => {
+test("Esc or a click outside closes the picker and stages nothing", async () => {
 	const env = install({ lib: EDIT_LIB });
 	const before = storeText(env);
 	const { tab, rows, calls } = await opened(env);
@@ -675,10 +888,12 @@ test("Esc or a click outside closes the picker and saves nothing", async () => {
 	await settle();
 	assert.equal(storeText(env), before);
 	assert.deepEqual(calls.sent, []);
+	assert.ok(!rows().some((row) => /unsaved/.test(row)));
 });
 
-test("a click on an agent's effort cycles the levels gentle-pi offers for its model and saves each", async () => {
+test("a click on an agent's effort cycles the levels gentle-pi offers for its model, staged; Save keeps the last", async () => {
 	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
 	const { tab, rows } = await opened(env);
 	const click = (agent, effort) => {
 		const out = rows();
@@ -687,6 +902,7 @@ test("a click on an agent's effort cycles the levels gentle-pi offers for its mo
 		assert.ok(x > 0, `${agent} (${effort})`);
 		return tab.handleClick(at, "left", x + 1);
 	};
+	const shows = (agent, effort) => assert.ok(rows().some((row) => new RegExp(`${agent} +claude-[\\w.-]+ \\(${effort}\\)$`).test(row)), `${agent} (${effort})`);
 	// Pi says nothing about the model's levels here: every level, then inherit.
 	const saved = { ...thinkingSupport };
 	thinkingSupport.load = async () => {
@@ -696,35 +912,35 @@ test("a click on an agent's effort cycles the levels gentle-pi offers for its mo
 		for (const [from, to] of [["high", "xhigh"], ["xhigh", "max"], ["max", "inherit"], ["inherit", "off"]]) {
 			assert.equal(click("jd-judge-a", from), true);
 			await settle();
-			const entry = stored(env).profiles.Max["jd-judge-a"];
-			assert.equal(entry.thinking, to === "inherit" ? undefined : to, `${from} → ${to}`);
-			assert.equal(entry.model, "claude-bridge/claude-opus-5-5", "the model kept");
+			shows("jd-judge-a", to);
 		}
 		// Pi's catalog knows the model's levels: only those.
 		thinkingSupport.load = async () => ({ getSupportedThinkingLevels: () => ["off", "low", "medium", "high"] });
 		for (const [from, to] of [["medium", "high"], ["high", "inherit"], ["inherit", "off"], ["off", "low"]]) {
 			assert.equal(click("gentle-ai-explore", from), true);
 			await settle();
-			assert.equal(stored(env).profiles.Max["gentle-ai-explore"].thinking, to === "inherit" ? undefined : to, `${from} → ${to}`);
+			shows("gentle-ai-explore", to);
 		}
 	} finally {
 		Object.assign(thinkingSupport, saved);
 	}
-	assert.ok(rows().some((row) => /gentle-ai-explore +claude-sonnet-5-5 \(low\)$/.test(row)));
+	assert.equal(storeText(env), before, "staged only");
+	press(tab, rows, "[ Save ]");
+	await settle();
+	assert.deepEqual(stored(env).profiles.Max["jd-judge-a"], { model: "claude-bridge/claude-opus-5-5", thinking: "off" });
+	assert.deepEqual(stored(env).profiles.Max["gentle-ai-explore"], { model: "claude-bridge/claude-sonnet-5-5", thinking: "low" });
 });
 
-test("editing the profile this session uses keeps the session on what is shown", async () => {
+test("saving the profile this session uses keeps the session on what is saved", async () => {
 	bindings().delete("s1");
 	const env = install({ lib: EDIT_LIB });
 	const { tab, rows, calls } = await opened(env);
-	let out = rows();
-	tab.handleClick(3, "left", out[3].indexOf("Max"));
+	press(tab, rows, "[ Use in this session ]");
 	await settle();
-	out = rows();
-	const at = rowIndex(out, /review-risk/);
-	tab.handleClick(at, "left", out[at].indexOf("grok"));
-	await settle();
-	pickRow(calls.component(), "openai/gpt-5.5");
+	assert.equal(bindings().get("s1")?.name, "Max");
+	await pickModel(tab, rows, calls, "review-risk", "grok", "openai/gpt-5.5");
+	assert.deepEqual(bindings().get("s1")?.modelProfiles["review-risk"], { model: "xai/grok-4.7" }, "staged: the session is unchanged");
+	press(tab, rows, "[ Save ]");
 	await settle();
 	assert.deepEqual(stored(env).profiles.Max["review-risk"], { model: "openai/gpt-5.5" });
 	assert.deepEqual(bindings().get("s1")?.modelProfiles["review-risk"], { model: "openai/gpt-5.5" }, "the session's snapshot follows");
@@ -750,8 +966,9 @@ test("without gentle-pi's writers, or with Gentle Shell on, every click runs /ge
 		assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
 		assert.equal(tab.handleClick(roster, "left", out[roster].indexOf("claude-opus")), true);
 		assert.equal(tab.handleClick(roster, "left", out[roster].indexOf("(high)") + 1), true);
+		for (const label of ["[ Use in this session ]", "[ Make default ]", "[ Save ]"]) assert.equal(press(tab, rows, label), true, label);
 		await settle();
-		assert.equal(calls.sent.length, 3);
+		assert.equal(calls.sent.length, 6);
 		assert.ok(calls.sent.every(([text]) => text === "/gentle:profiles"));
 		assert.equal(calls.custom.length, 0, "no picker");
 		assert.equal(storeText(env), before);
