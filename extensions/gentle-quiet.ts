@@ -15,8 +15,9 @@
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
 //           outline in the theme's border color
-//   sidebar fullscreen terminals with 140+ columns: the status line becomes a bar on top and Agents and
-//           Todos a column on the right (Gentle Shell's layout, drawn in this style); narrower ones keep them in place
+//   sidebar fullscreen terminals with 140+ columns: a column on the right holds the status line as Status
+//           and Context cards that stay on top, then Agents and Todos (Gentle Shell's layout, drawn in this style); narrower
+//           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it)
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
@@ -28,6 +29,8 @@
 //           one line that changes while the call runs, like Claude Code; ctrl+o shows pi-web-access's full output
 //   prompt  "❯ " flush with the margin before the input and sent user messages (from pi-pretty,
 //           without its rounded borders, so the editor stays native)
+//   images  with Gentle Shell off, a pasted image becomes gentle-pi's "[Image#1]" chip (its own files, loaded
+//           from the installed package) listed above the prompt as " [Image#1] png · 1280×720 · 84 KB"
 // Neither package offers display options, so this rewrites their UI writes.
 // @ts-nocheck
 
@@ -60,7 +63,7 @@ const DEFAULTS = {
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
-	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", rdd: "\u{100030}", other: "›", branch: "\u{E725}" },
+	icons: { memory: "\u{100000}", todo: "≡", agents: "◈", jobs: "⧗", rdd: "\u{100030}", other: "›", branch: "\u{E725}" },
 	// restyle: gentle-pi and memory tool rows redrawn quietly (false leaves them as their packages draw them);
 	// margin: Pi's one-column margin for those rows, and for the tool calls and messages Pi draws in a background box.
 	// tones: "claude" paints tool call rows in Claude Code's fixed greys; "theme" uses Pi's toolTitle/accent colors;
@@ -98,7 +101,9 @@ const MEMORY_ICONS = ["\u{100000}", "\u{E28C}", "\u{F09D1}", "\u{F02DA}", "\u{F0
 const RDD_ICONS = ["\u{100030}", "\u{F425}", "\u{F0BE0}", "\u{F05B7}", ...CARD_ICONS];
 // Branch choices: Nerd Font git branch (Devicons, Octicons, Powerline), then a plain Unicode one.
 const BRANCH_ICONS = ["\u{E725}", "\u{F418}", "\u{E0A0}", "⎇"];
-const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"], ["branch", "Branch icon"]];
+// Jobs title choices: gentle-pi's own still hourglass, then the card icons. Never the spinner: it marks running jobs.
+const JOBS_ICONS = ["⧗", ...CARD_ICONS];
+const ICON_GROUPS = [["memory", "Memory icon"], ["todo", "Todo icon"], ["agents", "Agents icon"], ["jobs", "Jobs icon"], ["rdd", "RDD icon"], ["other", "Other gentle tools icon"], ["branch", "Branch icon"]];
 const AGENT_TOOLS = /^(subagent_.*|orchestrator_.*)$/;
 // RDD review tools (gentle_review, capture, scope).
 const REVIEW_TOOLS = /^gentle_review(_.*)?$/;
@@ -476,7 +481,8 @@ const inProgressIcon = (row) => row.replace(IN_PROGRESS, "$1◔");
 
 // gentle-pi leaves two spaces between an agent's status icon and its name, the title only one: the name
 // would start a column past the title's "Agents". One space puts it, and the details under it, in line.
-const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–](?:\x1b\[[0-9;:]*m)*) {2,}(?=\S|\x1b)/u;
+// The Jobs card's rows (Pi's spinner while running) get the same single space.
+const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?:\x1b\[[0-9;:]*m)*) {2,}(?=\S|\x1b)/u;
 const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
 
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
@@ -616,6 +622,7 @@ class PromptEditor extends CustomEditor {
 		super(tui, editorTheme, keybindings, options);
 		this.userPaddingX = super.getPaddingX();
 		super.setPaddingX(this.userPaddingX + PROMPT_WIDTH);
+		attachImagePaste(this, tui);
 	}
 
 	getPaddingX() {
@@ -640,6 +647,130 @@ class PromptEditor extends CustomEditor {
 }
 
 const promptEditorFactory = (tui, editorTheme, keybindings) => new PromptEditor(tui, editorTheme, keybindings);
+
+// ---------------------------------------------------------------------------
+// Image paste: Gentle Shell's [Image#N] chips while Gentle Shell itself stays off
+// ---------------------------------------------------------------------------
+
+// Like the palette, the feature is gentle-pi's own, loaded from the installed package so its updates
+// arrive here: lib/clipboard-image.ts reads the clipboard into memory, lib/image-attachments.ts numbers
+// the chips, keeps each one a single unit in the draft and turns the ones still there into image
+// attachments on submit. This file only plugs them into the prompt, the way Gentle Shell's prompt
+// does, and draws the chip list above it. Without those files Pi's paste (temp file + path) stays.
+const IMAGES_WIDGET = "gentle-quiet-images";
+const IMAGE_PREVIEW = { maxWidthCells: 40, maxHeightCells: 6 }; // Gentle Shell's thumbnail size
+let imagePaste; // { attachments, read, describe } while gentle-pi's image files load
+let liveEditor; // the prompt whose draft the chip list and submit read
+
+async function loadImagePaste() {
+	if (!gentleShellOff()) return undefined; // Gentle Shell's own prompt owns the paste
+	const files = ["image-attachments.ts", "clipboard-image.ts"].map((name) => path.join(GENTLE_PI_LIB, name));
+	if (!files.every((file) => existsSync(file))) return undefined;
+	try {
+		const [images, clipboard] = await Promise.all(files.map((file) => import(pathToFileURL(file).href)));
+		if (typeof images.ImageAttachments !== "function" || typeof clipboard.readClipboardImage !== "function") return undefined;
+		const describe = typeof images.describeAttachment === "function" ? images.describeAttachment : () => "";
+		return { attachments: new images.ImageAttachments(), read: () => clipboard.readClipboardImage(), describe };
+	} catch {
+		return undefined; // gentle-pi moved or changed: Pi's paste rather than a broken one
+	}
+}
+
+/** Unknown capabilities count as image-capable, as in Gentle Shell; Pi decides for its own models. */
+const acceptsImages = (model) => !model?.input || model.input.includes("image");
+
+function notifyImages(message) {
+	try {
+		liveCtx?.ui?.notify?.(message, "warning");
+	} catch {
+		// ctx went stale after a session replacement or reload
+	}
+}
+
+// The same hooks as Gentle Shell's GentlePromptEditor: Pi's private segment() (cursor motion, wrap and
+// deletion) treats a chip as one unit, its private submitValue() marks where a draft ends, and Pi's
+// paste handler, which Pi assigns after construction, stays the fallback when no image is read.
+function attachImagePaste(editor, tui) {
+	liveEditor = editor;
+	if (!imagePaste) return;
+	const { attachments } = imagePaste;
+	const segment = editor.segment;
+	if (typeof segment === "function") editor.segment = (text, mode) => attachments.segment(text, segment.call(editor, text, mode));
+	let drafts = 0;
+	const submitValue = editor.submitValue;
+	if (typeof submitValue === "function") editor.submitValue = () => { drafts += 1; submitValue.call(editor); };
+	let piPaste;
+	let pasting = false;
+	const paste = async () => {
+		const draft = drafts;
+		let image = null;
+		try {
+			image = await imagePaste.read();
+		} catch {
+			image = null;
+		}
+		// The draft this paste belonged to was already sent: attach nothing to the next one.
+		if (drafts !== draft) {
+			if (image) notifyImages("Image paste discarded: the message was sent before the clipboard finished reading. Paste again to attach it.");
+			return;
+		}
+		if (!image) return piPaste?.();
+		const { token } = attachments.add(image);
+		const cursor = editor.getCursor();
+		const line = editor.getLines()[cursor.line] ?? "";
+		const before = cursor.col > 0 && !/\s/.test(line[cursor.col - 1] ?? "") ? " " : "";
+		const after = cursor.col < line.length && !/\s/.test(line[cursor.col] ?? "") ? " " : "";
+		editor.insertTextAtCursor(`${before}${token}${after}`);
+		tui?.requestRender?.();
+	};
+	Object.defineProperty(editor, "onPasteImage", {
+		configurable: true,
+		enumerable: true,
+		// Undefined until Pi installs its handler, so Pi's `if (!onPasteImage)` wiring still runs.
+		get: () => (piPaste ? () => {
+			// A repeated paste key while the clipboard is read must not insert a second chip or a path.
+			if (pasting) return;
+			pasting = true;
+			paste()
+				.catch((error) => notifyImages(`Image paste failed: ${error instanceof Error ? error.message : String(error)}`))
+				.finally(() => { pasting = false; });
+		} : undefined),
+		set: (handler) => { piPaste = handler; },
+	});
+}
+
+// The chips still in the draft, above the prompt at Pi's margin: " [Image#1] png · 1280×720 · 84 KB",
+// with the thumbnail under it while idle in a terminal with an image protocol (Kitty re-sends the whole
+// image whenever content above it moves, so while the agent streams the labels stand alone).
+function imagesWidget(t) {
+	const previews = new Map();
+	return {
+		render(width) {
+			if (!imagePaste) return [];
+			const shown = imagePaste.attachments.referenced(liveEditor?.getText?.() ?? "");
+			for (const id of previews.keys()) if (!shown.some((attachment) => attachment.id === id)) previews.delete(id);
+			if (shown.length === 0) return [];
+			const draw = typeof PiTui.Image === "function" && !!PiTui.getCapabilities?.()?.images && !!liveCtx?.isIdle?.();
+			const warning = acceptsImages(liveCtx?.model) ? "" : fg(t, "warning", " · not sent: the current model does not accept images");
+			const rows = [];
+			for (const attachment of shown) {
+				const label = join(fg(t, "accent", attachment.token), fg(t, "dim", imagePaste.describe(attachment)));
+				rows.push(truncateToWidth(` ${label}${warning}`, width, "…"));
+				if (!draw) continue;
+				let preview = previews.get(attachment.id);
+				if (!preview) {
+					preview = new PiTui.Image(attachment.base64, attachment.mimeType, { fallbackColor: (text) => fg(t, "dim", text) }, IMAGE_PREVIEW, attachment.dimensions);
+					previews.set(attachment.id, preview);
+				}
+				rows.push(...preview.render(Math.max(1, width - 1)).map((row) => ` ${row}`));
+			}
+			return rows;
+		},
+		invalidate() {
+			for (const preview of previews.values()) preview.invalidate();
+		},
+	};
+}
 
 // Sent user messages: drop Pi's outputPad so the prompt icon sits flush with the
 // margin, like the input. Patched once per process; the patch reads the config of
@@ -759,6 +890,7 @@ const ICON_HELP = {
 	memory: "The icon in front of memory tool calls (search, save…).",
 	todo: "The icon of the Todos block and of todo tool calls.",
 	agents: "The icon of the Agents block and of subagent tool calls.",
+	jobs: "The icon of the Jobs card title.",
 	rdd: "The icon in front of RDD review tool calls (rdd start, status, capture…).",
 	other: "The icon in front of the other gentle-pi tool calls.",
 	branch: "The icon in front of the git branch in the status line.",
@@ -806,11 +938,11 @@ function menuSections(ctx) {
 		["Blocks and agents", "Blocks", () => [
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, `${config.blocks.minimal ? "Todos and Agents panels drawn as flat rows." : "Todos and Agents panels as gentle-pi draws them."}`],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
-			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, Todos and Agents move to a column on the right and the status line to the top."],
+			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Todos and Agents under them."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
-		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : group === "branch" ? BRANCH_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
+		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : group === "branch" ? BRANCH_ICONS : group === "jobs" ? JOBS_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
 		["Prompt", "Prompt", () => [
 			[`Prompt icon in input: ${onOff(config.prompt.editor)}`, () => { config.prompt.editor = !config.prompt.editor; }, "The prompt icon in front of what you type."],
 			[`Prompt icon in sent messages: ${onOff(config.prompt.userMessage)}`, () => { config.prompt.userMessage = !config.prompt.userMessage; }, "The prompt icon in front of your messages in the conversation."],
@@ -1563,6 +1695,82 @@ async function openPalette(pi, palette, ctx) {
 	if (result?.type === "run") pi.sendUserMessage(`/${result.name}`, { expandPromptTemplates: true });
 }
 
+// ---------------------------------------------------------------------------
+// Jobs card: Gentle Shell's side-column card for background jobs while Gentle Shell itself stays off
+// ---------------------------------------------------------------------------
+
+// gentle-agents publishes the session's running and just-finished jobs on an event (lib/jobs-sidebar-state.ts)
+// and Gentle Shell draws them with gentle-pi's card (lib/jobs-widget.ts): newest first, elapsed times, the
+// 60-second finished tail and the collapsed form. With Gentle Shell off the same card is drawn here, in the
+// side column's outline; without the column the status line keeps its "⠋ N jobs".
+const JOBS_CARD = "jobs"; // its railBlocks key
+let jobsCard; // { list, collapsed, key, drawn } while gentle-pi's jobs files load
+
+async function loadJobsCard() {
+	if (!gentleShellOff()) return undefined; // Gentle Shell draws its own card
+	const files = ["jobs-sidebar-state.ts", "jobs-widget.ts"].map((name) => path.join(GENTLE_PI_LIB, name));
+	if (!files.every((file) => existsSync(file))) return undefined;
+	try {
+		const [state, widget] = await Promise.all(files.map((file) => import(pathToFileURL(file).href)));
+		if (typeof state.JOBS_SIDEBAR_EVENT !== "string" || typeof state.isJobsSidebarSnapshot !== "function" || typeof state.jobsCollapseKey !== "function" || typeof widget.renderJobsCard !== "function") return undefined;
+		return { ...state, renderJobsCard: widget.renderJobsCard };
+	} catch {
+		return undefined; // gentle-pi moved or changed: the status line count rather than a broken card
+	}
+}
+
+// gentle-pi draws its hourglass on the title and on every running job. The title gets the configured still
+// icon; the running jobs get Pi's Working spinner, as in the status line, so only they move.
+const HOURGLASS = /⧗((?:\x1b\[[0-9;:]*m)*) ?/u;
+function jobsGlyphs(rows) {
+	const title = rows.findIndex((row) => row.includes("⧗"));
+	return rows.map((row, index) => {
+		if (index !== title) return row.replace(/⧗/gu, jobsFrame());
+		return row.replace(HOURGLASS, (_, esc) => (config.icons.jobs ? `${config.icons.jobs}${esc} ` : esc));
+	});
+}
+
+async function registerJobsCard(pi) {
+	if (typeof pi.events?.on !== "function") return;
+	const lib = await loadJobsCard();
+	railBlocks.delete(JOBS_CARD);
+	jobsCard = undefined;
+	if (!lib) return;
+	const card = { list: [], session: undefined, collapsed: false, key: lib.jobsCollapseKey(process.env), drawn: false };
+	const toggle = () => {
+		card.collapsed = !card.collapsed;
+		sidebar.tui?.requestRender?.();
+	};
+	pi.events.on(lib.JOBS_SIDEBAR_EVENT, (value) => {
+		if (value?.sessionId !== liveCtx?.sessionManager?.getSessionId?.() || !lib.isJobsSidebarSnapshot(value.snapshot)) return;
+		card.list = value.snapshot.jobs;
+		card.session = value.sessionId;
+		sidebar.tui?.requestRender?.();
+	});
+	// The column only hands a card the clicks on its title row, so any left click is the collapse control;
+	// the wheel goes back to the column.
+	const component = {
+		// A snapshot of the session that was open before a switch is not drawn.
+		render: (width) => jobsGlyphs(lib.renderJobsCard(card.session === liveCtx?.sessionManager?.getSessionId?.() ? card.list : [], theme, width, Date.now(), { collapsed: card.collapsed, collapseKey: card.key, collapseControl: true })),
+		handleMouse(event) {
+			if (event?.type !== "click" || event.button !== "left") return undefined;
+			toggle();
+			return { handled: true, render: true };
+		},
+		invalidate() {},
+	};
+	railBlocks.set(JOBS_CARD, {
+		component,
+		draw: (width) => {
+			const rows = drawBlock(component, width, blockOptions("jobs"), theme, { spaced: true, agents: true });
+			card.drawn = rows.length > 0;
+			return rows;
+		},
+	});
+	if (card.key && typeof pi.registerShortcut === "function") pi.registerShortcut(card.key, { description: "Collapse or expand the jobs card", handler: async () => toggle() });
+	jobsCard = card;
+}
+
 async function registerPalette(pi) {
 	if (typeof pi.registerShortcut !== "function" || !gentleShellOff()) return;
 	const palette = await loadPalette();
@@ -1739,10 +1947,11 @@ function refreshChanges(delay = 0) {
 // when empty, then circle_slice_1 (U+F0A9E) through circle_slice_8 (U+F0AA5, a full disc).
 const GAUGE_EMPTY = "\u{F0766}";
 const GAUGE_SLICE_0 = 0xf0a9d;
+const gaugeTone = (percent) => (percent === null || percent === undefined ? "dim" : percent >= 95 ? "error" : percent >= 80 ? "warning" : "accent");
 function gauge(percent, t) {
 	const value = Math.max(0, Math.min(100, percent ?? 0));
 	const filled = Math.round((value / 100) * GAUGE_CELLS);
-	const tone = percent === null || percent === undefined ? "dim" : percent >= 95 ? "error" : percent >= 80 ? "warning" : "accent";
+	const tone = gaugeTone(percent);
 	return filled ? fg(t, tone, String.fromCodePoint(GAUGE_SLICE_0 + filled)) : fg(t, "border", GAUGE_EMPTY);
 }
 
@@ -1945,7 +2154,8 @@ function formatTokens(count) {
 	return `${Math.round(count / 1e6)}M`;
 }
 
-function statusLineRows(t, footerData, width) {
+/** What the status line shows, painted, for the line under the editor and for the Status and Context cards. */
+function statusParts(t, footerData, { jobs = true } = {}) {
 	const ctx = liveCtx;
 	const sep = ` ${fg(t, "dim", "·")} `;
 	const cwd = folderName(ctx?.sessionManager?.getCwd?.() ?? "");
@@ -1968,11 +2178,13 @@ function statusLineRows(t, footerData, width) {
 	const counts = changes?.files
 		? join(fg(t, "toolDiffAdded", `+${changes.added}`), fg(t, "toolDiffRemoved", `-${changes.deleted}`))
 		: "";
-	const location = (withCounts) => [cwd && fg(t, "muted", cwd), join(
+	const project = cwd && fg(t, "muted", cwd);
+	const branchText = (withCounts) => join(
 		branch && fg(t, "text", join(config.icons.branch, branch)),
 		changes?.files ? fg(t, "warning", `±${changes.files}`) : "",
 		withCounts && counts,
-	)].filter(Boolean).join(sep);
+	);
+	const location = (withCounts) => [project, branchText(withCounts)].filter(Boolean).join(sep);
 	// ↑input ↓output, then Rcache-read Wcache-write CHhit% when caching happened.
 	// "cache" mode keeps the hit rate when the terminal narrows; "all" keeps ↑ ↓ instead.
 	const tokens = (withCache) => {
@@ -2005,37 +2217,46 @@ function statusLineRows(t, footerData, width) {
 	// Like Pi's footer: "?" for the tokens in use while they are unknown (right after a compaction).
 	const window = config.statusLine.contextTokens && typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : 0;
 	const used = typeof usage?.tokens === "number" ? formatTokens(usage.tokens) : "?";
-	const contextText = join(`${fg(t, "muted", "ctx")} ${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`, window && fg(t, "dim", `${used}/${formatTokens(window)}`));
+	const percentText = `${gauge(percent, t)} ${fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`)}`;
+	const contextValue = join(percentText, window && fg(t, "dim", `${used}/${formatTokens(window)}`));
+	const contextText = `${fg(t, "muted", "ctx")} ${contextValue}`;
 
 	const statuses = [...(footerData?.getExtensionStatuses?.() ?? new Map()).entries()]
-		.filter(([, text]) => typeof text === "string" && text.trim() !== "")
+		.filter(([key, text]) => typeof text === "string" && text.trim() !== "" && (jobs || key !== KEYS.jobs))
 		// Permission mode first, then the rest by key.
 		.sort(([a], [b]) => (a === KEYS.mode ? -1 : b === KEYS.mode ? 1 : a.localeCompare(b)))
 		.map(([key, text]) => {
 			const flat = text.replace(/[\r\n\t]/g, " ");
 			return key === KEYS.jobs ? flat.replace(JOBS_LEAD, `${jobsFrame()} `) : flat;
 		});
-
-	// Statuses sit on the left after the location, Perm first (the model closes the Working row
-	// instead). Details give way in this order: cache counters, tokens, other usage windows, change
-	// counts; then the statuses move to their own row, then the usage and the location go.
-	// Context and cost stay.
-	const stages = [
-		{ inline: true, counts: true, cache: true, tokens: true, usage: "all", location: true },
-		{ inline: true, counts: true, cache: false, tokens: true, usage: "all", location: true },
-		{ inline: true, counts: true, cache: false, tokens: false, usage: "all", location: true },
-		{ inline: true, counts: true, cache: false, tokens: false, usage: "first", location: true },
-		{ inline: true, counts: false, cache: false, tokens: false, usage: "first", location: true },
-		{ inline: false, counts: false, cache: false, tokens: false, usage: "first", location: true },
-		{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: true },
-		{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: false },
-	];
 	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
 	const mcpPainted = mcp ? fg(t, mcp.online < mcp.total ? "warning" : "dim", mcpPlain) : "";
-	const statusText = [...statuses.map((text) => fg(t, "dim", text)), mcpPainted].filter(Boolean).join(sep);
+	const statusItems = [...statuses.map((text) => fg(t, "dim", text)), mcpPainted].filter(Boolean);
+	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
-	for (const stage of stages) {
+	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
+	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, secondRow };
+}
+
+// Statuses sit on the left after the location, Perm first (the model closes the Working row
+// instead). Details give way in this order: cache counters, tokens, other usage windows, change
+// counts; then the statuses move to their own row, then the usage and the location go.
+// Context and cost stay.
+const STATUS_STAGES = [
+	{ inline: true, counts: true, cache: true, tokens: true, usage: "all", location: true },
+	{ inline: true, counts: true, cache: false, tokens: true, usage: "all", location: true },
+	{ inline: true, counts: true, cache: false, tokens: false, usage: "all", location: true },
+	{ inline: true, counts: true, cache: false, tokens: false, usage: "first", location: true },
+	{ inline: true, counts: false, cache: false, tokens: false, usage: "first", location: true },
+	{ inline: false, counts: false, cache: false, tokens: false, usage: "first", location: true },
+	{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: true },
+	{ inline: false, counts: false, cache: false, tokens: false, usage: false, location: false },
+];
+
+function statusLineRows(t, footerData, width, options) {
+	const { sep, location, tokens, usageText, contextText, costText, statusText, secondRow } = statusParts(t, footerData, options);
+	for (const stage of STATUS_STAGES) {
 		const left = [
 			stage.location && location(stage.counts),
 			stage.inline && statusText,
@@ -2052,6 +2273,53 @@ function statusLineRows(t, footerData, width) {
 	const right = [contextText, costText && fg(t, "text", costText)].filter(Boolean).join(sep);
 	const line = truncateToWidth(right, width, "…");
 	return secondRow.length ? [line, truncateToWidth(secondRow.join("  "), width, "…")] : [line];
+}
+
+// In the side column the status line is two cards on top, Gentle Shell's Status and Context cards in this
+// style. Status: the location under a label column, then a blank row and the statuses, one per row (an
+// empty section is left out). Context: "56k / 200k tokens" with the ctx gauge on the right, a bar across
+// the card in the gauge's color, the tokens spent with the cost on the right, and the plan windows on one
+// row, as the status line draws them; a row whose data is missing is left out. A row too long for the
+// card is cut, never wrapped. No model: it closes the Working row.
+function statusCardRows(t, footerData, width, options) {
+	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
+	const inner = outlined ? width - BOX_CHROME : width - 1;
+	const p = statusParts(t, footerData, options);
+	const cut = (row) => (visibleWidth(row) <= inner ? row : truncateToWidth(row, inner, "…"));
+	// Left and right parts of a row, the right one flush with the card's edge.
+	const spread = (left, right) => {
+		const gap = inner - visibleWidth(left) - visibleWidth(right);
+		return gap >= 2 ? `${left}${" ".repeat(gap)}${right}` : cut([left, right].filter(Boolean).join("  "));
+	};
+	const title = (text) => [fg(t, "toolTitle", bold(t, text)), ""];
+	const draw = (card) => (outlined ? boxed(card, width, t) : card.map((line) => ` ${line}`));
+
+	// [label, value] rows; a row without a label is drawn as it is.
+	const sections = [
+		[["Project", p.project], ["Branch", p.branchText(true)]],
+		p.statusItems.map((item) => ["", item]),
+	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
+	const pad = Math.max(0, ...sections.flat().map(([label]) => visibleWidth(label)));
+	const row = ([label, value]) => cut(label ? `${fg(t, "muted", label.padEnd(pad))}  ${value}` : value);
+	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
+
+	const { percent, used, window, percentText } = p.context;
+	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
+	const filled = percent === null ? 0 : Math.round((Math.max(0, Math.min(100, percent)) / 100) * inner);
+	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");
+	const spent = p.tokens(true);
+	const cost = p.costText && `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}`;
+	const plan = p.plan.windows
+		.map((window, index) => `${fg(t, "muted", index === 0 ? join(p.plan.name, window.label) : window.label)} ${gauge(window.percent, t)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`)
+		.join(fg(t, "dim", " · "));
+	const context = [
+		...title("Context"),
+		spread(figures, percentText),
+		bar,
+		(spent || cost) && spread(spent, cost),
+		plan && cut(plan),
+	].filter((line, index) => index < 2 || line);
+	return [...draw(status), ...draw(context)];
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
@@ -2317,18 +2585,24 @@ function footerFactory(tui, t, footerData) {
 	const unsubscribe = footerData?.onBranchChange?.(() => tui?.requestRender?.());
 	refreshChanges();
 	openSidebar(tui);
-	// On wide terminals the status line is the bar on top of the side-column layout: a blank row
-	// keeps it off whatever the terminal draws above Pi (herdr's tabs), one column of margin, a rule below.
-	const bar = (width) => ["", ...statusLineRows(t, footerData, width - 1).map((row) => ` ${row}`), fg(t, "border", "─".repeat(width))];
-	railStatus = bar;
+	// On wide terminals the status line is the Status and Context cards on top of the side column; the
+	// job count leaves Status while the Jobs card under them shows the jobs.
+	const card = (width) => statusCardRows(t, footerData, width, { jobs: !jobsCard?.drawn });
+	railStatus = card;
 	// Turns the jobs spinner: redraws only while a background job status is shown, so idle Pi stays still.
+	// A Jobs card left with finished jobs only is redrawn once a second, until its tail ages out.
+	let second = 0;
 	const spinner = setInterval(() => {
 		const jobs = footerData?.getExtensionStatuses?.()?.get?.(KEYS.jobs);
 		if (typeof jobs === "string" && jobs.trim() !== "") tui?.requestRender?.();
+		else if (jobsCard?.drawn && Math.floor(Date.now() / 1000) !== second) {
+			second = Math.floor(Date.now() / 1000);
+			tui?.requestRender?.();
+		}
 	}, JOBS_SPINNER_MS);
 	spinner.unref?.();
 	return {
-		// While the side column is open the status line is the bar on top, so nothing is drawn under the
+		// While the side column is open the status line is the card on top, so nothing is drawn under the
 		// editor. Collie 1.21.3 then cannot find Pi's input box (AltanS/collie#445).
 		render: (width) => (sidebar.active ? [] : statusLineRows(t, footerData, width)),
 		invalidate() {},
@@ -2339,7 +2613,7 @@ function footerFactory(tui, t, footerData) {
 				footerTui = undefined;
 				clearInterval(usageTimer);
 			}
-			if (railStatus === bar) railStatus = undefined;
+			if (railStatus === card) railStatus = undefined;
 		},
 	};
 }
@@ -2363,11 +2637,11 @@ function applyFooter(ctx, force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Side column: Agents and Todos beside the conversation, the status line on top, on wide terminals
+// Side column: the status line, Jobs, Agents and Todos beside the conversation, on wide terminals
 // ---------------------------------------------------------------------------
 
 // Gentle Shell's sidebar layout, kept when Gentle Shell is disabled: in a fullscreen Pi the layout
-// root is a tree whose node can be swapped for [status bar / [conversation | column]]. Pi's own
+// root is a tree whose node can be swapped for [conversation | [Status and Context cards / column]]. Pi's own
 // internals (layout-node, ScrollView), so every step is guarded and falls back to the native layout.
 const LAYOUT_NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
@@ -2378,13 +2652,13 @@ const RAIL_GAP = 2;
 // active: the wide layout is painting; the status line and the panels it holds paint nothing in their usual places.
 const sidebar = { tui: undefined, active: false, dispose: undefined };
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
-let railStatus; // (width) => rows of the status bar, registered by the footer
+let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Agents and Todos as outlined cards, one right under the other, with where each one sits. */
+/** Jobs, Agents and Todos as outlined cards, one right under the other, with where each one sits. */
 function railRows(width) {
 	const rows = [];
 	const hits = [];
-	for (const key of ["gentle-agents", "gentle-todo"]) {
+	for (const key of [JOBS_CARD, "gentle-agents", "gentle-todo"]) {
 		const block = railBlocks.get(key);
 		const section = block?.draw(width);
 		if (!section?.length) continue;
@@ -2418,7 +2692,7 @@ function installSidebar(tui) {
 	const roots = new Set();
 	const cleanups = [];
 	let failed = false;
-	let barLines = [];
+	let statusLines = [];
 	let lines = [];
 	let hits = [];
 	const wanted = () =>
@@ -2446,7 +2720,21 @@ function installSidebar(tui) {
 		}
 		return result?.handled ? result : nativeMouse?.(event);
 	};
-	const bar = { render: () => barLines, invalidate() {} };
+	// The Status and Context cards stay on top of the column, outside its scrolling: they never go away.
+	const statusCard = { render: () => statusLines, invalidate() {} };
+	const side = {
+		render: () => [],
+		invalidate() {},
+		[LAYOUT_NODE]: () => ({
+			type: "vstack",
+			gap: 0,
+			align: "stretch",
+			entries: [
+				...(statusLines.length ? [{ component: statusCard, basis: "auto", grow: 0, shrink: 0, minSize: 1 }] : []),
+				...(lines.length ? [{ component: column, basis: 0, grow: 1, shrink: 1, minSize: 1 }] : []),
+			],
+		}),
+	};
 	const attach = () => {
 		if (failed) return;
 		try {
@@ -2464,36 +2752,28 @@ function installSidebar(tui) {
 					align: "stretch",
 					entries: [
 						{ component: conversation, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-						{ component: column, basis: RAIL_WIDTH, grow: 0, shrink: 0, minSize: RAIL_WIDTH },
+						{ component: side, basis: RAIL_WIDTH, grow: 0, shrink: 0, minSize: RAIL_WIDTH },
 					],
 				}),
 			};
 			const replacement = () => {
 				sidebar.active = false;
+				if (jobsCard) jobsCard.drawn = false;
 				if (!wanted()) return nativeNode.call(root);
 				try {
 					const width = column.getContentWidth(RAIL_WIDTH);
-					barLines = (config.statusLine.enabled ? railStatus?.(tui.terminal.columns) : undefined) ?? [];
+					// The cards first: the Status card leaves out the job count while the Jobs card shows the jobs.
 					const drawn = railRows(width);
+					statusLines = (config.statusLine.enabled ? railStatus?.(width) : undefined) ?? []; // lined up with the cards under it
 					hits = drawn.hits;
 					lines = drawn.rows.map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
 				} catch {
 					failed = true;
 					return nativeNode.call(root);
 				}
-				if (!barLines.length && !lines.length) return nativeNode.call(root);
+				if (!statusLines.length && !lines.length) return nativeNode.call(root);
 				sidebar.active = true;
-				const body = lines.length ? withColumn : conversation;
-				if (!barLines.length) return body[LAYOUT_NODE]();
-				return {
-					type: "vstack",
-					gap: 0,
-					align: "stretch",
-					entries: [
-						{ component: bar, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
-						{ component: body, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-					],
-				};
+				return withColumn[LAYOUT_NODE]();
 			};
 			root[LAYOUT_NODE] = replacement;
 			roots.add(root);
@@ -2648,6 +2928,8 @@ export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
 	await registerPalette(pi);
+	await registerJobsCard(pi);
+	imagePaste = await loadImagePaste();
 
 	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
 	piApi = pi;
@@ -2680,6 +2962,23 @@ export default async function (pi) {
 		latestFinished = -1;
 		patch(ctx);
 		applyEditor(ctx);
+		if (imagePaste) {
+			imagePaste.attachments.clear(); // a new or resumed session starts without pending images
+			ctx.ui?.setWidget?.(IMAGES_WIDGET, (_tui, t) => imagesWidget(t));
+		}
+	});
+	// Chips still in the submitted draft travel as real image attachments (gentle-pi's submit), so the
+	// model sees the image without calling read on a temp-file path.
+	pi.on("input", (event, ctx) => {
+		if (!imagePaste || event?.source !== "interactive" || imagePaste.attachments.size === 0) return { action: "continue" };
+		// The editor may already hold the next draft (a prompt Pi queued during compaction): its chips stay.
+		const submitted = imagePaste.attachments.submit(event.text, acceptsImages(ctx?.model), liveEditor?.getText?.() ?? "");
+		if (!submitted) return { action: "continue" };
+		if (submitted.omitted > 0 && ctx?.hasUI) {
+			const count = submitted.omitted === 1 ? "1 pasted image was" : `${submitted.omitted} pasted images were`;
+			ctx.ui.notify(`${count} not sent: the current model does not accept images. Switch to a vision model and paste again.`, "warning");
+		}
+		return { action: "transform", text: submitted.text, images: [...(event.images ?? []), ...submitted.images] };
 	});
 	// The model widget gives way to Pi's Working and Compacting rows, and follows /model and effort changes.
 	pi.on("agent_start", () => setBusy("running", true));
@@ -2714,6 +3013,7 @@ export default async function (pi) {
 		for (const timer of mcpTimers) clearTimeout(timer);
 		mcpTimers = [];
 		installedOn = undefined;
+		imagePaste?.attachments.clear();
 	});
 
 	// Pi uses the first extension that registered a message type; local extensions load

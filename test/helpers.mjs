@@ -43,7 +43,17 @@ export async function load({ mode = "rpc", select, input, custom, session = {}, 
 	const markdown = [];
 	const shortcuts = {};
 	const sent = [];
+	// pi.events: the bus gentle-pi's extensions publish display snapshots on.
+	const bus = {};
+	const events = {
+		on: (channel, handler) => {
+			(bus[channel] ??= []).push(handler);
+			return () => (bus[channel] = bus[channel].filter((other) => other !== handler));
+		},
+		emit: (channel, data) => (bus[channel] ?? []).forEach((handler) => handler(data)),
+	};
 	await extension({
+		events,
 		on: (event, handler) => ((handlers[event] ??= []).push(handler)),
 		registerCommand: (name, command) => (commands[name] = command),
 		registerShortcut: (key, shortcut) => (shortcuts[key] = shortcut),
@@ -95,15 +105,18 @@ export async function load({ mode = "rpc", select, input, custom, session = {}, 
 			getSessionName: () => session.name,
 		},
 	};
+	// Returns what each handler answered, in order (Pi reads the answers of input handlers).
 	const emit = async (event, payload = {}) => {
-		for (const handler of handlers[event] ?? []) await handler(payload, ctx);
+		const answers = [];
+		for (const handler of handlers[event] ?? []) answers.push(await handler(payload, ctx));
+		return answers;
 	};
 	await emit("session_start");
 
 	/** The renderers Pi would use for a tool whose own renderers are `base`. */
 	const tool = (name, base = {}) => toolResolvers.reduceRight((next, resolver) => () => resolver(name, next), () => base)();
 
-	return { ctx, ui, status, widgets, notices, commands, shortcuts, sent, tool, messageRenderers, entryRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
+	return { ctx, ui, status, widgets, notices, commands, shortcuts, sent, events, tool, messageRenderers, entryRenderers, markdown, emit, editor: () => editorFactory, footer: () => footerFactory };
 }
 
 /** Renders a component (or a tool row) to plain lines at `width`. */

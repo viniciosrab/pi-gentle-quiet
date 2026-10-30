@@ -19,6 +19,32 @@ export class CustomEditor {
 		const rule = "─".repeat(width);
 		return [rule, ...this.lines.map((line) => " ".repeat(this.paddingX) + line), rule];
 	}
+	// Draft editing, like Pi's Editor: the cursor sits at the end of the last line.
+	getText() {
+		return this.lines.join("\n");
+	}
+	setText(text) {
+		this.lines = text.split("\n");
+	}
+	getLines() {
+		return [...this.lines];
+	}
+	getCursor() {
+		return { line: this.lines.length - 1, col: this.lines.at(-1).length };
+	}
+	insertTextAtCursor(text) {
+		this.lines[this.lines.length - 1] += text;
+	}
+	// Pi's private grapheme segmentation, which cursor motion, wrapping and deletion go through.
+	segment(text) {
+		return [...text].map((segment, index) => ({ segment, index, input: text }));
+	}
+	// Pi's private submit: empties the draft, then hands it to onSubmit.
+	submitValue() {
+		const text = this.getText();
+		this.lines = [""];
+		this.onSubmit?.(text);
+	}
 }
 
 export const keyHint = (_binding, description) => `ctrl+o ${description}`;

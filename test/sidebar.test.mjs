@@ -28,32 +28,37 @@ async function wide(options = {}, config = {}) {
 	const todo = loaded.widgets["gentle-todo"](h.tui, theme);
 	const agents = loaded.widgets["gentle-agents"](h.tui, theme);
 	const layout = h.root[NODE]();
-	// [status bar / [conversation | column]]
-	const bar = layout.entries?.[0]?.component;
-	const body = layout.entries?.[1]?.component?.[NODE]?.();
-	const rail = body?.entries?.[1]?.component;
-	return { ...loaded, ...h, footer, todo, agents, layout, bar, body, rail, rows: (width = 60) => rail?.render(width).map(plain) };
+	// [conversation | [Status card / the other cards, scrolling]]
+	const body = layout;
+	const side = layout.entries?.[1]?.component?.[NODE]?.();
+	const status = side?.entries?.[0]?.component;
+	const rail = side?.entries?.[1]?.component;
+	return { ...loaded, ...h, footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
 }
 
-test("wide fullscreen terminals put the status bar on top of the conversation and a side column", async () => {
-	const { layout, body, native } = await wide();
-	assert.equal(layout.type, "vstack");
-	assert.equal(layout.entries[0].basis, "auto", "the bar is as tall as its rows");
+test("wide fullscreen terminals put a side column beside the conversation, with no bar on top", async () => {
+	const { layout, body, native, side } = await wide();
+	assert.equal(layout.type, "hstack", "the status line is a card in the column, not a bar");
+	assert.equal(side.type, "vstack");
+	assert.equal(side.entries[0].basis, "auto", "the Status card is as tall as its rows and stays on top");
+	assert.equal(side.entries[1].grow, 1, "the other cards scroll under it");
 	assert.equal(body.type, "hstack");
 	assert.equal(body.entries[0].component[NODE](), native, "the conversation keeps Pi's own layout");
 	assert.equal(body.entries[1].basis, 60, "fixed column width");
 	assert.equal((await wide({ columns: 300 })).body.entries[1].basis, 60, "whatever the terminal width");
 });
 
-test("the status line is the original bar, full width, set off by a blank row above and a rule below", async () => {
-	const { bar } = await wide({ columns: 180 });
-	const out = bar.render(180).map(plain);
-	assert.equal(out.length, 3);
-	assert.equal(out[0], "", "keeps the bar off what the terminal draws above Pi");
-	assert.match(out[1], /^ app · \u{E725} main +ctx .* 28%/u);
-	assert.doesNotMatch(out[1], /claude-opus-5-5/, "the model closes the Working row instead");
-	assert.ok([...out[1]].length <= 180 && [...out[1]].length >= 179, "spans the terminal");
-	assert.equal(out[2], "─".repeat(180));
+test("the status line is a Status card and a Context card on top of the column, in the same square outline", async () => {
+	const { status } = await wide({ columns: 180 });
+	const out = status.render(60).map(plain).map((row) => row.replace(/ +│$/, ""));
+	assert.ok(out[0].startsWith("┌") && out.at(-1).startsWith("└"));
+	assert.deepEqual(out.slice(1, 3), ["│ Status", "│"], "its title, then a blank row like the other cards");
+	assert.equal(out[3], "│ Project  app");
+	assert.equal(out[4], "│ Branch   \u{E725} main");
+	assert.ok(out[5].startsWith("└") && out[6].startsWith("┌"), "the Context card right under it");
+	assert.equal(out[7], "│ Context");
+	assert.match(out[9], /^│ .*tokens +\S 28%$/u);
+	assert.ok(status.render(60).every((row) => [...plain(row)].length <= 60));
 });
 
 test("the column stacks Agents and Todos in the square outline, a blank row under each title", async () => {
@@ -259,7 +264,7 @@ test("below the breakpoint everything stays where it is", async () => {
 	assert.ok(agents.render(60).length > 0);
 	assert.ok(footer.render(100).length > 0);
 	terminal.columns = 140;
-	assert.equal(root[NODE]().type, "vstack", "resizing wider opens the wide layout");
+	assert.equal(root[NODE]().type, "hstack", "resizing wider opens the wide layout");
 	assert.deepEqual(todo.render(100), []);
 	terminal.columns = 120;
 	assert.equal(root[NODE](), native, "and narrower closes it again");
@@ -280,18 +285,22 @@ test("the column can be turned off or moved to another width", async () => {
 	assert.equal(late.layout, late.native);
 });
 
-test("without Agents or Todos only the status bar goes on top, with no empty column", async () => {
+test("without Agents or Todos the column stays open with the Status card alone: it never goes away", async () => {
 	const loaded = await wide();
 	loaded.ui.setWidget("gentle-todo", undefined);
 	loaded.ui.setWidget("gentle-agents", undefined);
 	const layout = loaded.root[NODE]();
-	assert.equal(layout.type, "vstack");
-	assert.equal(layout.entries[1].component[NODE](), loaded.native);
+	assert.equal(layout.type, "hstack");
+	const side = layout.entries[1].component[NODE]();
+	assert.equal(side.entries.length, 1, "no empty scrolling area under it");
+	assert.equal(plain(side.entries[0].component.render(60)[1]).replace(/ +│$/, ""), "│ Status");
 });
 
 test("with Pi's own status line the column holds Agents and Todos, and nothing opens when they are empty", async () => {
 	const loaded = await wide({}, { statusLine: { enabled: false } });
 	assert.equal(loaded.layout.type, "hstack");
+	assert.equal(loaded.side.entries.length, 1, "no Status card");
+	assert.match(plain(loaded.side.entries[0].component.render(60)[1]), /Agents/);
 	loaded.ui.setWidget("gentle-todo", undefined);
 	loaded.ui.setWidget("gentle-agents", undefined);
 	assert.equal(loaded.root[NODE](), loaded.native);
@@ -360,6 +369,41 @@ test("clicks elsewhere in the column are not sent to the cards", async () => {
 	assert.equal(mouse("click", 2)?.handled, undefined, "on the Agents card");
 	assert.equal(mouse("click", 20)?.handled, undefined, "below the cards");
 	assert.deepEqual(seen, []);
+});
+
+// An Agents card like gentle-agents': it keeps its own collapsed state and only a left click on its
+// header row (`headerRow`, 0 or 1 with the theme's card style) toggles it, as ctrl+shift+a does.
+async function collapsibleAgents(headerRow) {
+	const loaded = await wide();
+	let collapsed = false;
+	loaded.ui.setWidget("gentle-agents", () => ({
+		render: (width) => panel(`Agents ${collapsed ? "▸ Expand" : "▾ Collapse"}  2 active`, ...(collapsed ? ["◐ gentle-ai-worker", "… 1 more"] : ["◐ gentle-ai-worker", "✓ gentle-ai-explore"]))(width),
+		handleMouse(event) {
+			if (event.type !== "click" || event.button !== "left" || event.y !== headerRow) return undefined;
+			collapsed = !collapsed;
+			return { handled: true, render: true };
+		},
+	}));
+	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.root[NODE]();
+	const mouse = (type, y) => loaded.rail.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 100, screenY: y });
+	return { ...loaded, mouse, collapsed: () => collapsed };
+}
+
+test("clicking the Agents title in the column collapses gentle-agents' card and clicking again expands it", async () => {
+	for (const headerRow of [0, 1]) {
+		const { mouse, rows, root, collapsed } = await collapsibleAgents(headerRow);
+		assert.equal(mouse("click", 3)?.handled, undefined, "an agent row is not the control");
+		assert.equal(mouse("click", 1)?.handled, true, `header row ${headerRow}`);
+		assert.equal(collapsed(), true);
+		root[NODE]();
+		const out = rows();
+		assert.match(out[1], /^│ ◈ Agents ▸ Expand {2}2 active/);
+		assert.ok(!out.some((row) => row.includes("gentle-ai-explore")), "only the first agent stays");
+		assert.equal(mouse("click", 1)?.handled, true);
+		root[NODE]();
+		assert.match(rows()[1], /^│ ◈ Agents ▾ Collapse/);
+	}
 });
 
 test("the wheel over the Todos card reaches it", async () => {
