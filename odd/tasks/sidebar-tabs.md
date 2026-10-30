@@ -16,6 +16,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
   - TREE: cute's project explorer (git status badges, folder toggles, `[ ↗ nvim ]` launcher).
 - **S4 — no YouTube tab.** User: "E o do youtube, que é o 6 do youtube, você não precisa colocar, entendeu????"
 - **S5 — tab switching as in cute:** left click on a tab in the tab bar, mouse wheel over the tab bar cycles tabs. The tab bar stays fixed at the top of the column.
+- **S6 — TREE file preview:** a left click on a file in TREE opens a read-only preview pop-up inside Pi (Esc closes, scroll keys, `e` opens it in the editor tab as before), instead of a new editor tab per click.
 
 ## Decisions
 
@@ -35,6 +36,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T6 | all | parent: README, full suite, deploy, live check | |
 | T8 | S4 (L6, reverted by L8) | worker: YT tab after cute's src/youtube/*, reading pi-youtube-player's published state | 45ded34 |
 | T9 | S2 (L7) | parent inline: model label in the Status card under Branch with the side column; not above the editor nor on the Working row | 84f2cb7 |
+| T10 | S6 (L9) | worker: TREE file preview overlay (tree-preview.ts), `e` opens the editor | f33e3b5 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -47,3 +49,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L6 (user, verbatim): "coloque do YT tbm agora". S4 is revised: the YouTube tab is wanted now, as `6:YT` after TREE, following cute's src/youtube/* (it reads the state pi-youtube-player publishes on globalThis[Symbol.for("pi-youtube-player")]; that package is not installed here, mpv and yt-dlp are).
 - L7 (user, verbatim): "E o modelo que a gente colocou na inline, mas isso só quando a tela estiver inteira e o painel lateral. O nome do modelo vai ficar lá no status, no bloco do status abaixo da branch." Done in 84f2cb7; below the breakpoint the model stays above the editor.
 - L8 (user, verbatim): "aaa remova essa aba ai de YT". YT tab reverted (ddf4a4e, 1d59ae1); S4 back to no YouTube tab. pi-youtube-player itself left installed pending the user.
+- L9 (user, verbatim): "Você acha, para a experiência de programação e usuário, você acha melhor ali na questão dos Tui, quando abre um documento, ele abre uma nova aba separada ou abre em pop-up?" Recommendation: click opens a read-only pop-up, a key opens the editor tab. User: "sim". Added S6, T10.
