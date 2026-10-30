@@ -74,7 +74,7 @@ async function wide({ columns, config = {}, load: options = {} } = {}) {
 	const layout = () => {
 		const tree = h.root[NODE]();
 		const side = tree.entries?.[1]?.component?.[NODE]?.();
-		return { tree, status: side?.entries?.[0]?.component, rail: side?.entries?.[1]?.component };
+		return { tree, status: side?.entries?.[1]?.component, rail: side?.entries?.[2]?.component }; // under the tab bar
 	};
 	const publish = (jobs, sessionId = "s1") => loaded.events.emit(EVENT, { sessionId, snapshot: { jobs } });
 	const rows = () => layout().rail?.render(60).map(plain) ?? [];

@@ -28,11 +28,11 @@ async function wide(options = {}, config = {}) {
 	const todo = loaded.widgets["gentle-todo"](h.tui, theme);
 	const agents = loaded.widgets["gentle-agents"](h.tui, theme);
 	const layout = h.root[NODE]();
-	// [conversation | [Status card / the other cards, scrolling]]
+	// [conversation | [tab bar / Status card / the other cards, scrolling]]
 	const body = layout;
 	const side = layout.entries?.[1]?.component?.[NODE]?.();
-	const status = side?.entries?.[0]?.component;
-	const rail = side?.entries?.[1]?.component;
+	const status = side?.entries?.[1]?.component;
+	const rail = side?.entries?.[2]?.component;
 	return { ...loaded, ...h, footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
 }
 
@@ -40,8 +40,8 @@ test("wide fullscreen terminals put a side column beside the conversation, with 
 	const { layout, body, native, side } = await wide();
 	assert.equal(layout.type, "hstack", "the status line is a card in the column, not a bar");
 	assert.equal(side.type, "vstack");
-	assert.equal(side.entries[0].basis, "auto", "the Status card is as tall as its rows and stays on top");
-	assert.equal(side.entries[1].grow, 1, "the other cards scroll under it");
+	assert.equal(side.entries[1].basis, "auto", "the Status card is as tall as its rows and stays on top, under the tab bar");
+	assert.equal(side.entries[2].grow, 1, "the other cards scroll under it");
 	assert.equal(body.type, "hstack");
 	assert.equal(body.entries[0].component[NODE](), native, "the conversation keeps Pi's own layout");
 	assert.equal(body.entries[1].basis, 60, "fixed column width");
@@ -292,15 +292,15 @@ test("without Agents or Todos the column stays open with the Status card alone: 
 	const layout = loaded.root[NODE]();
 	assert.equal(layout.type, "hstack");
 	const side = layout.entries[1].component[NODE]();
-	assert.equal(side.entries.length, 1, "no empty scrolling area under it");
-	assert.equal(plain(side.entries[0].component.render(60)[1]).replace(/ +│$/, ""), "│ Status");
+	assert.equal(side.entries.length, 2, "the tab bar and the Status card: no empty scrolling area under it");
+	assert.equal(plain(side.entries[1].component.render(60)[1]).replace(/ +│$/, ""), "│ Status");
 });
 
 test("with Pi's own status line the column holds Agents and Todos, and nothing opens when they are empty", async () => {
 	const loaded = await wide({}, { statusLine: { enabled: false } });
 	assert.equal(loaded.layout.type, "hstack");
-	assert.equal(loaded.side.entries.length, 1, "no Status card");
-	assert.match(plain(loaded.side.entries[0].component.render(60)[1]), /Agents/);
+	assert.equal(loaded.side.entries.length, 2, "the tab bar, no Status card");
+	assert.match(plain(loaded.side.entries[1].component.render(60)[1]), /Agents/);
 	loaded.ui.setWidget("gentle-todo", undefined);
 	loaded.ui.setWidget("gentle-agents", undefined);
 	assert.equal(loaded.root[NODE](), loaded.native);

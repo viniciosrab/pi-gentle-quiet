@@ -26,7 +26,7 @@ async function wide({ statuses = {}, branch = "main", config = {}, columns, sess
 	const footerData = { getGitBranch: () => branch, getExtensionStatuses: () => new Map(Object.entries(statuses)), onBranchChange: () => () => {} };
 	const footer = loaded.footer()(h.tui, theme, footerData);
 	const side = () => h.root[NODE]().entries?.[1]?.component?.[NODE]?.();
-	const raw = (width = 60) => side()?.entries[0].component.render(width) ?? [];
+	const raw = (width = 60) => side()?.entries[1].component.render(width) ?? []; // under the tab bar
 	// The fixed cards, each as its rows without the outline.
 	const cards = (width = 60) => {
 		const out = [];
@@ -119,7 +119,7 @@ test("an unknown context keeps its first row, without the bar; rows whose data i
 
 test("the Status and Context cards are there even when nothing else is", async () => {
 	const { side, cards } = await wide();
-	assert.equal(side().entries.length, 1, "fixed, no scrolling area under them");
+	assert.equal(side().entries.length, 2, "the tab bar and the fixed cards, no scrolling area under them");
 	assert.deepEqual(cards().map((card) => card[0]), ["Status", "Context"]);
 });
 

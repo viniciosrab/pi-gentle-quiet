@@ -17,7 +17,9 @@
 //           outline in the theme's border color
 //   sidebar fullscreen terminals with 140+ columns: a column on the right holds the status line as Status
 //           and Context cards that stay on top, then Agents and Todos (Gentle Shell's layout, drawn in this style); narrower
-//           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it)
+//           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it).
+//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE" (pi-cinlodev-cute's), switches the
+//           column: MAIN is the column above, AGENTS the Agents card alone, the others live in ./sidebar/
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
@@ -43,6 +45,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { cycleTab, renderTabBar, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
 const AGENT_DIR = (() => {
@@ -2654,11 +2657,11 @@ const sidebar = { tui: undefined, active: false, dispose: undefined };
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Jobs, Agents and Todos as outlined cards, one right under the other, with where each one sits. */
-function railRows(width) {
+/** Jobs, Agents and Todos (or the cards `keys`) as outlined cards, one right under the other, with where each one sits. */
+function railRows(width, keys = [JOBS_CARD, "gentle-agents", "gentle-todo"]) {
 	const rows = [];
 	const hits = [];
-	for (const key of [JOBS_CARD, "gentle-agents", "gentle-todo"]) {
+	for (const key of keys) {
 		const block = railBlocks.get(key);
 		const section = block?.draw(width);
 		if (!section?.length) continue;
@@ -2687,6 +2690,48 @@ function railMouse(event, hits, scrollTop) {
 	return undefined;
 }
 
+// A card drawn like the Status card: the title bold in toolTitle, a blank row, the rows, in the square outline.
+function railCard(title, rows, width, t) {
+	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
+	const card = [fg(t, "toolTitle", bold(t, title)), ...(rows.length ? ["", ...rows] : [])];
+	return outlined ? boxed(card, width, t) : card.map((line) => ` ${truncateToWidth(line, Math.max(1, width - 1), "…")}`);
+}
+
+// What a tab module gets from gentle-quiet (the contract is in ./sidebar/tabs.ts).
+function tabHost(tui) {
+	const host = {
+		get theme() {
+			return theme;
+		},
+		fg: (role, text) => fg(theme, role, text),
+		bold: (text) => bold(theme, text),
+		card: (title, rows, width) => railCard(title, rows ?? [], width, theme),
+		box: (rows, width) => (config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER ? boxed(rows, width, theme) : rows.map((row) => ` ${truncateToWidth(row, Math.max(1, width - 1), "…")}`)),
+		inner: (width) => (config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER ? width - BOX_CHROME : width - 1),
+		cwd: () => {
+			try {
+				return liveCtx?.sessionManager?.getCwd?.();
+			} catch {
+				return undefined; // ctx went stale after a session replacement or reload
+			}
+		},
+		ctx: () => liveCtx,
+		get pi() {
+			return piApi;
+		},
+		agentDir: AGENT_DIR,
+		requestRender: () => tui.requestRender?.(),
+		git: (args, cwd = host.cwd()) => (cwd ? run(cwd, args) : Promise.resolve(undefined)),
+		changes: (cwd = host.cwd()) => changesByCwd.get(cwd),
+		usage: () => currentUsage(liveCtx),
+		gauge: (percent) => gauge(percent, theme),
+		get icons() {
+			return { ...config.icons };
+		},
+	};
+	return host;
+}
+
 function installSidebar(tui) {
 	const host = tui;
 	const roots = new Set();
@@ -2702,14 +2747,16 @@ function installSidebar(tui) {
 		tui.terminal.columns >= config.sidebar.minColumns &&
 		// Gentle Shell paints its own sidebar when it is enabled.
 		typeof tui.terminal[GENTLE_SIDEBAR]?.ownsHost !== "function";
-	const column = new PiTui.ScrollView({ render: () => lines, invalidate() {} }, {
-		follow: "none",
-		primary: false,
-		overscroll: "contain",
-		scrollbar: "auto",
-		scrollbarTrackStyle: (text) => fg(theme, "border", text),
-		scrollbarThumbStyle: (text) => fg(theme, "accent", text),
-	});
+	const scrolling = (content) =>
+		new PiTui.ScrollView(content, {
+			follow: "none",
+			primary: false,
+			overscroll: "contain",
+			scrollbar: "auto",
+			scrollbarTrackStyle: (text) => fg(theme, "border", text),
+			scrollbarThumbStyle: (text) => fg(theme, "accent", text),
+		});
+	const column = scrolling({ render: () => lines, invalidate() {} });
 	const nativeMouse = column.handleMouse?.bind(column);
 	column.handleMouse = (event) => {
 		let result;
@@ -2722,6 +2769,104 @@ function installSidebar(tui) {
 	};
 	// The Status and Context cards stay on top of the column, outside its scrolling: they never go away.
 	const statusCard = { render: () => statusLines, invalidate() {} };
+
+	// The tab bar, fixed on top: a left click picks the tab under it (or the nearest), the wheel cycles them.
+	// The active tab is kept here, in memory: every new column opens on MAIN.
+	let tab = "main";
+	let shown = "main"; // the tab whose onShow ran last
+	let bar = { rows: [], hitboxes: [] };
+	const select = (id) => {
+		if (id) tab = id;
+		tui.requestRender?.();
+		return { handled: true, render: true };
+	};
+	const tabBar = {
+		render: () => bar.rows,
+		invalidate() {},
+		handleMouse(event) {
+			if (event.type === "wheel") return event.wheelDelta ? select(cycleTab(tab, event.wheelDelta)) : undefined;
+			if (event.button !== "left" || event.y >= TAB_BAR_ROWS) return undefined;
+			// Pi sends the click to the component that took the press.
+			if (event.type === "press") return { handled: true, render: false };
+			return event.type === "click" ? select(tabAt(bar.hitboxes, event.x - 1)) : undefined;
+		},
+	};
+
+	// Every tab but MAIN scrolls in a column of its own, so each keeps its scroll position. AGENTS is the
+	// Agents card as MAIN draws it; the others are tab modules, created the first time they are opened.
+	const tabHostApi = tabHost(tui);
+	const views = new Map(); // tab id -> { id, tab, error, rows, hits, column }
+	const view = (id) => {
+		if (views.has(id)) return views.get(id);
+		const entry = { id, tab: undefined, error: undefined, rows: [], hits: [] };
+		entry.column = scrolling({
+			render: () => entry.rows,
+			invalidate() {
+				try {
+					entry.tab?.invalidate?.();
+				} catch {
+					// the tab's own trouble: its next render shows it
+				}
+			},
+		});
+		const native = entry.column.handleMouse?.bind(entry.column);
+		entry.column.handleMouse = (event) => {
+			let result;
+			try {
+				result = id === "agents" ? railMouse(event, entry.hits, entry.column.scrollTop ?? 0) : tabMouse(entry, event);
+			} catch {
+				result = undefined;
+			}
+			return result?.handled ? result : native?.(event);
+		};
+		if (id !== "agents") {
+			try {
+				entry.tab = TAB_FACTORIES[id]?.(tabHostApi);
+			} catch (error) {
+				entry.error = error;
+			}
+		}
+		views.set(id, entry);
+		return entry;
+	};
+	// A tab module's mouse: the row of its rows under the pointer (scrolling included) and the column in it.
+	const tabMouse = (entry, event) => {
+		const line = (entry.column.scrollTop ?? 0) + event.y;
+		const acted =
+			event.type === "click" ? entry.tab?.handleClick?.(line, event.button, event.x)
+			: event.type === "wheel" ? entry.tab?.handleWheel?.(event.wheelDelta ?? 0, line, event.x)
+			: false;
+		return acted ? { handled: true, render: true } : undefined;
+	};
+	const drawTab = (entry, width, fit) => {
+		if (entry.id === "agents") {
+			const drawn = railRows(width, ["gentle-agents"]);
+			entry.hits = drawn.hits;
+			entry.rows = drawn.rows.length ? drawn.rows.map(fit) : railCard(join(config.icons.agents, "Agents"), [fg(theme, "muted", "No agents running")], width, theme);
+			return;
+		}
+		try {
+			if (!entry.tab) throw entry.error ?? new Error("not available");
+			if (shown !== entry.id) {
+				shown = entry.id;
+				entry.tab.onShow?.();
+			}
+			const height = Math.max(1, (tui.terminal?.rows ?? 24) - TAB_BAR_ROWS);
+			entry.rows = (entry.tab.render(width, height) ?? []).map((row) => fit(String(row ?? "")));
+		} catch (error) {
+			entry.rows = railCard(`${tabLabel(entry.id)} — ${error?.message ?? error}`, [], width, theme);
+		}
+	};
+	cleanups.push(() => {
+		for (const entry of views.values()) {
+			try {
+				entry.tab?.dispose?.();
+			} catch {
+				// leaving anyway
+			}
+		}
+	});
+
 	const side = {
 		render: () => [],
 		invalidate() {},
@@ -2730,8 +2875,13 @@ function installSidebar(tui) {
 			gap: 0,
 			align: "stretch",
 			entries: [
-				...(statusLines.length ? [{ component: statusCard, basis: "auto", grow: 0, shrink: 0, minSize: 1 }] : []),
-				...(lines.length ? [{ component: column, basis: 0, grow: 1, shrink: 1, minSize: 1 }] : []),
+				{ component: tabBar, basis: "auto", grow: 0, shrink: 0, minSize: TAB_BAR_ROWS },
+				...(tab === "main"
+					? [
+							...(statusLines.length ? [{ component: statusCard, basis: "auto", grow: 0, shrink: 0, minSize: 1 }] : []),
+							...(lines.length ? [{ component: column, basis: 0, grow: 1, shrink: 1, minSize: 1 }] : []),
+						]
+					: [{ component: view(tab).column, basis: 0, grow: 1, shrink: 1, minSize: 1 }]),
 			],
 		}),
 	};
@@ -2766,7 +2916,15 @@ function installSidebar(tui) {
 					const drawn = railRows(width);
 					statusLines = (config.statusLine.enabled ? railStatus?.(width) : undefined) ?? []; // lined up with the cards under it
 					hits = drawn.hits;
-					lines = drawn.rows.map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
+					const fit = (row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…"));
+					lines = drawn.rows.map(fit);
+					// MAIN's cards decide whether the column opens, whatever tab is showing.
+					if (statusLines.length || lines.length) {
+						const drawnBar = renderTabBar(width - 2, tab, theme);
+						bar = { rows: [` ${drawnBar.line} `, fg(theme, "border", "─".repeat(width))], hitboxes: drawnBar.hitboxes };
+						if (tab !== "main") drawTab(view(tab), width, fit);
+						else shown = "main";
+					}
 				} catch {
 					failed = true;
 					return nativeNode.call(root);
