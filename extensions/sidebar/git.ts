@@ -7,8 +7,8 @@
 //   list turns it into the branch diff inspector, "Diff · <branch>", with [ ✕ ] to close and [ ↗ ] for the
 //   full diff in less.
 //
-// A click on a file opens it in the editor ($VISUAL, $EDITOR, nvim); on its [diff], or a right click, its diff.
-// Both open in a herdr tab inside herdr, else in a detached terminal (./git-launch.ts). A click on a card's
+// A click on a file opens its read-only preview over Pi (./tree-preview.ts; e there opens the editor: $VISUAL,
+// $EDITOR, nvim); on its [diff], or a right click, its diff. The editor and the diff open in a herdr tab inside herdr, else in a detached terminal (./git-launch.ts). A click on a card's
 // title folds it to one summary row. The wheel scrolls a card whose rows do not fit its half.
 // @ts-nocheck
 
@@ -17,6 +17,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { createGitData, statusCounts } from "./git-data.ts";
 import { editorName, openDiff, openInEditor } from "./git-launch.ts";
+import { openPreview } from "./tree-preview.ts";
 
 const GAP = 1; // blank rows between the two cards
 const MIN_HEIGHT = 14; // under this the cards keep it and the column scrolls, as cute's
@@ -292,7 +293,12 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 		if (hit.kind === "file" && root) {
 			if (button === "right" || (button === "left" && local >= hit.rightAt)) openDiff(root, state.selected, hit.path, hit.untracked && !state.selected);
-			else if (button === "left") openInEditor(path.join(root, hit.path), root);
+			else if (button === "left") {
+				// The read-only preview pop-up, as in TREE; e there, or a Pi without overlays, opens the editor.
+				const file = path.join(root, hit.path);
+				const edit = () => openInEditor(file, root);
+				if (!openPreview(host.ctx?.(), { file, relPath: hit.path, onEdit: edit })) edit();
+			}
 			else return false;
 			return true;
 		}

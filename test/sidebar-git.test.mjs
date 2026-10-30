@@ -69,7 +69,7 @@ const pad = (row, width) => {
 };
 
 // A host like gentle-quiet's tabHost, with the theme of the helpers and git answered by `git`.
-function makeHost({ git = repo(), cwd = "/repo", outline = true, changes } = {}) {
+function makeHost({ git = repo(), cwd = "/repo", outline = true, changes, ctx } = {}) {
 	const calls = [];
 	let renders = 0;
 	const inner = (width) => (outline ? width - 4 : width - 1);
@@ -85,7 +85,7 @@ function makeHost({ git = repo(), cwd = "/repo", outline = true, changes } = {})
 		box,
 		inner,
 		cwd: () => cwd,
-		ctx: () => undefined,
+		ctx: () => ctx,
 		pi: undefined,
 		agentDir: "/agent",
 		requestRender: () => renders++,
@@ -503,3 +503,28 @@ test("parsers: porcelain with renames and quoted paths, counts, branches and bra
 	assert.deepEqual(diff.files.map((f) => [f.path, f.status, f.added]), [["a/y/z.ts", "renamed", 1], ["img.png", "modified", 0]]);
 	assert.equal(diff.added, 1);
 });
+
+test("with Pi's overlay UI a file click opens the read-only preview, and e there opens the editor", async () => {
+	const launches = recordLaunches({ EDITOR: "hx" });
+	const overlays = [];
+	const ctx = { hasUI: true, ui: { custom: (factory, options) => (overlays.push({ factory, options }), new Promise(() => {})) } };
+	try {
+		const { click } = await open({ ctx });
+		const before = launches.runs.length;
+		assert.equal(click(/src\/a\.ts/), true);
+		assert.equal(overlays.length, 1, "the preview pop-up, as in TREE");
+		assert.equal(launches.runs.length, before, "no editor tab");
+		const done = [];
+		const preview = overlays[0].factory({ terminal: { columns: 120, rows: 30 }, requestRender() {} }, theme, {}, (value) => done.push(value));
+		assert.ok(preview.render(80).some((row) => row.includes("src/a.ts")), "the file's path in the pop-up");
+		preview.handleInput("e");
+		assert.equal(done.length, 1, "e closes the preview");
+		await settle();
+		assert.deepEqual(launches.runs.at(-1).args.slice(-3), ["sh", "-c", "hx '/repo/src/a.ts'"], "and opens the editor");
+		assert.equal(click(/src\/a\.ts/, { at: "[diff]" }), true);
+		assert.equal(overlays.length, 1, "[diff] still opens the diff, not the preview");
+	} finally {
+		launches.restore();
+	}
+});
+

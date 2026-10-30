@@ -27,7 +27,7 @@ same; only how it is drawn changes.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
-  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
+  tree (a click opens a file in the read-only preview, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
   usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
   and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
