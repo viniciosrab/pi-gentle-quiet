@@ -308,7 +308,7 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	const { select, seen } = picker(/^Blocks and agents ›$/, /^Side column: on/, /^Side column from: 140 columns/, /^Back|^← Back/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160 });
+	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160, mcpCollapsed: false });
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
 });
 

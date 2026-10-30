@@ -92,7 +92,8 @@ const DEFAULTS = {
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
-	sidebar: { enabled: true, minColumns: 140 },
+	// mcpCollapsed: the Status card's MCP section shows only its header.
+	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
 const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"];
@@ -2236,11 +2237,12 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
 	const mcpPainted = mcp ? fg(t, mcp.online < mcp.total ? "warning" : "dim", mcpPlain) : "";
-	const statusItems = [...statuses.map((text) => fg(t, "dim", text)), mcpPainted].filter(Boolean);
+	const ownItems = statuses.map((text) => fg(t, "dim", text)); // the statuses without MCP's count
+	const statusItems = [...ownItems, mcpPainted].filter(Boolean);
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, secondRow };
+	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp };
 }
 
 // Statuses sit on the left after the location, Perm first (the model closes the Working row
@@ -2298,14 +2300,25 @@ function statusCardRows(t, footerData, width, options) {
 	const title = (text) => [fg(t, "toolTitle", bold(t, text)), ""];
 	const draw = (card) => (outlined ? boxed(card, width, t) : card.map((line) => ` ${line}`));
 
+	// MCP has a section of its own here: a header with the online count, which a click collapses, then one
+	// row per server. Its "MCP n/m" leaves the statuses.
+	const mcp = p.mcp?.servers?.length ? p.mcp : undefined;
+	const collapsed = Boolean(config.sidebar.mcpCollapsed);
+	const mcpHeader = mcp && [`${collapsed ? "▸" : "▾"} MCP`, fg(t, mcp.online < mcp.total ? "warning" : "dim", `${mcp.online}/${mcp.total} online`)];
+	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));
+	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => ["", spread(`  ${fg(t, "text", server.name)}`, serverState(server))]) : [];
+
 	// [label, value] rows; a row without a label is drawn as it is.
 	const sections = [
 		[["Project", p.project && fg(t, "text", p.project.replace(SGR, ""))], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "text", modelLabel())]],
-		p.statusItems.map((item) => ["", item]),
+		(mcp ? p.ownItems : p.statusItems).map((item) => ["", item]),
+		mcp ? [mcpHeader, ...mcpRows] : [],
 	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
 	// A labelled row: the label at the start, its value flush with the card's end, as in pi-cinlodev-cute.
 	const row = ([label, value]) => (label ? spread(fg(t, "muted", label), value) : cut(value));
 	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
+	// Where the MCP header is drawn, counting the outline's top row, for the click that collapses it.
+	const mcpRow = mcp ? status.length - 1 - mcpRows.length + (outlined ? 1 : 0) : -1;
 
 	const { percent, used, window, percentText } = p.context;
 	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
@@ -2320,7 +2333,7 @@ function statusCardRows(t, footerData, width, options) {
 		bar,
 		(spent || cost) && spread(spent, cost),
 	].filter((line, index) => index < 2 || line);
-	return [...draw(status), ...draw(context)];
+	return Object.assign([...draw(status), ...draw(context)], { mcpRow });
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
@@ -2556,7 +2569,8 @@ function installedMcpServers(ctx) {
 	return [...found.keys()];
 }
 
-/** { online, total } or undefined when no MCP servers are installed; cached briefly because the footer renders often. */
+/** { online, total, servers: [{ name, tools }] } or undefined when no MCP servers are installed; cached briefly
+ * because the footer renders often. tools counts a server's visible tools: 0 is offline. */
 function mcpCounts(ctx) {
 	const cwd = ctx?.sessionManager?.getCwd?.();
 	if (Date.now() - mcpCache.at < MCP_TTL_MS && mcpCache.cwd === cwd) return mcpCache.value;
@@ -2564,15 +2578,17 @@ function mcpCounts(ctx) {
 	let value;
 	if (installed.length) {
 		// Pi hides a server's tools when it disconnects, so a server is online while it has a visible tool.
-		const live = new Set();
+		const live = new Map(); // namespace -> visible tools
 		try {
 			for (const tool of piApi?.getAllTools?.() ?? []) {
-				if (tool?.exposure !== "hidden" && typeof tool?.namespace?.name === "string") live.add(tool.namespace.name);
+				const namespace = tool?.namespace?.name;
+				if (tool?.exposure !== "hidden" && typeof namespace === "string") live.set(namespace, (live.get(namespace) ?? 0) + 1);
 			}
 		} catch {
 			// no tool list: treat every server as offline rather than guess
 		}
-		value = { online: installed.filter((name) => live.has(mcpNamespace(name))).length, total: installed.length };
+		const servers = installed.map((name) => ({ name, tools: live.get(mcpNamespace(name)) ?? 0 }));
+		value = { online: servers.filter((server) => server.tools).length, total: installed.length, servers };
 	}
 	mcpCache = { at: Date.now(), cwd, value };
 	return value;
@@ -2774,7 +2790,21 @@ function installSidebar(tui) {
 		return result?.handled ? result : nativeMouse?.(event);
 	};
 	// The Status and Context cards stay on top of the column, outside its scrolling: they never go away.
-	const statusCard = { render: () => statusLines, invalidate() {} };
+	// A left click on its MCP header row collapses or opens the MCP section, and the choice is saved.
+	const statusCard = {
+		render: () => statusLines,
+		invalidate() {},
+		handleMouse(event) {
+			if (event.button !== "left" || statusLines.mcpRow < 0 || event.y !== statusLines.mcpRow) return undefined;
+			// Pi sends the click to the component that took the press.
+			if (event.type === "press") return { handled: true, render: false };
+			if (event.type !== "click") return undefined;
+			config.sidebar.mcpCollapsed = !config.sidebar.mcpCollapsed;
+			saveConfig();
+			tui.requestRender?.();
+			return { handled: true, render: true };
+		},
+	};
 
 	// The tab bar, fixed on top: a left click picks the tab under it (or the nearest), the wheel cycles them.
 	// The active tab is kept here, in memory: every new column opens on MAIN.
