@@ -235,7 +235,7 @@ test("the working tree card lists each file with its status badge and +n −n, w
 	assert.ok(!out.some((row) => /click:|view diff|\[diff\]/.test(row)), "no [diff] and no hint");
 	assert.ok(out.some((row) => /^│ M {2}src\/a\.ts +\+10 −2 │$/.test(row)), "counts flush right");
 	assert.ok(out.some((row) => /^│ A {2}src\/b\.ts +\+2 −1 │$/.test(row)));
-	assert.ok(out.some((row) => /^│ \? {2}new\.txt +│$/.test(row)));
+	assert.ok(out.some((row) => /^│ U {2}new\.txt +│$/.test(row)));
 	for (const row of out.filter((row) => row.trim())) assert.equal([...row].length, 59, "every card row as wide as the column");
 	const colored = draw();
 	const a = rows().findIndex((row) => row.includes("src/a.ts"));

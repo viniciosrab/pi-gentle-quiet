@@ -29,8 +29,8 @@ const FILE_BADGES = {
 	added: ["success", "A"],
 	deleted: ["error", "D"],
 	renamed: ["accent", "R"],
-	untracked: ["accent", "?"],
-	conflict: ["error", "U"],
+	untracked: ["accent", "U"], // as VS Code and Neo-tree mark them
+	conflict: ["error", "!"],
 };
 
 /** One row of a card: `left` cut to fit, `right` against the right edge; `hit` is what a click on it does. */
