@@ -53,6 +53,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T17 | S12 (L17) | worker: drag a tab in the bar to reorder | 76d8b37 |
 | T18 | S13 (L18) | worker: Engram card local essentials, no Cloud | 9b97658 |
 | T19 | S10 (L19) | worker: Nerd Font glyphs in Symbols' colors; drop GentleSymbols.ttf | e6222c9 |
+| T20 | S2 (L20) | worker: MCP back to a plain labelled row in the Status card | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -76,3 +77,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L17 (user, verbatim): "uma dúvida, teria um jeito de eu só arrastando com mouse eu mudar o lugar dela? tipo vou para 1, para 3 ou tem que ser mesmo usando o nosso gently quiet as configurações dele??" Pi delivers press/drag/release/move mouse events. User: "sim". S12, T17.
 - L18 (user, verbatim): "Aqui também podia ter só remover essa parte do Cloud Host, eu não uso o Cloud, saca? Então não precisa ter, eu quero só saber os dados do local, sabe? O status ali, o tamanho, quantas, enfim, os status essenciais aí do Engram, né?" Also (L17 follow-up): the user proposed dropping the Tab order menu once drag works; agreed to drop it only after the drag is tested live.
 - L19 (user, verbatim): "tudo torto feio isso que voce fez nao tem outra opcao melhor que deixe realmente bons? agora que voce falo Usar ícones da Nerd Font no estilo do Symbol e uma boa?" Converting Symbols SVGs to ~12 px glyphs cannot look clean. Recommendation: Nerd Font glyphs with Symbols' mapping and colors, drop the converted font. User: "ok". S10 revised; T19.
+- L20 (user, verbatim): "e os negocio o mcp aqui de acordem vamos desfazer deix padrao como ta os outros so coloque MCP dai a resposta entendeu [...] como ta os outros entendeu" The MCP divider, server list and fold go; MCP becomes a labelled row like Project/Branch/Model: "MCP" muted, "5/5" flush right (warning when a server is offline). T20.
