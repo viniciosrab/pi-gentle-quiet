@@ -46,19 +46,19 @@ async function preview(content, { name = "app.js", rows = 30, relPath = `src/${n
 
 const lines = (count) => Array.from({ length: count }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n") + "\n";
 
-test("the overlay opens centered, 60% of the terminal wide but at most 100 columns, and asks Pi for an overlay", async () => {
+test("the overlay opens centered, 70% of the terminal wide but at most 140 columns, and asks Pi for an overlay", async () => {
 	const { calls } = await preview("a\n");
 	assert.equal(calls.custom.length, 1);
 	const { options } = calls.custom[0];
 	assert.equal(options.overlay, true);
 	assert.equal(typeof options.overlayOptions, "function", "sized after the terminal it opens on");
 	const sized = (columns) => previewWidthFor(columns);
-	assert.equal(sized(220), 100, "capped on wide terminals");
-	assert.equal(sized(150), 90);
+	assert.equal(sized(220), 140, "capped on wide terminals");
+	assert.equal(sized(150), 105);
 	assert.equal(sized(80), 60, "never under 60");
 	const { width, ...rest } = options.overlayOptions();
 	assert.deepEqual(rest, { anchor: "center", minWidth: 60, maxHeight: "85%" });
-	assert.ok(width >= 60 && width <= 100);
+	assert.ok(width >= 60 && width <= 140);
 });
 
 test("title, language, path, numbered lines and the footer range in a square outline", async () => {
