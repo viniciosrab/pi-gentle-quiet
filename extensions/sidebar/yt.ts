@@ -3,20 +3,18 @@
 // globalThis[Symbol.for("pi-youtube-player")] (getState, on("stateChange"), and its controls) and draws two
 // cards, each folded and opened by a click on its title as cute's sections:
 //
-//   ♪ YouTube Music   the play state (♪ Playing, ♪ Paused), as cute's ♪ SONANDO; the cover (./yt-cover.ts,
-//                     where the terminal draws Kitty images; cute's ┌─────┐ stand-in elsewhere) beside the
-//                     play mark and the title, and 👤 the artist; the scrubber with the times
+//   ♪ YouTube Music   the cover (./yt-cover.ts, where the terminal draws Kitty images; cute's ┌─────┐ stand-in
+//                     elsewhere) beside the play mark, the title and the artist; the scrubber with the times
 //                     at its ends; [ ⏮  Prev ] [ ⏸  Pause ] [ ⏭  Next ] centered; repeat, volume down and up,
-//                     shuffle and picture in picture (lit while the player floats); the track that comes next.
+//                     shuffle and picture in picture; the track that comes next.
 //   ≡ Queue (n)       the queue, twelve tracks at a time (the wheel over it scrolls it), the playing one
 //                     marked ♪; a click plays a track.
 //
 // With no browser connected, cute's waiting card; without pi-youtube-player, one card saying so. The service
 // publishes no seek, so the scrubber seeks only when the player has a seek(seconds) of its own.
-// The player sends its whole state every second, changed or not. The tab draws each one at the last width
-// and asks for a redraw only when the rows differ from the drawn ones (the progress, every second while
-// playing; nothing while paused), and lets go of the player once its redraws stop being drawn: another tab
-// is showing. Its next render listens again.
+// The tab redraws on the player's stateChange while the state it draws changes (the progress, every second
+// while playing; nothing while paused), and lets go of the player once its redraws stop being drawn: another
+// tab is showing. Its next render listens again.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -65,6 +63,25 @@ const player = () => {
 	return published && typeof published.getState === "function" ? published : undefined;
 };
 
+// Everything the tab draws from the state, so an unchanged state asks for no redraw.
+const drawnKey = (state) =>
+	JSON.stringify([
+		state?.status,
+		state?.platform,
+		state?.title,
+		state?.artist,
+		Math.floor(state?.currentTime ?? 0),
+		state?.duration,
+		state?.volume,
+		state?.repeatMode,
+		state?.shuffle,
+		state?.isPip,
+		state?.connectedClients,
+		state?.thumbnailPath,
+		state?.thumbnailBase64?.length,
+		(state?.queue ?? []).map((track) => [track?.title, track?.artist, track?.duration, track?.isCurrent]),
+	]);
+
 export function createTab(host: SidebarHost, options = {}): SidebarTab {
 	const fg = (role, text) => host.fg(role, text);
 	const now = options.now ?? Date.now;
@@ -74,8 +91,7 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 	let hitboxes = []; // { line, startX, endX, action }
 	let queueLines = [-1, -1]; // the queue card's first and last line
 	let listening; // { source, stop }
-	let drawnWidth; // the width the last render drew at
-	let drawn = ""; // the rows the last render drew
+	let drawn = ""; // drawnKey of the state the last render drew
 	let pendingSince; // when a redraw was asked for that no render has drawn yet
 
 	const stop = () => {
@@ -91,31 +107,19 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 		stop();
 		if (!source || typeof source.on !== "function") return;
 		try {
-			const off = source.on("stateChange", () => {
-				if (pendingSince !== undefined) {
-					if (now() - pendingSince > HIDDEN_MS) stop();
+			const off = source.on("stateChange", (state) => {
+				const key = drawnKey(state);
+				if (key === drawn) return;
+				if (pendingSince !== undefined && now() - pendingSince > HIDDEN_MS) {
+					stop();
 					return;
 				}
-				if (!changed()) return;
-				pendingSince = now();
+				pendingSince ??= now();
 				host.requestRender();
 			});
 			listening = { source, stop: off };
 		} catch {
 			listening = undefined;
-		}
-	};
-
-	// Whether the player's state now draws other rows than the last render drew (the hitboxes stay the drawn ones).
-	const changed = () => {
-		if (drawnWidth === undefined) return true;
-		const kept = [hitboxes, queueLines];
-		try {
-			return rows(drawnWidth).join("\n") !== drawn;
-		} catch {
-			return true;
-		} finally {
-			[hitboxes, queueLines] = kept;
 		}
 	};
 
@@ -155,7 +159,6 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 	const nowPlayingRows = (state, source, inner) => {
 		const playing = state.status === "playing";
 		const mark = playing ? fg("success", "▶ ") : fg("warning", "⏸ ");
-		const label = playing ? fg("success", host.bold("♪ Playing")) : state.status === "paused" ? fg("warning", host.bold("♪ Paused")) : fg("muted", host.bold(`♪ ${state.status === "stopped" ? "Stopped" : "Idle"}`));
 		const title = state.title || "Unknown";
 		const artist = cleanArtist(state.artist, title);
 		const image = cover.draw(state, inner);
@@ -163,10 +166,8 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 		const room = Math.max(4, inner - 1 - columns - 2 - 2);
 		const art = image ? [image.sequence + " ".repeat(columns), " ".repeat(columns), " ".repeat(columns)] : ["┌─────┐", `│  ${fg("accent", "◉")}  │`, "└─────┘"];
 		const rows = [
-			label,
-			"",
 			` ${art[0]}  ${mark}${fg("accent", host.bold(cut(title, room)))}`,
-			` ${art[1]}  ${fg("dim", "👤")} ${fg("muted", cut(artist, room - 1))}`,
+			` ${art[1]}  ${fg("muted", cut(artist, room + 2))}`,
 			` ${art[2]}`,
 			"",
 		];
@@ -284,6 +285,7 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 			return host.card("♪ YouTube", [fg("muted", "pi-youtube-player is not installed."), fg("dim", "Set it up from its README (it is not on npm):"), fg("accent", PLAYER_REPO)], width);
 		}
 		listen(source);
+		drawn = drawnKey(state);
 		const brand = state?.platform === "youtube" ? "YouTube" : "YouTube Music";
 		if (!state || !(state.connectedClients > 0) || state.status === "disconnected") {
 			return host.card(`♪ ${brand} · offline`, [`${fg("accent", "✦")} ${fg("text", "Waiting for Chrome…")}`, fg("muted", "Open youtube.com or music.youtube.com")], width);
@@ -298,16 +300,11 @@ export function createTab(host: SidebarHost, options = {}): SidebarTab {
 		return [...first, ...second];
 	};
 
-	const rows = (width) => draw(width).map((line) => cut(line, width));
-
 	return {
 		id: "yt",
 		render(width) {
 			pendingSince = undefined;
-			const out = rows(width);
-			drawnWidth = width;
-			drawn = out.join("\n");
-			return out;
+			return draw(width).map((line) => cut(line, width));
 		},
 		handleClick(line, button, x) {
 			if (button !== "left") return false;

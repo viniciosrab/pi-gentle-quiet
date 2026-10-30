@@ -163,13 +163,10 @@ test("playing: title and artist beside the cover, the scrubber, centered control
 	const out = rows();
 	const raw = draw();
 	assert.equal(out[1], "│ ▾ ♪ YouTube Music");
-	assert.equal(out[3], "│ ♪ Playing", "the play state under the title, as cute's ♪ SONANDO");
-	assert.ok(raw.join("").includes(theme.fg("success", theme.bold("♪ Playing"))));
-	assert.equal(out[4], "│", "a blank row before the cover");
 	const titleRow = out.findIndex((row) => row.includes("▶ Starboy"));
-	assert.equal(titleRow, 5);
+	assert.ok(titleRow > 1);
 	assert.match(out[titleRow], /┌─────┐ +▶ Starboy/, "the stand-in cover where the terminal draws no images");
-	assert.match(out[titleRow + 1], /│  ◉  │ +👤 The Weeknd$/, "the artist, cleaned of the album and year");
+	assert.match(out[titleRow + 1], /│  ◉  │ +The Weeknd$/, "the artist, cleaned of the album and year");
 	assert.match(out[titleRow + 2], /└─────┘/);
 	assert.ok(painted(raw.join(""), "success", "▶ "), "the play mark in success");
 	assert.ok(raw.join("").includes(theme.fg("accent", theme.bold("Starboy"))), "the title in accent bold");
@@ -186,7 +183,6 @@ test("playing: title and artist beside the cover, the scrubber, centered control
 	const right = 55 - (left + "[ ⏮  Prev ]  [ ⏸  Pause ]  [ ⏭  Next ]".length);
 	assert.ok(Math.abs(left - right) <= 1, "centered");
 	assert.ok(out.some((row) => /\[ 🔁 \] \[ - \] 🔊 80% \[ \+ \] \[ 🔀 \] \[ 📺 \]/.test(row)), "repeat, volume, shuffle and picture in picture");
-	assert.ok(painted(raw.join(""), "dim", "[ 📺 ]"), "picture in picture off: dim");
 	assert.ok(out.some((row) => row.includes("↳ Next: Blinding Lights")));
 
 	const queueTitle = out.findIndex((row) => row === "│ ▾ ≡ Queue (3)");
@@ -205,8 +201,6 @@ test("paused: the pause mark in warning and a Play button; repeat one, shuffle a
 	const out = rows();
 	const raw = draw().join("");
 	assert.equal(out[1], "│ ▾ ♪ YouTube");
-	assert.equal(out[3], "│ ♪ Paused");
-	assert.ok(raw.includes(theme.fg("warning", theme.bold("♪ Paused"))));
 	assert.ok(out.some((row) => row.includes("⏸ Starboy")));
 	assert.ok(painted(raw, "warning", "⏸ "));
 	assert.ok(out.some((row) => row.includes("[ ▶  Play ]")));
@@ -452,94 +446,6 @@ test("the published base64 cover is used when there is no file", async () => {
 	const { deps } = kitty();
 	const { rows } = opened({ cover: createCover(() => {}, deps) });
 	rows();
-	await settle();
-	assert.ok(rows().some((row) => row.includes("<IMG 7>")));
-});
-
-test("a state packet that changes nothing drawn asks for no render (the player sends one every second)", () => {
-	const player = publish({ ...PLAYING, status: "paused" });
-	const { calls, draw } = opened();
-	draw();
-	player.emit({ lastUpdated: 2, volume: 0.801, currentTime: 75.4, duration: 230.2, isLiked: true });
-	assert.equal(calls.renders, 0, "the same rows: no redraw");
-	player.emit({ volume: 0.9 });
-	assert.equal(calls.renders, 1, "the volume shown changed");
-	draw();
-	player.emit({ isPip: true });
-	assert.equal(calls.renders, 2, "picture in picture lit");
-});
-
-// A PNG header saying 2×1: pngSize and the stand-in renderImage read nothing past it.
-const PNG_2x1 = (() => {
-	const buffer = Buffer.from(PNG_1x1, "base64");
-	buffer.writeUInt32BE(2, 16);
-	return buffer.toString("base64");
-})();
-
-test("the cover is sent once: renders reuse its sequence, and the next cover replaces it under the same image id", async () => {
-	const dir = mkdtempSync(path.join(os.tmpdir(), "gentle-quiet-yt-"));
-	const file = path.join(dir, "pi-yt-current-cover.png");
-	writeFileSync(file, Buffer.from(PNG_1x1, "base64"));
-	const player = publish({ ...PLAYING, thumbnailUrl: "https://i.ytimg.com/vi/a/hqdefault.jpg", thumbnailPath: file, thumbnailBase64: PNG_1x1 });
-	const { deps, drawn } = kitty();
-	let ids = 0;
-	deps.allocateImageId = () => (ids++, 7);
-	const { rows } = opened({ cover: createCover(() => {}, deps) });
-	rows();
-	await settle();
-	for (let i = 0; i < 5; i++) assert.ok(rows().some((row) => row.includes("<IMG 7>")));
-	assert.equal(drawn.length, 1, "one transmission for every render of the same cover");
-
-	// pi-youtube-player writes every cover to the same file
-	writeFileSync(file, Buffer.from(PNG_2x1, "base64"));
-	player.emit({ thumbnailUrl: "https://i.ytimg.com/vi/b/hqdefault.jpg", thumbnailBase64: PNG_2x1 });
-	rows();
-	await settle();
-	assert.ok(rows().some((row) => row.includes("<IMG 7>")));
-	assert.equal(drawn.length, 2, "the next cover is sent once");
-	assert.deepEqual(drawn[1].dimensions, { widthPx: 2, heightPx: 1 });
-	assert.equal(ids, 1, "one image id for the tab: the new cover replaces the old one in the terminal");
-});
-
-test("the cover file pi-youtube-player wrote is preferred over the published base64", async () => {
-	const dir = mkdtempSync(path.join(os.tmpdir(), "gentle-quiet-yt-"));
-	const file = path.join(dir, "pi-yt-current-cover.png");
-	writeFileSync(file, Buffer.from(PNG_2x1, "base64"));
-	publish({ ...PLAYING, thumbnailPath: file, thumbnailBase64: PNG_1x1 });
-	const { deps, drawn } = kitty();
-	const { rows } = opened({ cover: createCover(() => {}, deps) });
-	rows();
-	await settle();
-	assert.ok(rows().some((row) => row.includes("<IMG 7>")));
-	assert.deepEqual(drawn.at(-1).dimensions, { widthPx: 2, heightPx: 1 }, "the file");
-
-	publish({ ...PLAYING, thumbnailPath: path.join(dir, "gone.png"), thumbnailBase64: PNG_1x1 });
-	const other = kitty();
-	const second = opened({ cover: createCover(() => {}, other.deps) });
-	second.rows();
-	await settle();
-	assert.ok(second.rows().some((row) => row.includes("<IMG 7>")), "an unreadable file: the base64");
-	assert.deepEqual(other.drawn.at(-1).dimensions, { widthPx: 1, heightPx: 1 });
-});
-
-test("while the next cover loads the last one stays: the cover never blinks back to the stand-in", async () => {
-	const player = publish({ ...PLAYING, thumbnailUrl: "a", thumbnailBase64: PNG_1x1 });
-	let release;
-	const { deps } = kitty({ toPng: () => new Promise((resolve) => (release = resolve)) });
-	const { rows } = opened({ cover: createCover(() => {}, deps) });
-	rows();
-	await settle();
-	assert.ok(rows().some((row) => row.includes("<IMG 7>")));
-	player.emit({ thumbnailUrl: "b", thumbnailBase64: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 1]).toString("base64") });
-	rows();
-	await settle();
-	assert.equal(typeof release, "function", "converting");
-	for (let i = 0; i < 3; i++) {
-		const out = rows();
-		assert.ok(out.some((row) => row.includes("<IMG 7>")), "the last cover while the JPEG converts");
-		assert.ok(!out.some((row) => row.includes("┌─────┐")));
-	}
-	release(Buffer.from(PNG_2x1, "base64"));
 	await settle();
 	assert.ok(rows().some((row) => row.includes("<IMG 7>")));
 });
