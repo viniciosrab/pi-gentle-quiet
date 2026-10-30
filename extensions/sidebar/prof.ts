@@ -9,16 +9,23 @@
 //   Plan usage   each window of the plan usage the Context card shows as cute's quota gauge: the label,
 //                the percent used and the reset on one row, a bar across the card under it.
 //
-// A click on a profile or on the Profiles title runs /gentle:profiles: switching stays gentle-pi's, in its
-// own screen, rather than cute's in-card switcher. The wheel is left to the column, which scrolls the tab.
+// Editing happens in the card, through gentle-pi's own writers (./prof-data.ts profileEditor), without its
+// screen: a click on a profile uses it in this session (gentle-pi's "Use in this session"); a click on an
+// agent's model (or the orchestrator's) opens a picker of Pi's models under the row (./prof-picker.ts), and
+// the choice is saved in the shown profile (gentle-pi's Save); a click on an effort steps to the next level
+// gentle-pi offers for that model, saved the same way. The card is read again after each change. A click on
+// the Profiles title opens gentle-pi's full editor (/gentle:profiles), and so does every click when this
+// gentle-pi does not export the writers or Gentle Shell is on. Make default is not offered here: gentle-pi
+// keeps it inside its command (confirmation, models.json, rollback). The wheel is left to the column.
 // The data is read in ./prof-data.ts when the tab is shown, never while it draws.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { loadProfiles, PROF_TIMEOUTS } from "./prof-data.ts";
+import { loadProfiles, PROF_TIMEOUTS, profileEditor, thinkingSupport } from "./prof-data.ts";
+import { openPicker } from "./prof-picker.ts";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 
-export { PROF_TIMEOUTS };
+export { PROF_TIMEOUTS, thinkingSupport };
 
 const TITLE = "Profiles";
 const USAGE_TITLE = "Plan usage";
@@ -50,6 +57,10 @@ const FAMILIES = [
 	["research-", "error"],
 ];
 const shortModel = (model) => String(model).split("/").at(-1);
+const ORCHESTRATOR = "orchestrator";
+const INHERIT = "inherit";
+const UNTOUCHED = "leave untouched"; // gentle-pi's inherit for the orchestrator
+const COMMAND = "/gentle:profiles";
 
 export function createTab(host: SidebarHost): SidebarTab {
 	const fg = (role, text) => host.fg(role, text);
@@ -58,7 +69,9 @@ export function createTab(host: SidebarHost): SidebarTab {
 	let loading = false;
 	let again = false; // a refresh asked for while one was running
 	let expanded = false;
-	let hitboxes = []; // { line, startX, endX, action }
+	let hitboxes = []; // { line, startX, endX, action, ... }
+	let editor; // gentle-pi's writers (./prof-data.ts profileEditor), once resolved; undefined runs the command
+	let editorLoad;
 
 	const refresh = () => {
 		if (loading) {
@@ -66,6 +79,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			return;
 		}
 		loading = true;
+		editorLoad ??= profileEditor(host).then((found) => (editor = found));
 		loadProfiles(host).then((next) => {
 			loading = false;
 			loadedAt = Date.now();
@@ -101,7 +115,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 				name === data.shown
 					? fg("accent", host.bold(raw))
 					: `${fg("dim", "[")}${own.length ? own.map(([, glyph, role]) => fg(role, glyph)).join("") : fg("dim", "○")}${fg("dim", ` ${index + 1}: `)}${fg("muted", name)}${fg("dim", "]")}`;
-			return { styled, len: visibleWidth(raw) };
+			return { styled, len: visibleWidth(raw), name };
 		});
 		const wrapped = [];
 		let row = [];
@@ -134,7 +148,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			const spans = [];
 			let x = 0;
 			for (const button of fits) {
-				spans.push({ startX: x, endX: x + button.len, action: "profiles" });
+				spans.push({ startX: x, endX: x + button.len, action: "use", name: button.name });
 				x += button.len + 1;
 			}
 			const parts = fits.map((button) => button.styled);
@@ -146,18 +160,46 @@ export function createTab(host: SidebarHost): SidebarTab {
 		});
 	};
 
+	// spread() for a row whose right side is clickable parts ({ styled, len, ...hit }), joined by a space.
+	const spreadParts = (left, parts, inner) => {
+		const right = parts.map((part) => part.styled).join(" ");
+		const width = parts.reduce((sum, part) => sum + part.len, 0) + parts.length - 1;
+		const rows = spread(left, right, inner);
+		let x = rows.length === 1 ? inner - width : 2;
+		const spans = [];
+		for (const { styled, len, ...hit } of parts) {
+			if (hit.action) spans.push({ startX: x, endX: x + len, ...hit });
+			x += len + 1;
+		}
+		return rows.length === 1 ? [{ text: rows[0], spans }] : [rows[0], { text: rows[1], spans }];
+	};
+
 	const rosterRows = (inner) => {
-		const effort = (entry, fallback) => fg("dim", `(${entry?.thinking ?? fallback})`);
-		const model = (value) => (value === undefined || value === "inherit" ? fg("dim", "inherit") : fg("text", shortModel(value)));
+		const modelPart = (agent, value, unset = INHERIT) => {
+			const set = value !== undefined && value !== INHERIT;
+			const label = set ? shortModel(value) : unset;
+			return { styled: set ? fg("text", label) : fg("dim", label), len: visibleWidth(label), action: "model", agent, model: set ? value : undefined };
+		};
+		const effortPart = (agent, model, thinking) => {
+			const label = `(${thinking ?? INHERIT})`;
+			return { styled: fg("dim", label), len: visibleWidth(label), action: "effort", agent, model, thinking: thinking === INHERIT ? undefined : thinking };
+		};
 		const orchestrator = data.orchestrator;
 		const head = `${fg("accent", "◆")} ${host.bold("orchestrator")}`;
-		const rows = spread(head, orchestrator?.model ? `${model(orchestrator.model)} ${effort(orchestrator, "inherit")}` : fg("dim", "leave untouched"), inner);
+		const rows = spreadParts(
+			head,
+			orchestrator?.model
+				? [modelPart(ORCHESTRATOR, orchestrator.model), effortPart(ORCHESTRATOR, orchestrator.model, orchestrator.thinking)]
+				: [modelPart(ORCHESTRATOR, undefined, UNTOUCHED)],
+			inner,
+		);
 		rows.push("");
 		if (!data.rows.length) rows.push(fg("dim", "no subagents routed"));
 		for (const entry of data.rows) {
 			const family = FAMILIES.find(([prefix]) => entry.agent.startsWith(prefix))?.[1];
 			const left = `${fg(family ?? "muted", "•")} ${fg(family ?? "text", entry.agent)}`;
-			rows.push(...spread(left, `${model(entry.model)} ${effort(entry, "inherit")}`, inner));
+			const model = entry.model === INHERIT ? undefined : entry.model;
+			rows.push(...spreadParts(left, [modelPart(entry.agent, model), effortPart(entry.agent, model, entry.thinking)], inner));
 		}
 		return rows;
 	};
@@ -180,6 +222,35 @@ export function createTab(host: SidebarHost): SidebarTab {
 			const bar = [filled && fg(tone(percent), "■".repeat(filled)), filled < inner && fg("dim", "□".repeat(inner - filled))].filter(Boolean).join("");
 			return [...spread(label, right, inner), bar];
 		});
+	};
+
+	const openEditor = () => {
+		try {
+			host.pi?.sendUserMessage?.(COMMAND, { expandPromptTemplates: true });
+		} catch {
+			// Pi's API went away with the session: nothing to run
+		}
+		return true;
+	};
+
+	// An edit's outcome: said in Pi's notice line, then the card read again from gentle-pi.
+	const done = (pending) => {
+		Promise.resolve(pending).then((outcome) => {
+			try {
+				if (outcome?.message) host.ctx()?.ui?.notify?.(outcome.message, outcome.ok ? "info" : "warning");
+			} catch {
+				// a stale ctx: the card still refreshes
+			}
+			refresh();
+		});
+		return true;
+	};
+
+	// The effort after `hit.thinking`: inherit, then the levels gentle-pi offers for the row's model, wrapping.
+	const nextEffort = async (profile, hit) => {
+		const levels = [INHERIT, ...(await editor.efforts(hit.model))];
+		const next = levels[(levels.indexOf(hit.thinking ?? INHERIT) + 1) % levels.length];
+		return editor.set(profile, hit.agent, { thinking: next === INHERIT ? undefined : next });
 	};
 
 	// A card with its rows' hitboxes moved to where the card puts them: rows start two under the title.
@@ -210,7 +281,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			hitboxes = profiles.spans;
 			return lines.map((line) => (visibleWidth(line) <= width ? line : truncateToWidth(line, width, "…")));
 		},
-		handleClick(line, button, x) {
+		handleClick(line, button, x, event) {
 			if (button !== "left") return false;
 			const hit = hitboxes.find((box) => box.line === line && x >= box.startX && x < box.endX);
 			if (!hit) return false;
@@ -219,11 +290,28 @@ export function createTab(host: SidebarHost): SidebarTab {
 				host.requestRender();
 				return true;
 			}
-			try {
-				host.pi?.sendUserMessage?.("/gentle:profiles", { expandPromptTemplates: true });
-			} catch {
-				// Pi's API went away with the session: nothing to run
-			}
+			if (hit.action === "profiles" || !editor || data?.state !== "ok") return openEditor();
+			if (hit.action === "use") return done(editor.use(hit.name));
+			const profile = data.shown;
+			if (hit.action === "effort") return done(nextEffort(profile, hit));
+			const untouched = hit.agent === ORCHESTRATOR ? UNTOUCHED : INHERIT;
+			const ctx = (() => {
+				try {
+					return host.ctx();
+				} catch {
+					return undefined;
+				}
+			})();
+			editor.models().then((models) => {
+				const opened = openPicker(ctx, {
+					title: `Model · ${hit.agent} · ${profile}`,
+					choices: [untouched, ...models],
+					current: hit.model ?? untouched,
+					at: event && { screenX: event.screenX, screenY: event.screenY, x: event.x ?? x },
+					onPick: (choice) => done(editor.set(profile, hit.agent, { model: choice === untouched ? undefined : choice })),
+				});
+				if (!opened) openEditor(); // no overlay UI here: gentle-pi's screen instead
+			});
 			return true;
 		},
 		handleWheel() {

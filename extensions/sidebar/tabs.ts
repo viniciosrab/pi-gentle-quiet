@@ -30,10 +30,11 @@
 //       Called on every frame while the tab is open: read cached data, never wait. Load data asynchronously
 //       (host.git, files, ...) and call host.requestRender() when it changed. A render that throws draws an
 //       "<LABEL> — <message>" card instead of closing the column.
-//   handleClick?(line: number, button: "left" | "right" | "middle", x: number): boolean
+//   handleClick?(line: number, button: "left" | "right" | "middle", x: number, event?: MouseEvent): boolean
 //       A click on the tab's content. `line` is the index in the rows render() last returned (the scroll
-//       offset is already added); `x` is the column within the row, 0 at its first character. Return true
-//       when the tab acted on it: the column is redrawn and the click goes no further.
+//       offset is already added); `x` is the column within the row, 0 at its first character; `event` is
+//       Pi's mouse event (screenX/screenY place a pop-up by the click). Return true when the tab acted on
+//       it: the column is redrawn and the click goes no further.
 //   handleWheel?(delta: number, line: number, x: number): boolean
 //       The wheel over the tab's content (delta > 0 scrolls down). Return true to keep it (a card scrolling
 //       its own list, an account switcher); false or no method and the column scrolls.
@@ -70,6 +71,8 @@
 //       Pi's extension API (events, getAllTools, getCommands, sendUserMessage).
 //   agentDir: string
 //       Pi's agent dir (~/.pi/agent): installed packages are under npm/node_modules.
+//   gentleShellOff(): boolean
+//       True when settings.json turns Gentle Shell off in gentle-pi's package entry (PROF edits profiles then).
 //   requestRender(): void
 //       Redraws the column.
 //   git(args: string[], cwd?: string): Promise<string | undefined>
@@ -105,6 +108,7 @@ export interface SidebarHost {
 	ctx(): any;
 	readonly pi: any;
 	readonly agentDir: string;
+	gentleShellOff?(): boolean;
 	requestRender(): void;
 	git(args: string[], cwd?: string): Promise<string | undefined>;
 	changes(cwd?: string): { files: number; added: number; deleted: number } | undefined;
@@ -122,7 +126,7 @@ export interface SidebarHost {
 export interface SidebarTab {
 	id: string;
 	render(width: number, height: number): string[];
-	handleClick?(line: number, button: string, x: number): boolean;
+	handleClick?(line: number, button: string, x: number, event?: any): boolean;
 	handleWheel?(delta: number, line: number, x: number): boolean;
 	onShow?(): void;
 	onHide?(): void;

@@ -27,7 +27,10 @@ same; only how it is drawn changes.
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
   tree (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
-  usage (a click opens `/gentle:profiles`); **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
+  usage, edited in place through gentle-pi's own profile functions: a click on a profile uses it in this session (◉), a click on
+  an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click on its effort steps
+  to the next level that model allows, each saved in the shown profile; the Profiles title opens the full `/gentle:profiles`
+  editor (where Make default stays), and so does every click with Gentle Shell on or a gentle-pi without these functions; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
   some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the

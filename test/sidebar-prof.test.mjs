@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { configFile, load, painted, plain, role, theme, writeConfig } from "./helpers.mjs";
-import { createTab, PROF_TIMEOUTS } from "../extensions/sidebar/prof.ts";
+import { createTab, PROF_TIMEOUTS, thinkingSupport } from "../extensions/sidebar/prof.ts";
 
 // gentle-pi's profile readers, as plain JavaScript stand-ins with the same exports and the same files
 // (the test loader runs .ts files under node_modules of a "gentle-quiet-test-" dir as modules).
@@ -69,6 +69,42 @@ export function readSessionProfileBinding(sessionId) {
 `,
 };
 
+// gentle-pi's writers, as stand-ins with the same exports: what the in-column editing needs on top of the readers.
+const WRITERS = {
+	"model-routing-authority.ts": `
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+export function isThinkingLevel(value) { return THINKING_LEVELS.includes(value); }
+export function normalizeModelId(value) { return typeof value === "string" && /^[A-Za-z0-9._~:@/+%-]+$/.test(value.trim()) ? value.trim() : undefined; }
+export function normalizeModelConfig(value) {
+	if (!value || typeof value !== "object") return undefined;
+	return Object.fromEntries(Object.entries(value).map(([agent, entry]) => [agent, { ...entry }]));
+}
+`,
+	"profiles-orchestrator.ts": `
+export function parseOrchestratorModelRef(id) {
+	const at = typeof id === "string" ? id.indexOf("/") : -1;
+	return at > 0 ? { provider: id.slice(0, at), model: id.slice(at + 1) } : undefined;
+}
+`,
+	"session-profile-binding.ts": `${LIB["session-profile-binding.ts"]}
+export function bindSessionProfile(sessionId, name, modelProfiles) {
+	(globalThis[key] ??= new Map()).set(sessionId, { name, modelProfiles: JSON.parse(JSON.stringify(modelProfiles)) });
+}
+`,
+	"agent-profiles.ts": `${LIB["agent-profiles.ts"]}
+import { writeFileSync } from "node:fs";
+export function updateProfile(file, name, config) {
+	if (!Object.prototype.hasOwnProperty.call(file.profiles, name)) throw new Error("Profile does not exist: " + name + ".");
+	return { ...file, profiles: { ...file.profiles, [name]: JSON.parse(JSON.stringify(config)) } };
+}
+export function writeProfilesFileSync(path, file) {
+	globalThis.profileWrites = (globalThis.profileWrites ?? 0) + 1;
+	writeFileSync(path, JSON.stringify({ kind: file.kind, version: file.version, active: file.active, profiles: file.profiles }, null, 2) + "\\n");
+}
+`,
+};
+const EDIT_LIB = { ...LIB, ...WRITERS };
+
 const bindings = () => (globalThis[Symbol.for("gentle-pi:session-profile-bindings")] ??= new Map());
 
 const MAX = {
@@ -123,8 +159,34 @@ const boxed = (rows, width) => {
 };
 
 /** A stand-in for gentle-quiet's tab host. */
-function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false } = {}) {
-	const calls = { git: [], sent: [], renders: 0, usage: 0 };
+function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40 } = {}) {
+	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [] };
+	// Pi's overlay UI, recording what it is asked to show; component() builds it like Pi does.
+	const tui = {
+		terminal: { columns, rows },
+		requestRender() {},
+		// Pi's overlay mouse routing: a press here lands on no overlay.
+		dispatchMouseToOverlay: () => ({ hit: false }),
+		getTopmostVisibleOverlay: () => calls.top,
+	};
+	calls.tui = tui;
+	const ui = {
+		custom: (factory, options) => {
+			calls.custom.push({ factory, options });
+			return new Promise(() => {});
+		},
+		notify: (...args) => calls.notices.push(args),
+	};
+	const ctx = {
+		hasUI: true,
+		ui,
+		sessionManager: { getSessionId: () => sessionId },
+		modelRegistry: {
+			getAvailable: async () => models,
+			find: (provider, id) => models.find((model) => model.provider === provider && model.id === id),
+		},
+	};
+	calls.component = () => calls.custom.at(-1).factory(tui, theme, {}, (value) => calls.done.push(value));
 	const h = {
 		theme,
 		fg: (name, text) => theme.fg(name, text),
@@ -133,8 +195,15 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 		box: (rows, width) => boxed(rows, width),
 		inner: (width) => width - 4,
 		cwd: () => env?.repo,
-		ctx: () => ({ sessionManager: { getSessionId: () => sessionId } }),
-		pi: noPi ? undefined : { sendUserMessage: (text, options) => calls.sent.push([text, options]) },
+		ctx: () => ctx,
+		pi: noPi
+			? undefined
+			: {
+					sendUserMessage: (text, options) => calls.sent.push([text, options]),
+					setModel: async (model) => (calls.setModel.push(model), true),
+					setThinkingLevel: (level) => calls.thinking.push(level),
+				},
+		gentleShellOff: () => shellOff,
 		agentDir: env?.agentDir ?? "/nonexistent/agent",
 		requestRender: () => calls.renders++,
 		git: async (args, cwd) => {
@@ -154,6 +223,14 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 	};
 	return { host: h, calls };
 }
+
+// Pi's model catalog, unsorted.
+const MODELS = [
+	{ provider: "xai", id: "grok-4.7", reasoning: true },
+	{ provider: "claude-bridge", id: "claude-sonnet-5-5", reasoning: true },
+	{ provider: "claude-bridge", id: "claude-opus-5-5", reasoning: true },
+	{ provider: "openai", id: "gpt-5.5", reasoning: false },
+];
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
@@ -411,17 +488,18 @@ test("render never throws and keeps every row within the width, down to a narrow
 	tab.dispose?.();
 });
 
-test("in gentle-quiet's column: PROF draws the Profiles card and a click on a profile runs /gentle:profiles", async () => {
+test("in gentle-quiet's column: a click on a profile uses it in this session; the title still runs /gentle:profiles", async () => {
 	const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 	const agentDir = path.dirname(configFile);
 	const libDir = path.join(agentDir, "npm/node_modules/gentle-pi/lib");
 	mkdirSync(libDir, { recursive: true });
-	for (const [name, source] of Object.entries(LIB)) writeFileSync(path.join(libDir, name), source);
+	for (const [name, source] of Object.entries(EDIT_LIB)) writeFileSync(path.join(libDir, name), source);
+	writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:gentle-pi", extensions: ["-extensions/gentle-shell.ts"] }] }));
 	const configHome = mkdtempSync(path.join(os.tmpdir(), "gentle-quiet-test-prof-home-"));
 	writeFileSync(path.join(configHome, "profiles.json"), JSON.stringify(STORE));
 	process.env.GENTLE_PI_CONFIG_HOME = configHome;
 	writeConfig({});
-	const loaded = await load({ mode: "tui", session: { cwd: "/srv/app", model: { id: "claude-opus-5-5" } } });
+	const loaded = await load({ mode: "tui", session: { id: "column-1", cwd: "/srv/app", model: { id: "claude-opus-5-5" } } });
 	const native = { type: "vstack", entries: [] };
 	const root = { render: () => [], [NODE]: () => native };
 	const tui = { terminal: { columns: 180, rows: 40 }, mode: "fullscreen", layoutRoot: root, requestRender() {} };
@@ -437,7 +515,246 @@ test("in gentle-quiet's column: PROF draws the Profiles card and a click on a pr
 	assert.match(out[1], /^│ Profiles/);
 	const at = rowIndex(out, /\[★ 2: Max\]/);
 	assert.ok(at > 0, out.join("\n"));
-	const result = content().handleMouse({ type: "click", button: "left", x: out[at].indexOf("Max"), y: at, width: 60, height: 38, screenX: 120, screenY: at + 2 });
-	assert.equal(result?.handled, true);
+	const click = (y, x) => content().handleMouse({ type: "click", button: "left", x, y, width: 60, height: 38, screenX: 120 + x, screenY: y + 2 });
+	assert.equal(click(at, out[at].indexOf("Balanced"))?.handled, true);
+	await settle();
+	assert.equal(bindings().get("column-1")?.name, "Balanced");
+	assert.deepEqual(loaded.sent, [], "gentle-pi's screen stays closed");
+	assert.equal(click(1, 4)?.handled, true, "the title");
 	assert.deepEqual(loaded.sent.at(-1), ["/gentle:profiles", { expandPromptTemplates: true }]);
+	bindings().delete("column-1");
+});
+
+// ---- Editing in the column, through gentle-pi's own writers (T24) ----
+
+const stored = (env) => JSON.parse(readFileSync(path.join(env.configHome, "profiles.json"), "utf8"));
+const storeText = (env) => readFileSync(path.join(env.configHome, "profiles.json"), "utf8");
+const KEYS = { up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", backspace: "\x7f" };
+/** The picker's rows, plain, at `width`. */
+const pickerRows = (picker, width = 55) => picker.render(width).map(plain);
+/** A click inside the picker on the row reading `label`. */
+const pickRow = (picker, label, width = 55) => {
+	const y = pickerRows(picker, width).findIndex((row) => row.includes(label));
+	assert.ok(y > 0, `${label} in the picker`);
+	return picker.handleMouse({ type: "click", button: "left", x: 6, y, width, height: 20 });
+};
+
+test("a click on a profile uses it in this session, as gentle-pi's Use in this session, without its screen", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	let out = rows();
+	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
+	await settle();
+	assert.equal(bindings().get("s1")?.name, "Balanced");
+	assert.deepEqual(bindings().get("s1").modelProfiles, STORE.profiles.Balanced, "the profile's routing, as a snapshot");
+	assert.deepEqual(calls.sent, [], "gentle-pi's screen is not opened");
+	assert.deepEqual(calls.setModel, [], "no orchestrator in Balanced: this session keeps its model");
+	out = rows();
+	assert.equal(out[3], "│ [◉ 1: Balanced] [★ 2: Max] [○ 3: Low]", "◉ follows, read again from gentle-pi");
+	assert.ok(out.some((row) => /gentle-ai-worker +gpt-5\.5 \(medium\)/.test(row)), "the roster is the session's profile");
+	// Max carries an orchestrator: this session moves to it, as gentle-pi's Use does.
+	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Max")), true);
+	await settle();
+	assert.equal(bindings().get("s1")?.name, "Max");
+	assert.deepEqual(calls.setModel.map((model) => `${model.provider}/${model.id}`), ["claude-bridge/claude-opus-5-5"]);
+	assert.deepEqual(calls.thinking, ["high"]);
+	assert.equal(rows()[3], "│ [○ 1: Balanced] [◉★ 2: Max] [○ 3: Low]");
+	assert.equal(storeText(env), before, "nothing shared is written");
+	bindings().delete("s1");
+});
+
+test("a right click on a profile is left alone: Make default stays in gentle-pi's screen", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	assert.equal(tab.handleClick(3, "right", out[3].indexOf("Balanced")), false);
+	await settle();
+	assert.equal(storeText(env), before);
+	assert.deepEqual(calls.sent, []);
+});
+
+test("a click on an agent's model opens a picker of Pi's models by the row; choosing one saves it for that agent only", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	const at = rowIndex(out, /gentle-ai-explore/);
+	const x = out[at].indexOf("claude-sonnet-5-5");
+	assert.equal(tab.handleClick(at, "left", x, { screenX: 121 + x, screenY: 14, x }), true);
+	await settle();
+	assert.equal(calls.custom.length, 1, "one pop-up");
+	assert.deepEqual(calls.sent, []);
+	const { options } = calls.custom[0];
+	assert.equal(options.overlay, true);
+	const picker = calls.component(); // Pi builds the pop-up, then places it
+	const place = typeof options.overlayOptions === "function" ? options.overlayOptions() : options.overlayOptions;
+	assert.equal(place.row, 15, "just under the clicked row");
+	assert.ok(place.col >= 120 && place.col + place.width <= 180, "inside the column");
+	assert.ok(place.width <= 55);
+	const shown = pickerRows(picker);
+	assert.ok(shown.every((row) => [...row].length <= 55), "fits 55 columns");
+	assert.ok(shown.some((row) => row.includes("Model · gentle-ai-explore · Max")), shown.join("\n"));
+	const listed = shown.filter((row) => /inherit|\w\//.test(row) && !row.includes("Model ·")).map((row) => row.replace(/^▏ [▸ ] ?/, "").replace(/ +▕$/, "").trim());
+	assert.deepEqual(
+		listed.map((row) => row.replace(/^● /, "")),
+		["inherit", "claude-bridge/claude-opus-5-5", "claude-bridge/claude-sonnet-5-5", "openai/gpt-5.5", "xai/grok-4.7"],
+		"inherit, then Pi's models as provider/model, sorted",
+	);
+	assert.ok(shown.some((row) => row.includes("● claude-bridge/claude-sonnet-5-5")), "the current model marked");
+	assert.equal(pickRow(picker, "xai/grok-4.7")?.handled, true);
+	await settle();
+	assert.equal(calls.done.length, 1, "the picker closed");
+	const saved = stored(env);
+	assert.deepEqual(saved.profiles.Max["gentle-ai-explore"], { model: "xai/grok-4.7", thinking: "medium" });
+	const { "gentle-ai-explore": _, ...others } = saved.profiles.Max;
+	const { "gentle-ai-explore": __, ...was } = STORE.profiles.Max;
+	assert.deepEqual(others, was, "the other agents untouched");
+	assert.deepEqual(saved.profiles.Balanced, STORE.profiles.Balanced, "the other profiles untouched");
+	assert.equal(saved.active, "Max");
+	assert.ok(rows().some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), "the card reads it back");
+});
+
+test("the orchestrator's model picker: the keyboard moves and picks, and leave untouched removes it", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	const at = rowIndex(out, /orchestrator/);
+	assert.equal(tab.handleClick(at, "left", out[at].indexOf("claude-opus")), true);
+	await settle();
+	const picker = calls.component();
+	assert.ok(pickerRows(picker).some((row) => row.includes("leave untouched")), "the orchestrator's inherit");
+	picker.handleInput(KEYS.up);
+	picker.handleInput(KEYS.enter);
+	await settle();
+	assert.equal(calls.done.length, 1);
+	assert.equal(stored(env).profiles.Max.orchestrator, undefined);
+	assert.ok(rows().some((row) => /◆ orchestrator +leave untouched$/.test(row)));
+});
+
+test("the picker filters as you type and keeps within the terminal", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env, { rows: 20 });
+	const out = rows();
+	const at = rowIndex(out, /review-risk/);
+	tab.handleClick(at, "left", out[at].indexOf("grok"), { screenX: 150, screenY: 19, x: 30 });
+	await settle();
+	const picker = calls.component();
+	const place = calls.custom[0].options.overlayOptions();
+	assert.ok(place.row + picker.render(place.width).length <= 20, "moved up to fit");
+	for (const char of "son") picker.handleInput(char);
+	let listed = pickerRows(picker).filter((row) => row.includes("/"));
+	assert.deepEqual(listed.map((row) => row.match(/[\w-]+\/[\w.-]+/)[0]), ["claude-bridge/claude-sonnet-5-5"]);
+	picker.handleInput(KEYS.backspace);
+	picker.handleInput(KEYS.backspace);
+	picker.handleInput(KEYS.backspace);
+	listed = pickerRows(picker).filter((row) => row.includes("/"));
+	assert.equal(listed.length, 4);
+});
+
+test("Esc or a click outside closes the picker and saves nothing", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	const at = rowIndex(out, /jd-judge-a/);
+	tab.handleClick(at, "left", out[at].indexOf("claude-opus"));
+	await settle();
+	let picker = calls.component();
+	picker.handleInput(KEYS.down);
+	picker.handleInput(KEYS.escape);
+	assert.equal(calls.done.length, 1);
+	tab.handleClick(at, "left", out[at].indexOf("claude-opus"));
+	await settle();
+	picker = calls.component();
+	calls.top = { component: picker };
+	const routed = calls.tui.dispatchMouseToOverlay({ type: "press", button: "left", screenX: 2, screenY: 2, width: 180, height: 40 });
+	assert.equal(routed.hit, true, "the press is taken");
+	assert.equal(calls.done.length, 2, "and closes the picker");
+	await settle();
+	assert.equal(storeText(env), before);
+	assert.deepEqual(calls.sent, []);
+});
+
+test("a click on an agent's effort cycles the levels gentle-pi offers for its model and saves each", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows } = await opened(env);
+	const click = (agent, effort) => {
+		const out = rows();
+		const at = rowIndex(out, new RegExp(`${agent} `));
+		const x = out[at].lastIndexOf(`(${effort})`);
+		assert.ok(x > 0, `${agent} (${effort})`);
+		return tab.handleClick(at, "left", x + 1);
+	};
+	// Pi says nothing about the model's levels here: every level, then inherit.
+	const saved = { ...thinkingSupport };
+	thinkingSupport.load = async () => {
+		throw new Error("no pi-ai");
+	};
+	try {
+		for (const [from, to] of [["high", "xhigh"], ["xhigh", "max"], ["max", "inherit"], ["inherit", "off"]]) {
+			assert.equal(click("jd-judge-a", from), true);
+			await settle();
+			const entry = stored(env).profiles.Max["jd-judge-a"];
+			assert.equal(entry.thinking, to === "inherit" ? undefined : to, `${from} → ${to}`);
+			assert.equal(entry.model, "claude-bridge/claude-opus-5-5", "the model kept");
+		}
+		// Pi's catalog knows the model's levels: only those.
+		thinkingSupport.load = async () => ({ getSupportedThinkingLevels: () => ["off", "low", "medium", "high"] });
+		for (const [from, to] of [["medium", "high"], ["high", "inherit"], ["inherit", "off"], ["off", "low"]]) {
+			assert.equal(click("gentle-ai-explore", from), true);
+			await settle();
+			assert.equal(stored(env).profiles.Max["gentle-ai-explore"].thinking, to === "inherit" ? undefined : to, `${from} → ${to}`);
+		}
+	} finally {
+		Object.assign(thinkingSupport, saved);
+	}
+	assert.ok(rows().some((row) => /gentle-ai-explore +claude-sonnet-5-5 \(low\)$/.test(row)));
+});
+
+test("editing the profile this session uses keeps the session on what is shown", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	let out = rows();
+	tab.handleClick(3, "left", out[3].indexOf("Max"));
+	await settle();
+	out = rows();
+	const at = rowIndex(out, /review-risk/);
+	tab.handleClick(at, "left", out[at].indexOf("grok"));
+	await settle();
+	pickRow(calls.component(), "openai/gpt-5.5");
+	await settle();
+	assert.deepEqual(stored(env).profiles.Max["review-risk"], { model: "openai/gpt-5.5" });
+	assert.deepEqual(bindings().get("s1")?.modelProfiles["review-risk"], { model: "openai/gpt-5.5" }, "the session's snapshot follows");
+	bindings().delete("s1");
+});
+
+test("the title still opens gentle-pi's full editor", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, calls } = await opened(env);
+	assert.equal(tab.handleClick(1, "left", 4), true);
+	assert.deepEqual(calls.sent, [["/gentle:profiles", { expandPromptTemplates: true }]]);
+	assert.equal(calls.custom.length, 0);
+});
+
+test("without gentle-pi's writers, or with Gentle Shell on, every click runs /gentle:profiles and nothing is written", async () => {
+	for (const [lib, shellOff] of [[LIB, true], [{ ...EDIT_LIB, "session-profile-binding.ts": LIB["session-profile-binding.ts"] }, true], [EDIT_LIB, false]]) {
+		bindings().delete("s1");
+		const env = install({ lib });
+		const before = storeText(env);
+		const { tab, rows, calls } = await opened(env, { shellOff });
+		const out = rows();
+		const roster = rowIndex(out, /jd-judge-a/);
+		assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
+		assert.equal(tab.handleClick(roster, "left", out[roster].indexOf("claude-opus")), true);
+		assert.equal(tab.handleClick(roster, "left", out[roster].indexOf("(high)") + 1), true);
+		await settle();
+		assert.equal(calls.sent.length, 3);
+		assert.ok(calls.sent.every(([text]) => text === "/gentle:profiles"));
+		assert.equal(calls.custom.length, 0, "no picker");
+		assert.equal(storeText(env), before);
+		assert.equal(bindings().get("s1"), undefined);
+	}
 });

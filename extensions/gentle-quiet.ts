@@ -2801,6 +2801,7 @@ function tabHost(tui) {
 			return piApi;
 		},
 		agentDir: AGENT_DIR,
+		gentleShellOff: () => gentleShellOff(),
 		requestRender: () => tui.requestRender?.(),
 		git: (args, cwd = host.cwd()) => (cwd ? run(cwd, args) : Promise.resolve(undefined)),
 		changes: (cwd = host.cwd()) => changesByCwd.get(cwd),
@@ -2991,7 +2992,7 @@ function installSidebar(tui) {
 	const tabMouse = (entry, event) => {
 		const line = (entry.column.scrollTop ?? 0) + event.y;
 		const acted =
-			event.type === "click" ? entry.tab?.handleClick?.(line, event.button, event.x)
+			event.type === "click" ? entry.tab?.handleClick?.(line, event.button, event.x, event)
 			: event.type === "wheel" ? entry.tab?.handleWheel?.(event.wheelDelta ?? 0, line, event.x)
 			: false;
 		return acted ? { handled: true, render: true } : undefined;

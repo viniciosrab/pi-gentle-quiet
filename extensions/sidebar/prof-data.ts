@@ -158,3 +158,171 @@ export async function loadProfiles(host) {
 		return { state: "message", message: `Profiles unavailable: ${error?.message ?? error}` };
 	}
 }
+
+// ---- Editing, through gentle-pi's own writers ----
+
+/** Where the effort levels a model supports come from: Pi's pi-ai, as gentle-pi's models screen reads them. Tests replace load. */
+export const thinkingSupport = { load: () => import("@earendil-works/pi-ai") };
+
+// What each edit needs from gentle-pi, by file. An edit whose writers gentle-pi does not export is not offered:
+// the click runs /gentle:profiles instead, so nothing is written by a guess at gentle-pi's format.
+const WRITERS = {
+	"agent-home.ts": ["gentlePiConfigHome"],
+	"agent-profiles.ts": ["profilesFilePath", "readProfilesFileResult", "readProfileOrchestrator", "updateProfile", "writeProfilesFileSync"],
+	"model-routing-authority.ts": ["THINKING_LEVELS", "normalizeModelConfig", "normalizeModelId"],
+	"session-profile-binding.ts": ["bindSessionProfile", "readSessionProfileBinding"],
+};
+const LIVE = { "profiles-orchestrator.ts": ["parseOrchestratorModelRef"] };
+
+async function exportsOf(lib, files) {
+	const found = {};
+	for (const [name, wanted] of Object.entries(files)) {
+		const module = await importLib(lib, name);
+		for (const key of wanted) {
+			if (module[key] === undefined) return undefined;
+			found[key] = module[key];
+		}
+	}
+	return found;
+}
+
+const errorText = (error) => String(error?.message ?? error);
+
+/**
+ * gentle-pi's profile editing for the PROF tab, or undefined when this gentle-pi does not export what it
+ * needs (or Gentle Shell is on, host.gentleShellOff() false): the tab then runs /gentle:profiles. Never throws.
+ *
+ *   use(name)                 gentle-pi's "Use in this session": binds the profile's routing to this session
+ *                             (bindSessionProfile) and moves the live session to its orchestrator, if it has one.
+ *   set(name, key, change)    one agent's (or the orchestrator's) { model } or { thinking } in the saved profile,
+ *                             written as gentle-pi's Save does (updateProfile, writeProfilesFileSync); undefined
+ *                             is inherit ("leave untouched" for the orchestrator, which drops its entry). When
+ *                             this session uses that profile it takes the saved routing too, as Use does.
+ *   models()                  Pi's available models as provider/model, sorted, as gentle-pi's picker lists them.
+ *   efforts(model)            the effort levels for `model`: the ones Pi's catalog says it supports, or all.
+ * Each edit resolves to { ok, message }.
+ */
+export async function profileEditor(host) {
+	try {
+		if (host.gentleShellOff?.() !== true) return undefined;
+		const lib = path.join(host.agentDir, "npm/node_modules/gentle-pi/lib");
+		if (!existsSync(lib)) return undefined;
+		const w = await exportsOf(lib, WRITERS);
+		if (!w || !Array.isArray(w.THINKING_LEVELS) || typeof w.gentlePiConfigHome !== "function") return undefined;
+		if (![w.profilesFilePath, w.readProfilesFileResult, w.updateProfile, w.writeProfilesFileSync, w.bindSessionProfile, w.normalizeModelConfig].every((f) => typeof f === "function")) return undefined;
+		const live = (await exportsOf(lib, LIVE)) ?? {};
+		const ctx = () => {
+			try {
+				return host.ctx();
+			} catch {
+				return undefined; // ctx went stale after a session replacement
+			}
+		};
+		const sessionId = () => {
+			try {
+				const id = ctx()?.sessionManager?.getSessionId?.();
+				return typeof id === "string" && id.length ? id : undefined;
+			} catch {
+				return undefined;
+			}
+		};
+		const store = () => {
+			const file = w.profilesFilePath(w.gentlePiConfigHome());
+			const read = w.readProfilesFileResult(file);
+			if (read?.status !== "valid") throw new Error(read?.status === "missing" ? "no profiles saved yet" : "gentle-pi's profiles.json is unreadable");
+			return { file, store: read.file };
+		};
+		// The live session onto the orchestrator entry, with Pi's own setModel/setThinkingLevel; a note on failure.
+		const switchLive = async (entry) => {
+			const reference = typeof live.parseOrchestratorModelRef === "function" ? live.parseOrchestratorModelRef(entry?.model) : undefined;
+			if (!reference) return "";
+			const label = `${reference.provider}/${reference.model}`;
+			const model = ctx()?.modelRegistry?.find?.(reference.provider, reference.model);
+			if (!model) return ` ${label} is not in the model catalog; this session keeps its model.`;
+			if (typeof host.pi?.setModel !== "function") return "";
+			try {
+				if (!(await host.pi.setModel(model))) return ` No authentication for ${reference.provider}; this session keeps its model.`;
+				if (entry.thinking !== undefined) host.pi.setThinkingLevel?.(entry.thinking);
+			} catch (error) {
+				return ` This session could not switch to ${label}: ${errorText(error)}.`;
+			}
+			return ` This session now runs on ${label}${entry.thinking ? ` · ${entry.thinking}` : ""}.`;
+		};
+		const bind = async (id, name, config, moveLive) => {
+			const snapshot = w.normalizeModelConfig(config) ?? {};
+			w.bindSessionProfile(id, name, snapshot);
+			const orchestrator = w.readProfileOrchestrator?.(snapshot);
+			return moveLive && orchestrator ? switchLive(orchestrator) : "";
+		};
+		return {
+			async use(name) {
+				try {
+					const id = sessionId();
+					if (!id) return { ok: false, message: `This Pi session has no id to bind "${name}" to.` };
+					const { store: file } = store();
+					if (!own(file.profiles, name)) return { ok: false, message: `No profile named "${name}".` };
+					const note = await bind(id, name, file.profiles[name], true);
+					return { ok: true, message: `This session now uses "${name}".${note}` };
+				} catch (error) {
+					return { ok: false, message: `"${name}" was not used: ${errorText(error)}` };
+				}
+			},
+			async set(name, key, change) {
+				try {
+					const { file, store: current } = store();
+					if (!own(current.profiles, name)) return { ok: false, message: `No profile named "${name}".` };
+					const config = w.normalizeModelConfig(current.profiles[name]) ?? {};
+					const entry = { ...(config[key] ?? {}) };
+					if (own(change, "thinking")) {
+						if (key === ORCHESTRATOR && !entry.model) return { ok: false, message: "Pick a model for the orchestrator first; its effort follows the model." };
+						if (change.thinking === undefined) delete entry.thinking;
+						else entry.thinking = change.thinking;
+					}
+					if (own(change, "model")) {
+						if (change.model === undefined) delete entry.model;
+						else entry.model = change.model;
+					}
+					// gentle-pi's editor drops an orchestrator left untouched and keeps an agent with nothing set as {}.
+					if (key === ORCHESTRATOR && !entry.model) delete config[key];
+					else config[key] = entry.model || entry.thinking ? entry : {};
+					w.writeProfilesFileSync(file, w.updateProfile(current, name, config));
+					const id = sessionId();
+					const bound = id && w.readSessionProfileBinding(id)?.name === name;
+					const note = bound ? await bind(id, name, config, key === ORCHESTRATOR) : "";
+					const what = own(change, "model") ? `model ${change.model ?? (key === ORCHESTRATOR ? "leave untouched" : "inherit")}` : `effort ${change.thinking ?? "inherit"}`;
+					return { ok: true, message: `Saved "${name}": ${key} ${what}.${note}` };
+				} catch (error) {
+					return { ok: false, message: `"${name}" was not saved: ${errorText(error)}` };
+				}
+			},
+			async models() {
+				let available;
+				try {
+					available = await ctx()?.modelRegistry?.getAvailable?.();
+				} catch {
+					available = undefined;
+				}
+				if (!Array.isArray(available)) return [];
+				const ids = available.map((model) => w.normalizeModelId(`${model?.provider}/${model?.id}`)).filter(Boolean);
+				return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+			},
+			async efforts(model) {
+				const all = [...w.THINKING_LEVELS];
+				if (!model) return all;
+				try {
+					const available = await ctx()?.modelRegistry?.getAvailable?.();
+					const entry = (Array.isArray(available) ? available : []).find((candidate) => `${candidate?.provider}/${candidate?.id}` === model);
+					// Without the reasoning flag the catalog says nothing about effort: every level, as gentle-pi does.
+					if (!entry || typeof entry.reasoning !== "boolean") return all;
+					const supported = (await thinkingSupport.load()).getSupportedThinkingLevels(entry);
+					const levels = all.filter((level) => supported.includes(level));
+					return levels.length ? levels : all;
+				} catch {
+					return all;
+				}
+			},
+		};
+	} catch {
+		return undefined;
+	}
+}
