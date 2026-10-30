@@ -1,11 +1,11 @@
 // Tabs of gentle-quiet's side column, after pi-cinlodev-cute's rail: a tab bar fixed on top of the column,
-// "1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE", the active tab drawn "[ 5:TREE ]" in accent bold, the
+// "1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:YT", the active tab drawn "[ 5:TREE ]" in accent bold, the
 // others with a dim key and a muted label, then a "─" divider row. A left click on the bar (or its divider)
 // picks the nearest tab; the wheel over it cycles the tabs, wrapping at both ends. The active tab lives in
 // memory and starts at MAIN.
 //
 // MAIN (today's column: Status, Context, Jobs, Todos) is drawn by gentle-quiet.ts; the Agents card stays
-// inline above the editor, as in cute. GIT, PROF, MEM and TREE are modules in this folder, one file each, registered in TAB_FACTORIES below; a tab
+// inline above the editor, as in cute. GIT, PROF, MEM, TREE and YT (pi-youtube-player's controls) are modules in this folder, one file each, registered in TAB_FACTORIES below; a tab
 // is written without touching gentle-quiet.ts or another tab's file.
 //
 // This folder has no index.ts on purpose: Pi loads only top-level files and folders with an index or a
@@ -20,7 +20,7 @@
 //
 // SidebarTab (only `id` and `render` are required):
 //   id: string
-//       "git" | "prof" | "mem" | "tree", the tab's id in TABS.
+//       "git" | "prof" | "mem" | "tree" | "yt", the tab's id in TABS.
 //   render(width: number, height: number): string[]
 //       The tab's rows, top to bottom, synchronously, with ANSI colors from host.fg. `width` is the column's
 //       content width (59 today): a row wider than that is cut with "…". `height` is how many rows of the
@@ -86,6 +86,7 @@ import { createTab as createGitTab } from "./git.ts";
 import { createTab as createMemTab } from "./mem.ts";
 import { createTab as createProfTab } from "./prof.ts";
 import { createTab as createTreeTab } from "./tree.ts";
+import { createTab as createYtTab } from "./yt.ts";
 
 export interface SidebarHost {
 	readonly theme: any;
@@ -124,6 +125,7 @@ export const TABS = [
 	{ id: "prof", key: "3", label: "PROF" },
 	{ id: "mem", key: "4", label: "MEM" },
 	{ id: "tree", key: "5", label: "TREE" },
+	{ id: "yt", key: "6", label: "YT" },
 ];
 
 /** The tabs drawn by their own module, by id. Tests swap entries for stand-ins. */
@@ -132,6 +134,7 @@ export const TAB_FACTORIES: Record<string, CreateTab> = {
 	prof: createProfTab,
 	mem: createMemTab,
 	tree: createTreeTab,
+	yt: createYtTab,
 };
 
 /** Rows the tab bar takes on top of the column: the bar and its divider. */

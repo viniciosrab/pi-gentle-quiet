@@ -71,25 +71,26 @@ async function withTab(id, factory, run) {
 	}
 }
 
-test("the tabs are 1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE, with no AGENTS or YouTube tab", () => {
-	assert.deepEqual(TABS.map((tab) => `${tab.key}:${tab.label}`), ["1:MAIN", "2:GIT", "3:PROF", "4:MEM", "5:TREE"]);
-	assert.deepEqual(Object.keys(TAB_FACTORIES).sort(), ["git", "mem", "prof", "tree"]);
+test("the tabs are 1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:YT, with no AGENTS tab", () => {
+	assert.deepEqual(TABS.map((tab) => `${tab.key}:${tab.label}`), ["1:MAIN", "2:GIT", "3:PROF", "4:MEM", "5:TREE", "6:YT"]);
+	assert.deepEqual(Object.keys(TAB_FACTORIES).sort(), ["git", "mem", "prof", "tree", "yt"]);
 });
 
 test("the tab bar draws the active tab bracketed in accent bold and the others dim and muted, spread across the width", () => {
 	const { line, divider, hitboxes } = renderTabBar(58, "tree", theme);
 	const text = plain(line);
 	assert.equal([...text].length, 58);
-	assert.match(text, /^1:MAIN +2:GIT +3:PROF +4:MEM +\[ 5:TREE \]$/);
+	assert.match(text, /^1:MAIN +2:GIT +3:PROF +4:MEM +\[ 5:TREE \] +6:YT$/);
 	const gaps = hitboxes.slice(1).map((box, i) => box.startX - hitboxes[i].endX);
 	assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 1, "equal gaps");
 	assert.ok(line.includes(role("accent")) && line.includes(theme.bold("[ 5:TREE ]")), "active: accent and bold");
 	assert.ok(painted(line, "dim", "1") && painted(line, "muted", "MAIN"), "inactive: key dim, label muted");
 	assert.equal(plain(divider), "─".repeat(58));
 	assert.ok(painted(divider, "border"), "the divider in the border color");
-	assert.deepEqual(hitboxes.map((box) => box.id), ["main", "git", "prof", "mem", "tree"]);
+	assert.deepEqual(hitboxes.map((box) => box.id), ["main", "git", "prof", "mem", "tree", "yt"]);
 	assert.equal(text.slice(hitboxes[4].startX, hitboxes[4].endX), "[ 5:TREE ]");
 	assert.equal(text.slice(hitboxes[1].startX, hitboxes[1].endX), "2:GIT");
+	assert.equal(text.slice(hitboxes[5].startX, hitboxes[5].endX), "6:YT");
 });
 
 test("under 44 columns the active tab drops the spaces inside its brackets, and nothing overflows", () => {
@@ -106,7 +107,7 @@ test("the column opens with the tab bar fixed on top, MAIN active, with no banne
 	assert.equal(entries[0].grow, 0, "the bar stays on top, outside the scrolling");
 	const [bar, divider] = barRows();
 	assert.equal(barRows().length, 2);
-	assert.match(bar, /^ \[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE $/);
+	assert.match(bar, /^ \[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:YT $/);
 	assert.match(divider, /^─+$/);
 	assert.ok(!barRows().join("").includes("CINLODEV"));
 });
@@ -134,7 +135,7 @@ test("with the column open the Agents card stays inline above the editor, drawn 
 	assert.ok(inline[0].startsWith("┌") && inline.at(-1).startsWith("└"));
 	assert.deepEqual(inline.slice(1, 3), ["│ ◈ Agents  1 active", "│ ◔ gentle-ai-worker"], "no blank row under the title, as in place");
 	assert.deepEqual(loaded.todo.render(60), [], "Todos still leaves its place for the column");
-	for (const label of ["2:GIT", "3:PROF", "4:MEM", "5:TREE"]) {
+	for (const label of ["2:GIT", "3:PROF", "4:MEM", "5:TREE", "6:YT"]) {
 		loaded.clickTab(label);
 		assert.ok(loaded.agents.render(60).length > 0, label);
 	}
@@ -171,14 +172,17 @@ test("the wheel over the bar cycles the tabs, wrapping at both ends", async () =
 	assert.ok(renders() > before, "the column is redrawn");
 	wheelBar(-1);
 	wheelBar(-1);
-	assert.match(barRows()[0], /\[ 5:TREE \]/, "MAIN back to TREE");
+	assert.match(barRows()[0], /\[ 6:YT \]/, "MAIN back to YT");
+	wheelBar(-1);
+	assert.match(barRows()[0], /\[ 5:TREE \]/, "YT back to TREE");
 	wheelBar(1);
-	assert.match(barRows()[0], /\[ 1:MAIN \]/, "TREE on to MAIN");
+	wheelBar(1);
+	assert.match(barRows()[0], /\[ 1:MAIN \]/, "YT on to MAIN");
 });
 
-test("GIT, PROF, MEM and TREE draw their own cards in the square outline, within the column", async () => {
+test("GIT, PROF, MEM, TREE and YT draw their own cards in the square outline, within the column", async () => {
 	const loaded = await wide();
-	for (const [label, title] of [["2:GIT", "GIT"], ["3:PROF", "PROF"], ["4:MEM", "MEM"], ["5:TREE", "TREE"]]) {
+	for (const [label, title] of [["2:GIT", "GIT"], ["3:PROF", "PROF"], ["4:MEM", "MEM"], ["5:TREE", "TREE"], ["6:YT", "YT"]]) {
 		loaded.clickTab(label);
 		const out = loaded.rows();
 		assert.ok(out[0].startsWith("┌"), title);
