@@ -19,7 +19,7 @@
 //           and Context cards that stay on top, then Todos (Gentle Shell's layout, drawn in this style); narrower
 //           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it).
 //           The Agents card stays inline above the editor, as in pi-cinlodev-cute.
-//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE 6:YT" (pi-cinlodev-cute's), switches the
+//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE" (pi-cinlodev-cute's), switches the
 //           column: MAIN is the column above, the others live in ./sidebar/
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"

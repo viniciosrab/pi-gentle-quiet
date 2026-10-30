@@ -23,14 +23,11 @@ same; only how it is drawn changes.
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
   The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
-  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:YT` on top of the column. Click a tab, or turn the wheel over
+  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
   tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
   usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
-  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]`; **YT**
-  the YouTube or YouTube Music track playing in Chrome, with the cover (in terminals with Kitty images),
-  progress, controls and the queue (needs [pi-youtube-player](https://github.com/CinloDev/pi-youtube-player),
-  set up as its README says; without it the tab says so). Files and
+  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]`. Files and
   diffs open in a herdr tab inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
