@@ -53,12 +53,11 @@ test("the Status card keeps Project, Branch and the statuses; the context moves 
 	const { cards } = await wide({ statuses: { "gentle:mode": "Perm: Yolo", engram: "mem · ok", "gentle-jobs": "⧗ 1 job" }, session: { entries: spent } });
 	const [status, context] = cards();
 	assert.equal(cards().length, 2, "Status, then Context");
-	assert.deepEqual(status.slice(0, 5), ["Status", "", "Project  app", "Branch   \u{E725} main", ""]);
-	assert.equal(status[5], "Perm: Yolo", "Perm first");
-	assert.equal(status[6], "mem · ok", "then by key, as in the status line");
-	assert.match(status[7], SPIN, "with no Jobs card the count stays here, spinning");
-	assert.equal(status.length, 8, "no ctx, tokens or cost rows");
-	assert.ok(!status.some((row) => row.includes("claude-opus-5-5")), "no model: it closes the Working row");
+	assert.deepEqual(status.slice(0, 6), ["Status", "", "Project  app", "Branch   \u{E725} main", "Model    claude-opus-5-5 · high", ""]);
+	assert.equal(status[6], "Perm: Yolo", "Perm first");
+	assert.equal(status[7], "mem · ok", "then by key, as in the status line");
+	assert.match(status[8], SPIN, "with no Jobs card the count stays here, spinning");
+	assert.equal(status.length, 9, "no ctx, tokens or cost rows");
 	assert.deepEqual(context.slice(0, 2), ["Context", ""], "a title row like the other cards");
 });
 
@@ -87,7 +86,7 @@ test("the plan windows close the Context card on one row, as the status line dra
 	const { cards, raw, emit } = await wide({ session: { model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true } } });
 	await emit("after_provider_response", { status: 200, headers: planHeaders });
 	const [status, context] = cards();
-	assert.equal(status.length, 4, "nothing of the context left in Status");
+	assert.equal(status.length, 5, "nothing of the context left in Status");
 	assert.match(context.at(-1), /^claude 5h \S 38% · week \S 31%$/u);
 	const plan = raw().find((row) => plain(row).includes("claude 5h"));
 	assert.ok(painted(plan, "muted", "claude 5h") && painted(plan, "muted", "week"), "window labels muted");
@@ -99,13 +98,13 @@ test("labels keep the status line's muted role and sections are split by blank r
 	const rows = raw();
 	assert.ok(rows.some((row) => painted(row, "muted", "Project")));
 	assert.ok(rows.every((row) => !plain(row).includes("─") || /^[┌└]/.test(plain(row))), "no rule inside the cards");
-	assert.deepEqual(cards()[0].map((row) => row === ""), [false, true, false, false, true, false]);
+	assert.deepEqual(cards()[0].map((row) => row === ""), [false, true, false, false, false, true, false]);
 });
 
 test("without statuses their section and its blank row are left out; long values are cut with … and never wrap", async () => {
 	const { cards } = await wide({ branch: "feature/a-rather-long-branch-name-for-the-side-column-and-more" });
 	const [status] = cards();
-	assert.equal(status.length, 4);
+	assert.equal(status.length, 5);
 	assert.match(status[3], /^Branch {3}\u{E725} feature\/a-rather-long-branch-name-for-the-s…$/u);
 	assert.equal([...status[3]].length, 55);
 });
@@ -136,4 +135,18 @@ test("below the breakpoint the status line stays under the editor, as before", a
 	const { footer, root, native } = await wide({ columns: 120 });
 	assert.equal(root[NODE](), native);
 	assert.match(plain(footer.render(120)[0]), /^app · \u{E725} main +ctx/u);
+});
+
+test("with the side column the model moves into the Status card: no longer above the editor nor on the Working row", async () => {
+	const loaded = await wide();
+	assert.ok(loaded.cards()[0].includes("Model    claude-opus-5-5 · high"));
+	assert.deepEqual(loaded.widgets["gentle-quiet:model"]({ requestRender() {} }, theme).render(80), [], "no idle label above the editor");
+	const { Loader } = await import("@earendil-works/pi-tui");
+	const working = Object.assign(new Loader(undefined, (s) => s, (s) => s, "Working"), { kind: "working" });
+	assert.doesNotMatch(plain(working.render(80)[1]), /claude-opus/, "nor at the end of the Working row");
+});
+
+test("below the breakpoint the model stays above the editor, as before", async () => {
+	const loaded = await wide({ columns: 120 });
+	assert.match(plain(loaded.widgets["gentle-quiet:model"]({ requestRender() {} }, theme).render(80)[0]), /claude-opus-5-5 · high $/);
 });

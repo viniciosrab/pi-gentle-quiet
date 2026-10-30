@@ -55,9 +55,10 @@ test("the status line is a Status card and a Context card on top of the column, 
 	assert.deepEqual(out.slice(1, 3), ["│ Status", "│"], "its title, then a blank row like the other cards");
 	assert.equal(out[3], "│ Project  app");
 	assert.equal(out[4], "│ Branch   \u{E725} main");
-	assert.ok(out[5].startsWith("└") && out[6].startsWith("┌"), "the Context card right under it");
-	assert.equal(out[7], "│ Context");
-	assert.match(out[9], /^│ .*tokens +\S 28%$/u);
+	assert.match(out[5], /^│ Model {4}\S/u, "the model under the branch");
+	assert.ok(out[6].startsWith("└") && out[7].startsWith("┌"), "the Context card right under it");
+	assert.equal(out[8], "│ Context");
+	assert.match(out[10], /^│ .*tokens +\S 28%$/u);
 	assert.ok(status.render(60).every((row) => [...plain(row)].length <= 60));
 });
 

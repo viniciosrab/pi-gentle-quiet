@@ -2300,7 +2300,7 @@ function statusCardRows(t, footerData, width, options) {
 
 	// [label, value] rows; a row without a label is drawn as it is.
 	const sections = [
-		[["Project", p.project], ["Branch", p.branchText(true)]],
+		[["Project", p.project], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "dim", modelLabel())]],
 		p.statusItems.map((item) => ["", item]),
 	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
 	const pad = Math.max(0, ...sections.flat().map(([label]) => visibleWidth(label)));
@@ -2335,17 +2335,25 @@ let piApi; // the extension API, for the MCP tool and server lists
 const WORKING_PATCHED = Symbol.for("gentle-quiet.workingPatched");
 const WORKING_MODEL = Symbol.for("gentle-quiet.workingModel");
 
-/** "claude-opus-5-5 · high" in dim; "" while the status line is off or no model is known. */
-function workingModel() {
+/** "claude-opus-5-5 · high"; "" while no model is known. */
+function modelLabel() {
 	const model = liveCtx?.model;
-	if (!config.statusLine.enabled || !footerTheme || !model?.id) return "";
+	if (!model?.id) return "";
 	let effort;
 	try {
 		effort = model.reasoning ? liveCtx?.thinkingLevel ?? piThinking?.() : undefined;
 	} catch {
 		effort = undefined;
 	}
-	return fg(footerTheme, "dim", effort ? `${model.id} · ${effort}` : model.id);
+	return effort ? `${model.id} · ${effort}` : model.id;
+}
+
+/** The model label in dim, for the Working row and above the editor; "" while the status line is off or
+ * the side column is open (its Status card shows the model under the branch). */
+function workingModel() {
+	const label = modelLabel();
+	if (!config.statusLine.enabled || !footerTheme || !label || sidebar.active) return "";
+	return fg(footerTheme, "dim", label);
 }
 
 function patchWorkingRow() {
