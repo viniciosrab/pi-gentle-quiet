@@ -54,7 +54,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T18 | S13 (L18) | worker: Engram card local essentials, no Cloud | 9b97658 |
 | T19 | S10 (L19) | worker: Nerd Font glyphs in Symbols' colors; drop GentleSymbols.ttf | e6222c9 |
 | T20 | S2 (L20) | worker: MCP back to a plain labelled row in the Status card | 90ba942 |
-| T21 | S10 (L21) | worker: the same Nerd Font icons about 20% larger, from a small generated font, with fallback | pending |
+| T21 | S10 (L21) | worker: the same Nerd Font icons about 20% larger, from a small generated font, with fallback | 9638c42 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
