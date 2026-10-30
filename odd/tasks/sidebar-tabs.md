@@ -33,6 +33,8 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T4 | S3 MEM | worker (parallel): `extensions/sidebar/mem.ts` | 030093c |
 | T5 | S3 TREE | worker (parallel): `extensions/sidebar/tree.ts` | 3fb3edd |
 | T6 | all | parent: README, full suite, deploy, live check | |
+| T8 | S4 (L6) | worker: YT tab after cute's src/youtube/*, reading pi-youtube-player's published state | |
+| T9 | S2 (L7) | parent inline: model label in the Status card under Branch with the side column; not above the editor nor on the Working row | 84f2cb7 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -42,3 +44,5 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L3 (evidence): T1 done (worker mvuiv74b-2-f71c), 252/252 tests; tab contract `createTab(host): SidebarTab` documented in extensions/sidebar/tabs.ts. Slice boundary: T1 is its own commit; T2-T5 one commit each.
 - L4 (evidence): T2-T5 done by parallel workers; full suite 342/342. PROF's quota bar switched from ▰▱ to ■□ to match the Context card the user chose. Deployed: extensions/gentle-quiet.ts and extensions/sidebar/ to ~/.pi/agent/extensions/.
 - L5 (user, verbatim): "no original não tem aquela parte de agentes né, no original a parte do agentes é como original, ela fica inline ali né, não fica na tabela lateral. Pra melhor experiência [...] qual que seria o melhor, como no original, inline né [...] ou nessa aba de agentes??" Recommendation given: inline, drop the AGENTS tab. User: "sim".
+- L6 (user, verbatim): "coloque do YT tbm agora". S4 is revised: the YouTube tab is wanted now, as `6:YT` after TREE, following cute's src/youtube/* (it reads the state pi-youtube-player publishes on globalThis[Symbol.for("pi-youtube-player")]; that package is not installed here, mpv and yt-dlp are).
+- L7 (user, verbatim): "E o modelo que a gente colocou na inline, mas isso só quando a tela estiver inteira e o painel lateral. O nome do modelo vai ficar lá no status, no bloco do status abaixo da branch." Done in 84f2cb7; below the breakpoint the model stays above the editor.
