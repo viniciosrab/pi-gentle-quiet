@@ -8,8 +8,9 @@
 # Each SVG goes through picosvg (strokes, circles, rects, lines, transforms and clip paths become filled paths),
 # then its shapes are merged in paint order: a shape lying inside what is already drawn, in a color other than
 # the one under it, cuts a hole (the white letters on a colored badge); any other shape adds to the glyph.
-# The glyph is the icon's 24-unit view box fitted to one cell (600 of a 1000 em), centred on the cap height like
-# the Nerd Font icons. The color is the one painting the largest area, a grey only when nothing else is painted
+# The glyph is the icon's 24-unit view box drawn SIZE units tall, centred on the cap height like the Nerd Font
+# icons. Its advance is one cell (600 of a 1000 em), so it overflows into the space TREE draws after it, about
+# as wide as the two-cell emoji it stands in for. The color is the one painting the largest area, a grey only when nothing else is painted
 # (a folder's colored badge gives the folder its color).
 #
 # Run: uv run --no-project --with fonttools --with picosvg python fonts/build-symbols-icons.py [vscode-symbols checkout]
@@ -40,6 +41,8 @@ PIN = "2c95b15b0a8ef95ac62855e3784a6024ee6e5d2e"
 FIRST = 0x100100
 ADVANCE = 600
 CENTRE_Y = 360  # half the cap height, where the Nerd Font icons are centred
+SIZE = 1000  # the view box's side: the icon spans its own cell and most of the space after it
+CENTRE_X = SIZE / 2  # from the cell's left edge
 ROOT = Path(__file__).resolve().parent.parent
 FONT = ROOT / "fonts" / "GentleSymbols.ttf"
 MODULE = ROOT / "extensions" / "sidebar" / "symbols-icons.ts"
@@ -244,10 +247,10 @@ def icon_glyph(file):
         pass
     if shape.area == 0:
         return None, None
-    scale = ADVANCE / max(box.w, box.h)
+    scale = SIZE / max(box.w, box.h)
     cx, cy = box.x + box.w / 2, box.y + box.h / 2
-    # SVG y grows downwards: flip it, then centre the view box on (300, CENTRE_Y).
-    transform = (scale, 0, 0, -scale, ADVANCE / 2 - cx * scale, CENTRE_Y + cy * scale)
+    # SVG y grows downwards: flip it, then centre the view box on (CENTRE_X, CENTRE_Y).
+    transform = (scale, 0, 0, -scale, CENTRE_X - cx * scale, CENTRE_Y + cy * scale)
     area = AreaPen()
     shape.draw(TransformPen(area, transform))
     pen = TTGlyphPen(None)
