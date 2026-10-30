@@ -58,7 +58,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T22 | S8, S6 (L22) | worker: GIT drops [diff] and its hint; the preview closes on a click outside it | 922ff0b |
 | T23 | S10, S6 (L23) | worker: TREE icons as Neo-tree (mini.icons via LazyVim), plain font; hidden items toggle; title PROJECT | f39ae75 |
 | T24 | S5 (L24) | worker: PROF edits profiles in the column (switch, model, effort) without gentle-pi's screen | 0aa794e |
-| T25 | S5 (L25) | worker: PROF buttons [ Use in this session ] [ Make default ] [ Save ] as gentle-pi's screen; edits staged until Save | pending |
+| T25 | S5 (L25) | worker: PROF buttons [ Use in this session ] [ Make default ] [ Save ] as gentle-pi's screen; edits staged until Save | 4cf6eae |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
