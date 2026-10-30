@@ -161,14 +161,14 @@ test("the wheel over the bar cycles the tabs, wrapping at both ends", async () =
 	assert.match(barRows()[0], /\[ 1:MAIN \]/, "TREE on to MAIN");
 });
 
-test("the tabs still to come draw a placeholder card in the square outline", async () => {
+test("GIT, PROF, MEM and TREE draw their own cards in the square outline, within the column", async () => {
 	const loaded = await wide();
 	for (const [label, title] of [["2:GIT", "GIT"], ["4:PROF", "PROF"], ["5:MEM", "MEM"], ["6:TREE", "TREE"]]) {
 		loaded.clickTab(label);
 		const out = loaded.rows();
-		assert.ok(out[0].startsWith("┌") && out.at(-1).startsWith("└"), title);
-		assert.equal(out[1].replace(/ +│$/, ""), `│ ${title} — coming soon`);
-		assert.ok(out.every((row) => [...row].length <= 60));
+		assert.ok(out[0].startsWith("┌"), title);
+		assert.ok(!out.some((row) => row.includes("coming soon")), title);
+		assert.ok(out.every((row) => [...row].length <= 60), title);
 	}
 });
 
