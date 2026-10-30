@@ -53,7 +53,11 @@ test("the Status card keeps Project, Branch and the statuses; the context moves 
 	const { cards } = await wide({ statuses: { "gentle:mode": "Perm: Yolo", engram: "mem · ok", "gentle-jobs": "⧗ 1 job" }, session: { entries: spent } });
 	const [status, context] = cards();
 	assert.equal(cards().length, 2, "Status, then Context");
-	assert.deepEqual(status.slice(0, 6), ["Status", "", "Project  app", "Branch   \u{E725} main", "Model    claude-opus-5-5 · high", ""]);
+	assert.deepEqual(status.slice(0, 2), ["Status", ""]);
+	assert.match(status[2], /^Project {2,}app$/);
+	assert.match(status[3], /^Branch {2,}\u{E725} main$/u);
+	assert.match(status[4], /^Model {2,}claude-opus-5-5 · high$/);
+	assert.equal(status[5], "");
 	assert.equal(status[6], "Perm: Yolo", "Perm first");
 	assert.equal(status[7], "mem · ok", "then by key, as in the status line");
 	assert.match(status[8], SPIN, "with no Jobs card the count stays here, spinning");
@@ -102,7 +106,7 @@ test("without statuses their section and its blank row are left out; long values
 	const { cards } = await wide({ branch: "feature/a-rather-long-branch-name-for-the-side-column-and-more" });
 	const [status] = cards();
 	assert.equal(status.length, 5);
-	assert.match(status[3], /^Branch {3}\u{E725} feature\/a-rather-long-branch-name-for-the-s…$/u);
+	assert.match(status[3], /^Branch {2}\u{E725} feature\/a-rather-long-branch-name-for-the-si…$/u);
 	assert.equal([...status[3]].length, 55);
 });
 
@@ -123,7 +127,7 @@ test("with the block outline off the cards go without it, like the other cards",
 	const { raw } = await wide({ config: { blocks: { border: false } } });
 	const out = raw().map(plain);
 	assert.equal(out[0], " Status");
-	assert.equal(out[2], " Project  app");
+	assert.match(out[2], /^ Project {2,}app$/);
 	assert.ok(out.includes(" Context"));
 	assert.ok(out.every((row) => !/[┌│└]/.test(row)));
 });
@@ -136,7 +140,7 @@ test("below the breakpoint the status line stays under the editor, as before", a
 
 test("with the side column the model moves into the Status card: no longer above the editor nor on the Working row", async () => {
 	const loaded = await wide();
-	assert.ok(loaded.cards()[0].includes("Model    claude-opus-5-5 · high"));
+	assert.ok(loaded.cards()[0].some((row) => /^Model {2,}claude-opus-5-5 · high$/.test(row)));
 	assert.deepEqual(loaded.widgets["gentle-quiet:model"]({ requestRender() {} }, theme).render(80), [], "no idle label above the editor");
 	const { Loader } = await import("@earendil-works/pi-tui");
 	const working = Object.assign(new Loader(undefined, (s) => s, (s) => s, "Working"), { kind: "working" });
@@ -146,4 +150,21 @@ test("with the side column the model moves into the Status card: no longer above
 test("below the breakpoint the model stays above the editor, as before", async () => {
 	const loaded = await wide({ columns: 120 });
 	assert.match(plain(loaded.widgets["gentle-quiet:model"]({ requestRender() {} }, theme).render(80)[0]), /claude-opus-5-5 · high $/);
+});
+
+test("Project and Model values take the branch name's text color; the labels stay muted", async () => {
+	const { raw } = await wide();
+	const rows = raw();
+	const project = rows.find((row) => plain(row).includes("Project"));
+	const model = rows.find((row) => plain(row).includes("Model"));
+	assert.ok(painted(project, "muted", "Project") && painted(project, "text", "app"), "project value in text");
+	assert.ok(painted(model, "muted", "Model") && painted(model, "text", "claude-opus-5-5 · high"), "model value in text");
+});
+
+test("labelled rows: the label at the start, the value flush with the card's end", async () => {
+	const { cards } = await wide();
+	const [status] = cards();
+	for (const row of status.filter((r) => /^(Project|Branch|Model) /.test(r))) assert.equal([...row].length, 55, row);
+	assert.match(status.find((r) => r.startsWith("Project")), /^Project {2,}app$/);
+	assert.match(status.find((r) => r.startsWith("Model")), /^Model {2,}claude-opus-5-5 · high$/);
 });

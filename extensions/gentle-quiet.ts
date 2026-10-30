@@ -2300,11 +2300,11 @@ function statusCardRows(t, footerData, width, options) {
 
 	// [label, value] rows; a row without a label is drawn as it is.
 	const sections = [
-		[["Project", p.project], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "dim", modelLabel())]],
+		[["Project", p.project && fg(t, "text", p.project.replace(SGR, ""))], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "text", modelLabel())]],
 		p.statusItems.map((item) => ["", item]),
 	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
-	const pad = Math.max(0, ...sections.flat().map(([label]) => visibleWidth(label)));
-	const row = ([label, value]) => cut(label ? `${fg(t, "muted", label.padEnd(pad))}  ${value}` : value);
+	// A labelled row: the label at the start, its value flush with the card's end, as in pi-cinlodev-cute.
+	const row = ([label, value]) => (label ? spread(fg(t, "muted", label), value) : cut(value));
 	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
 
 	const { percent, used, window, percentText } = p.context;
