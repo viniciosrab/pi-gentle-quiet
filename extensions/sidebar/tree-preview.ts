@@ -2,8 +2,9 @@
 // in the border color, drawn at the cells' outer edge (▔ ▁ ▏ ▕ and their corners) so no half-cell of the
 // overlay sticks out past it, around "Read-only — <language>", the file's path, then its numbered lines (no
 // wrap, long lines cut with "…", tabs as spaces) and the footer "Esc close · e edit · ↑↓ PgUp/PgDn Home/End
-// · 43-64 / 168". Esc or q closes it, ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel
-// three lines; e closes it and opens the file in the editor tab, as a click did before.
+// · 43-64 / 168". Esc or q closes it, and so does a click anywhere outside it (that click does nothing else);
+// ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel three lines; e closes it and opens the
+// file in the editor tab, as a click did before.
 //
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
 // theme), without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
@@ -147,9 +148,47 @@ function renderedMarkdown(lines, width) {
 // Outline strokes at the outer edge of their cells.
 const EDGE = { top: "▔", bottom: "▁", left: "▏", right: "▕", topLeft: "\u{1FB7D}", topRight: "\u{1FB7E}", bottomRight: "\u{1FB7F}", bottomLeft: "\u{1FB7C}" };
 
+// Answers the rest of a click that closed the pop-up (release, click), so it reaches nothing under it.
+const SWALLOW = { handleMouse: () => undefined, invalidate() {} };
+
+// Pi 1.4.0 hands an overlay the mouse only inside its box (TUI.dispatchMouseToOverlay), has no overlay option
+// for a click outside it, and its terminal input listeners never see mouse sequences (the viewport's own
+// listener takes them first). So while the pop-up is open the TUI's dispatchMouseToOverlay is wrapped on the
+// instance: a press that lands on no overlay, with the pop-up on top, closes it and is answered with a target
+// that swallows the release and the click. Pi then sends that press nowhere else. Returns the unwrap.
+function closeOnOutsidePress(tui, preview) {
+	const original = tui?.dispatchMouseToOverlay;
+	if (typeof original !== "function") return () => {};
+	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
+	const wrapped = function (event) {
+		const routed = original.call(this, event);
+		if (routed?.hit || event?.type !== "press" || preview.closed) return routed;
+		try {
+			const top = tui.getTopmostVisibleOverlay?.();
+			if (top && top.component !== preview) return routed; // another overlay is over it
+		} catch {
+			// an older TUI: the pop-up is the one on top
+		}
+		preview.close();
+		const target = { component: SWALLOW, originX: 0, originY: 0, width: event.width, height: event.height };
+		return { hit: true, result: { handled: true, render: true, target } };
+	};
+	try {
+		tui.dispatchMouseToOverlay = wrapped;
+	} catch {
+		return () => {};
+	}
+	return () => {
+		if (tui.dispatchMouseToOverlay !== wrapped) return; // wrapped again since: ours stays, inert once closed
+		if (own) tui.dispatchMouseToOverlay = original;
+		else delete tui.dispatchMouseToOverlay;
+	};
+}
+
 class FilePreview {
 	constructor({ file, relPath, tui, theme, done, onEdit, loading, label }) {
 		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label });
+		this.unwrapMouse = closeOnOutsidePress(tui, this);
 		this.top = 0;
 		this.content = undefined;
 		this.closed = false;
@@ -230,6 +269,7 @@ class FilePreview {
 	close(edit = false) {
 		if (this.closed) return;
 		this.closed = true;
+		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
 		if (edit) this.onEdit?.();
@@ -303,6 +343,12 @@ class FilePreview {
 	}
 
 	invalidate() {}
+
+	// Pi disposes the component when it closes the overlay, by whatever path.
+	dispose() {
+		this.closed = true;
+		this.unwrapMouse();
+	}
 }
 
 /** The pop-up's width on a terminal `columns` wide: 65% of it, between 60 and 125 columns, so lines stay readable. */

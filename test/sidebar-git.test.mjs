@@ -4,7 +4,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
 import { createTab } from "../extensions/sidebar/git.ts";
 import { parseBranchDiff, parseBranches, parseStatus, statusCounts } from "../extensions/sidebar/git-data.ts";
-import { launchDeps, openDiff, openInEditor } from "../extensions/sidebar/git-launch.ts";
+import { launchDeps, openInEditor } from "../extensions/sidebar/git-launch.ts";
 
 const GRAPH = [
 	"* a1b2c3d (HEAD -> main, origin/main) Add git tab",
@@ -226,14 +226,17 @@ test("a detached HEAD shows the short commit as the branch", async () => {
 	assert.match(rows()[3], /│ a1b2c3d /);
 });
 
-test("the working tree card lists each file with its status badge and +n −n, and [diff]", async () => {
+test("the working tree card lists each file with its status badge and +n −n, with no [diff] and no hint row", async () => {
 	const { rows, draw } = await open();
 	const out = rows();
-	assert.ok(out.some((row) => /● 3 files changed +\+12 {2}−3 │$/.test(row)));
-	assert.ok(out.some((row) => /click: nvim · \[diff\]: view diff/.test(row)));
-	assert.ok(out.some((row) => /│ M {2}src\/a\.ts +\[diff\] \+10 −2 │$/.test(row)));
-	assert.ok(out.some((row) => /│ A {2}src\/b\.ts +\[diff\] \+2 −1 │$/.test(row)));
-	assert.ok(out.some((row) => /│ \? {2}new\.txt +\[diff\] │$/.test(row)));
+	const summary = out.findIndex((row) => /● 3 files changed +\+12 {2}−3 │$/.test(row));
+	assert.ok(summary > 0);
+	assert.match(out[summary + 1], /^│ ─+ │$/, "the divider right under the summary: no hint row");
+	assert.ok(!out.some((row) => /click:|view diff|\[diff\]/.test(row)), "no [diff] and no hint");
+	assert.ok(out.some((row) => /^│ M {2}src\/a\.ts +\+10 −2 │$/.test(row)), "counts flush right");
+	assert.ok(out.some((row) => /^│ A {2}src\/b\.ts +\+2 −1 │$/.test(row)));
+	assert.ok(out.some((row) => /^│ \? {2}new\.txt +│$/.test(row)));
+	for (const row of out.filter((row) => row.trim())) assert.equal([...row].length, 59, "every card row as wide as the column");
 	const colored = draw();
 	const a = rows().findIndex((row) => row.includes("src/a.ts"));
 	assert.ok(painted(colored[a], "warning", "M"));
@@ -269,15 +272,18 @@ test("clicking a branch turns the working tree card into the branch diff inspect
 	await settle();
 	const out = rows();
 	assert.ok(calls.some(([args]) => args === "diff HEAD...feature --numstat"));
-	assert.ok(out.some((row) => /│ Diff · feature +\[ ✕ \] \[ ↗ \] │$/.test(row)));
+	assert.ok(out.some((row) => /│ Diff · feature +\[ ✕ \] │$/.test(row)), "only the close button: no [ ↗ ] diff tab");
 	assert.ok(out.some((row) => /│ ▶ feature +diff │$/.test(row)), "the selected branch marked");
-	assert.ok(out.some((row) => /● 3 files +\+8 {2}−8 │$/.test(row)));
-	assert.ok(out.some((row) => /│ A {2}src\/new\.ts +\[diff\] \+5 │$/.test(row)));
-	assert.ok(out.some((row) => /│ D {2}src\/gone\.ts +\[diff\] −7 │$/.test(row)));
-	assert.ok(out.some((row) => /│ R {2}src\/moved\.ts +\[diff\] \+3 −1 │$/.test(row)), "a rename under its new name");
+	const summary = out.findIndex((row) => /● 3 files +\+8 {2}−8 │$/.test(row));
+	assert.ok(summary > 0);
+	assert.match(out[summary + 1], /^│ ─+ │$/, "no hint row");
+	assert.ok(out.some((row) => /│ A {2}src\/new\.ts +\+5 │$/.test(row)));
+	assert.ok(out.some((row) => /│ D {2}src\/gone\.ts +−7 │$/.test(row)));
+	assert.ok(out.some((row) => /│ R {2}src\/moved\.ts +\+3 −1 │$/.test(row)), "a rename under its new name");
+	assert.ok(!out.some((row) => /\[diff\]|view diff|↗/.test(row)));
 	assert.ok(!out.some((row) => row.includes("Working tree")));
 	const colored = draw();
-	assert.ok(colored.some((row) => painted(row, "error", "✕")) && colored.some((row) => painted(row, "accent", "↗")));
+	assert.ok(colored.some((row) => painted(row, "error", "✕")));
 	// The same branch again closes the inspector.
 	assert.equal(click(/▶ feature/), true);
 	assert.ok(rows().some((row) => row.includes("Working tree")));
@@ -286,7 +292,7 @@ test("clicking a branch turns the working tree card into the branch diff inspect
 	assert.ok(rows().some((row) => row.includes("Working tree")));
 });
 
-test("[ ✕ ] closes the inspector, and [ ↗ ] opens the full branch diff", async () => {
+test("[ ✕ ] closes the inspector; the rest of its title opens no diff tab", async () => {
 	const launches = recordLaunches();
 	try {
 		const { rows, click } = await open();
@@ -294,11 +300,11 @@ test("[ ✕ ] closes the inspector, and [ ↗ ] opens the full branch diff", asy
 		await settle();
 		click(/● feature/);
 		await settle();
-		assert.equal(click(/Diff · feature/, { at: "↗" }), true);
+		assert.equal(click(/Diff · feature/, { at: "Diff" }), false);
+		assert.equal(click(/Diff · feature/, { at: "Diff", button: "right" }), false);
 		await settle();
-		const command = launches.runs.at(-1).args.at(-1);
-		assert.equal(command, "git -c color.ui=always diff --color=always 'HEAD...feature' | less -R");
-		assert.equal(launches.runs.at(-1).cwd, "/repo");
+		assert.equal(launches.runs.length, 0, "no diff tab");
+		assert.ok(rows().some((row) => row.includes("Diff · feature")), "still open");
 		assert.equal(click(/Diff · feature/, { at: "✕" }), true);
 		assert.ok(rows().some((row) => row.includes("Working tree")));
 	} finally {
@@ -312,7 +318,7 @@ test("a branch with no merge base falls back to the direct diff; no difference s
 	await settle();
 	direct.click(/● feature/);
 	await settle();
-	assert.ok(direct.rows().some((row) => /M {2}README\.md +\[diff\] \+4 −4/.test(row)));
+	assert.ok(direct.rows().some((row) => /M {2}README\.md +\+4 −4 │$/.test(row)));
 	assert.ok(direct.calls.some(([args]) => args === "diff HEAD feature --name-status"));
 
 	const same = await open({ git: repo({ "diff...numstat": "", "diff..numstat": "" }) });
@@ -323,25 +329,26 @@ test("a branch with no merge base falls back to the direct diff; no difference s
 	assert.ok(same.rows().some((row) => /✔ No differences with HEAD/.test(row)));
 });
 
-test("a file click opens it in the editor; [diff] or a right click opens its diff", async () => {
+test("without Pi's overlay UI a file click opens the editor; a right click or the counts open no diff", async () => {
 	const launches = recordLaunches({ EDITOR: "hx" });
 	try {
 		const { click } = await open();
 		assert.equal(click(/src\/a\.ts/), true);
 		assert.deepEqual(launches.runs.at(-1).args.slice(-3), ["sh", "-c", "hx '/repo/src/a.ts'"]);
-		assert.equal(click(/src\/a\.ts/, { at: "[diff]" }), true);
-		assert.equal(launches.runs.at(-1).args.at(-1), "git -c color.ui=always diff --color=always HEAD -- 'src/a.ts' | less -R");
-		assert.equal(click(/src\/b\.ts/, { button: "right" }), true);
-		assert.match(launches.runs.at(-1).args.at(-1), /diff --color=always HEAD -- 'src\/b\.ts'/);
-		click(/new\.txt/, { at: "[diff]" });
-		assert.match(launches.runs.at(-1).args.at(-1), /diff --color=always --no-index -- \/dev\/null 'new\.txt'/, "an untracked file against nothing");
+		const before = launches.runs.length;
+		assert.equal(click(/src\/b\.ts/, { button: "right" }), false, "a right click does nothing");
 		assert.equal(click(/src\/a\.ts/, { button: "middle" }), false);
+		await settle();
+		assert.equal(launches.runs.length, before, "no diff launched");
+		assert.ok(!launches.runs.some((run) => /diff/.test(run.args.at(-1))));
+		assert.equal(click(/src\/a\.ts/, { at: "+10" }), true, "a left click on the counts is a file click too");
+		assert.deepEqual(launches.runs.at(-1).args.slice(-3), ["sh", "-c", "hx '/repo/src/a.ts'"]);
 	} finally {
 		launches.restore();
 	}
 });
 
-test("in the inspector a file's diff is against the branch", async () => {
+test("in the inspector a file click opens the file; a right click opens no diff", async () => {
 	const launches = recordLaunches();
 	try {
 		const { click } = await open();
@@ -349,8 +356,8 @@ test("in the inspector a file's diff is against the branch", async () => {
 		await settle();
 		click(/● feature/);
 		await settle();
-		click(/src\/new\.ts/, { at: "[diff]" });
-		assert.equal(launches.runs.at(-1).args.at(-1), "git -c color.ui=always diff --color=always 'HEAD...feature' -- 'src/new.ts' | less -R");
+		assert.equal(click(/src\/new\.ts/, { button: "right" }), false);
+		assert.equal(launches.runs.length, 0);
 		click(/src\/new\.ts/);
 		assert.match(launches.runs.at(-1).args.at(-1), /^nvim '\/repo\/src\/new\.ts'$/, "nvim when neither $VISUAL nor $EDITOR is set");
 	} finally {
@@ -370,19 +377,19 @@ test("launchers: a focused herdr tab inside herdr, else a detached terminal, fal
 	}
 	const plainEnv = recordLaunches({ TERMINAL: "kitty" });
 	try {
-		assert.equal(await openDiff("/repo", "it's", "a b.ts"), true);
+		assert.equal(await openInEditor("/repo/it's a.ts", "/repo"), true);
 		const run = plainEnv.runs[0];
 		assert.equal(run.via, "spawn");
 		assert.equal(run.bin, "kitty");
 		assert.equal(run.detached, true);
-		assert.equal(run.args.at(-1), "git -c color.ui=always diff --color=always 'HEAD...it'\\''s' -- 'a b.ts' | less -R", "quoted for the shell");
+		assert.equal(run.args.at(-1), "nvim '/repo/it'\\''s a.ts'", "quoted for the shell");
 	} finally {
 		plainEnv.restore();
 	}
 	const broken = recordLaunches({ HERDR_ENV: "1" });
 	launchDeps.execFile = (bin, args, options, done) => done(new Error("no herdr"));
 	try {
-		assert.equal(await openDiff("/repo", null), true);
+		assert.equal(await openInEditor("/repo/x.ts", "/repo"), true);
 		assert.equal(broken.runs.at(-1).via, "spawn");
 		assert.equal(broken.runs.at(-1).bin, "foot", "the first terminal found");
 	} finally {
@@ -393,7 +400,7 @@ test("launchers: a focused herdr tab inside herdr, else a detached terminal, fal
 		throw new Error("ENOENT");
 	};
 	try {
-		assert.equal(await openDiff("/repo", null), false, "a launcher that cannot start says so and does not throw");
+		assert.equal(await openInEditor("/repo/x.ts", "/repo"), false, "a launcher that cannot start says so and does not throw");
 	} finally {
 		failing.restore();
 	}
@@ -404,7 +411,7 @@ test("the wheel scrolls inside a card with more rows than room, with a position 
 	const { tab, rows } = await open({ git: repo({ status: many, numstat: "" }) }, { height: 30 });
 	let out = rows(59, 30);
 	assert.equal(out.length, 30);
-	const marker = out.findIndex((row) => /wheel to scroll +\[ ▲ 1\.\.\d+\/33 ▼ \] │$/.test(row));
+	const marker = out.findIndex((row) => /wheel to scroll +\[ ▲ 1\.\.\d+\/32 ▼ \] │$/.test(row));
 	assert.ok(marker > 15, "the marker in the working tree card");
 	const bottomLine = out.findIndex((row) => row.includes("f00.ts"));
 	assert.equal(tab.handleWheel(1, bottomLine, 5), true);
@@ -469,8 +476,9 @@ test("without the outline the rows are indented and clicks still land on the rig
 		const { rows, click } = await open({ outline: false });
 		const out = rows();
 		assert.match(out[0], /^ ⎇ Git +\[ Graph \| Branches \]$/);
-		assert.equal(click(/src\/a\.ts/, { at: "[diff]" }), true);
-		assert.match(launches.runs.at(-1).args.at(-1), /diff --color=always HEAD -- 'src\/a\.ts'/);
+		assert.match(out.find((row) => row.includes("src/a.ts")), /^ M {2}src\/a\.ts +\+10 −2$/, "counts flush right without the outline too");
+		assert.equal(click(/src\/a\.ts/, { at: "+10" }), true);
+		assert.match(launches.runs.at(-1).args.at(-1), /^nvim '\/repo\/src\/a\.ts'$/);
 		assert.equal(click(/Graph \| Branches/, { at: "Branches" }), true);
 		await settle();
 		assert.ok(rows().some((row) => row.includes("● 5 branches")));
@@ -521,8 +529,13 @@ test("with Pi's overlay UI a file click opens the read-only preview, and e there
 		assert.equal(done.length, 1, "e closes the preview");
 		await settle();
 		assert.deepEqual(launches.runs.at(-1).args.slice(-3), ["sh", "-c", "hx '/repo/src/a.ts'"], "and opens the editor");
-		assert.equal(click(/src\/a\.ts/, { at: "[diff]" }), true);
-		assert.equal(overlays.length, 1, "[diff] still opens the diff, not the preview");
+		const before2 = launches.runs.length;
+		assert.equal(click(/src\/a\.ts/, { button: "right" }), false, "a right click opens neither a diff nor a preview");
+		assert.equal(overlays.length, 1);
+		await settle();
+		assert.equal(launches.runs.length, before2);
+		assert.equal(click(/src\/b\.ts/, { at: "+2" }), true, "a left click where [diff] was opens the preview");
+		assert.equal(overlays.length, 2);
 	} finally {
 		launches.restore();
 	}

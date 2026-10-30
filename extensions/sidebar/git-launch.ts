@@ -1,5 +1,5 @@
-// The GIT tab's launchers, after pi-cinlodev-cute's src/git/git-launchers.ts, src/tree/tree-launchers.ts and
-// launchInHerdrTab in src/cute-notify.ts: inside herdr a focused herdr tab, else a detached terminal window
+// The GIT tab's editor launcher, after pi-cinlodev-cute's src/git/git-launchers.ts, src/tree/tree-launchers.ts
+// and launchInHerdrTab in src/cute-notify.ts: inside herdr a focused herdr tab, else a detached terminal window
 // (foot, alacritty, kitty, ghostty). Nothing here blocks the UI: herdr runs through an asynchronous execFile.
 // @ts-nocheck
 
@@ -95,15 +95,4 @@ function launch(command, label, cwd): Promise<boolean> {
 /** Opens `file` (absolute) in the editor. */
 export function openInEditor(file, cwd) {
 	return launch(`${editorCommand()} ${quote(file)}`, `${editorName()}: ${path.basename(file)}`, cwd);
-}
-
-/**
- * Opens a diff in less: the working tree against HEAD (branch null) or HEAD...branch, of one file or all of
- * them. An untracked file is shown against nothing.
- */
-export function openDiff(cwd, branch, file = undefined, untracked = false) {
-	const target = branch ? quote(`HEAD...${branch}`) : "HEAD";
-	const what = file === undefined ? target : untracked ? `--no-index -- /dev/null ${quote(file)}` : `${target} -- ${quote(file)}`;
-	const command = `git -c color.ui=always diff --color=always ${what} | less -R`;
-	return launch(command, `diff: ${file ? path.basename(file) : "all"} (${branch ?? "HEAD"})`, cwd);
 }
