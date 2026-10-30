@@ -93,8 +93,8 @@ const DEFAULTS = {
 	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
 	// mcpCollapsed: the Status card's MCP section shows only its divider, ending in "MCP n/m".
-	// treeIcons (not written until changed, read through treeIcons()): the TREE tab's icons, "emoji" or "symbols"
-	// (the Symbols theme's glyphs from fonts/GentleSymbols.ttf, which must be installed like GentleIcons.ttf).
+	// treeIcons (not written until changed, read through treeIcons()): the TREE tab's icons, "emoji" or "nerd"
+	// (the terminal's Nerd Font glyphs in the Symbols theme's colors); an older "symbols" reads as "nerd".
 	// tabOrder (not written until changed, read through tabOrder()): the tab ids in the order the tab bar shows them.
 	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -160,8 +160,12 @@ function merge(user = {}) {
 	};
 }
 
-const TREE_ICONS = ["emoji", "symbols"];
-const treeIcons = () => (TREE_ICONS.includes(config.sidebar.treeIcons) ? config.sidebar.treeIcons : "emoji");
+const TREE_ICONS = ["emoji", "nerd"];
+// "symbols" was the converted Symbols icon font, replaced by the Nerd Font glyphs.
+const treeIcons = () => {
+	const saved = config.sidebar.treeIcons === "symbols" ? "nerd" : config.sidebar.treeIcons;
+	return TREE_ICONS.includes(saved) ? saved : "emoji";
+};
 const tabOrder = () => normalizeTabOrder(config.sidebar.tabOrder);
 
 const TONE_MODES = ["claude", "theme", "soft"];
@@ -960,7 +964,7 @@ function menuSections(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
 			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Jobs and Todos under them; the Agents card stays above the editor."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
-			[`Tree icons: ${treeIcons()}`, () => { config.sidebar.treeIcons = TREE_ICONS[(TREE_ICONS.indexOf(treeIcons()) + 1) % TREE_ICONS.length]; }, "The file and folder icons of the side column's TREE tab: emoji, or Miguel Solorio's Symbols icons in their colors. Symbols needs fonts/GentleSymbols.ttf installed in ~/.local/share/fonts."],
+			[`Tree icons: ${treeIcons()}`, () => { config.sidebar.treeIcons = TREE_ICONS[(TREE_ICONS.indexOf(treeIcons()) + 1) % TREE_ICONS.length]; }, "The file and folder icons of the side column's TREE tab: emoji, or the terminal's Nerd Font icons picked and colored as Miguel Solorio's Symbols theme does. Nothing to install: the Nerd Font is enough."],
 			[`Tab order: ${tabOrder().map(tabLabel).join(" ")}`, async () => { await configureTabOrder(ctx); }, "The order of the side column's tabs, numbered by position in the tab bar. Pick a tab and move it up or down, or reset to the default order."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],

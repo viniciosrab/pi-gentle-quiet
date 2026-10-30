@@ -40,13 +40,11 @@ same; only how it is drawn changes.
   in `/gentle-quiet` reorders the tabs: pick one, Move up / Move down (PR second gives
   `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order. You can also
   drag a tab sideways in the bar and drop it at a new place; the order is saved the same way.
-- **Symbols icons in TREE.** The TREE tab can draw its file and folder icons with
+- **Nerd Font icons in TREE.** With **Blocks** → Tree icons: nerd in `/gentle-quiet` (emoji by default),
+  the TREE tab draws its file and folder icons with your terminal's Nerd Font glyphs, picked and colored as
   [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
-  ([MIT](fonts/LICENSE-vscode-symbols)), each in its own color and picked by file name, extension and folder
-  name as Symbols does. Its icons are turned into the `GentleSymbols.ttf` font: install it with
-  `cp fonts/GentleSymbols.ttf ~/.local/share/fonts/ && fc-cache -f`, reopen the terminal, then pick
-  **Blocks** → Tree icons: symbols in `/gentle-quiet` (emoji by default). `fonts/build-symbols-icons.py`
-  rebuilds the font.
+  ([MIT](fonts/LICENSE-vscode-symbols)), picks its icons: by file name, extension and folder name, each in
+  Symbols' color. No extra font to install. `fonts/build-nerd-icons.py` regenerates the mapping.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in

@@ -8,7 +8,7 @@ import { painted, plain, theme } from "./helpers.mjs";
 import { createTab, treeTiming } from "../extensions/sidebar/tree.ts";
 import { launchDeps, launchEditor } from "../extensions/sidebar/tree-launch.ts";
 import { flattenTree, parseGitStatus, scanTree } from "../extensions/sidebar/tree-scan.ts";
-import { symbolIcon } from "../extensions/sidebar/symbols-icons.ts";
+import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
 
 // A project on disk: `files` are relative paths, a trailing "/" makes an empty folder.
 function project(files, name = "demo-app") {
@@ -153,14 +153,14 @@ test("the tree: folders first with item counts, guides, ignored folders left out
 	assert.ok(!rows().join("").match(/node_modules|dist|\.git\b/), "ignored names");
 });
 
-// A Symbols icon as the TREE paints it: the glyph in its own 24-bit color.
+// A Nerd Font icon in Symbols' color as the TREE paints it: the glyph in its own 24-bit color.
 const truecolor = ({ char, color }) => `\x1b[38;2;${parseInt(color.slice(1, 3), 16)};${parseInt(color.slice(3, 5), 16)};${parseInt(color.slice(5, 7), 16)}m${char}\x1b[39m`;
 
-test("with Symbols icons each row draws its mapped glyph in its color and two spaces, so names start where the emoji rows put them", async (t) => {
+test("with nerd icons each row draws its mapped Nerd Font glyph in its color and two spaces, so names start where the emoji rows put them", async (t) => {
 	const git = STATUS(" M src/index.ts\n?? docs/guide.md\n");
-	const { tab, rows, raw } = await opened({ cwd: project([...FILES, "src/tree.test.ts"]), git, treeIcons: "symbols" });
+	const { tab, rows, raw } = await opened({ cwd: project([...FILES, "src/tree.test.ts"]), git, treeIcons: "nerd" });
 	t.after(() => tab.dispose());
-	const icon = (name, options) => symbolIcon(name, options);
+	const icon = (name, options) => nerdIcon(name, options);
 	const body = rows().slice(3, -1).map((row) => row.replace(/^│ /, "").replace(/ *[●M]? │$/, "")).filter(Boolean);
 	assert.deepEqual(body, [
 		`├── ${icon("docs", { isDirectory: true }).char}  docs (1 items)`,
