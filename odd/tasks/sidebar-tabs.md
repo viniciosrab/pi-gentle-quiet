@@ -17,6 +17,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - **S4 — no YouTube tab.** User: "E o do youtube, que é o 6 do youtube, você não precisa colocar, entendeu????"
 - **S5 — tab switching as in cute:** left click on a tab in the tab bar, mouse wheel over the tab bar cycles tabs. The tab bar stays fixed at the top of the column.
 - **S6 — TREE file preview:** a left click on a file in TREE opens a read-only preview pop-up inside Pi (Esc closes, scroll keys, `e` opens it in the editor tab as before), instead of a new editor tab per click.
+- **S7 — preview polish:** a Markdown file shows rendered Markdown in the preview (raw source on a key); the pop-up's outline sits flush with its edge, with no black half-cell sticking out past the border over the conversation.
 
 ## Decisions
 
@@ -37,6 +38,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T8 | S4 (L6, reverted by L8) | worker: YT tab after cute's src/youtube/*, reading pi-youtube-player's published state | 45ded34 |
 | T9 | S2 (L7) | parent inline: model label in the Status card under Branch with the side column; not above the editor nor on the Working row | 84f2cb7 |
 | T10 | S6 (L9) | worker: TREE file preview overlay (tree-preview.ts), `e` opens the editor | f33e3b5 |
+| T11 | S7 (L10) | worker: rendered Markdown in the preview; flush pop-up outline | 6ec8f47 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -50,3 +52,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L7 (user, verbatim): "E o modelo que a gente colocou na inline, mas isso só quando a tela estiver inteira e o painel lateral. O nome do modelo vai ficar lá no status, no bloco do status abaixo da branch." Done in 84f2cb7; below the breakpoint the model stays above the editor.
 - L8 (user, verbatim): "aaa remova essa aba ai de YT". YT tab reverted (ddf4a4e, 1d59ae1); S4 back to no YouTube tab. pi-youtube-player itself left installed pending the user.
 - L9 (user, verbatim): "Você acha, para a experiência de programação e usuário, você acha melhor ali na questão dos Tui, quando abre um documento, ele abre uma nova aba separada ou abre em pop-up?" Recommendation: click opens a read-only pop-up, a key opens the editor tab. User: "sim". Added S6, T10.
+- L10 (user, verbatim): "no modo pop up tipo arquivos markdow tem como invez de o preview vim e markdow ter o visulizado e markdow?? e alem disso o bloco do poup up da com uma rebarba do bloco pra fora vejaa [...] e tbm tem uma falha em baixo feja a linha borda nao veja ta com falhas e eu vi isso tbm [...] no bloco do tree essas falhjas na linha nao sei oque é tem haver com o pop up" then "para contexto agr que fichei os editor essas falhas sumiram". Evidence: the rebarba is the overlay's black half-cell outside the ┌│└ strokes, visible over the grey user-message rows; the TREE border gaps went away once the herdr editor tabs closed (a redraw after herdr resized the pane), not the pop-up. Added S7, T11.
