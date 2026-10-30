@@ -2313,15 +2313,12 @@ function statusCardRows(t, footerData, width, options) {
 	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");
 	const spent = p.tokens(true);
 	const cost = p.costText && `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}`;
-	const plan = p.plan.windows
-		.map((window, index) => `${fg(t, "muted", index === 0 ? join(p.plan.name, window.label) : window.label)} ${gauge(window.percent, t)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`)
-		.join(fg(t, "dim", " · "));
+	// No plan windows here: in the side column they live in the PROF tab.
 	const context = [
 		...title("Context"),
 		spread(figures, percentText),
 		bar,
 		(spent || cost) && spread(spent, cost),
-		plan && cut(plan),
 	].filter((line, index) => index < 2 || line);
 	return [...draw(status), ...draw(context)];
 }

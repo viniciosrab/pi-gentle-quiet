@@ -82,15 +82,12 @@ test("the bar warns like the gauge", async () => {
 	assert.ok(raw().some((row) => painted(row, "warning", "■")));
 });
 
-test("the plan windows close the Context card on one row, as the status line draws them", async () => {
-	const { cards, raw, emit } = await wide({ session: { model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true } } });
+test("the plan windows stay out of the Context card: they live in the PROF tab", async () => {
+	const { cards, emit } = await wide({ session: { model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true } } });
 	await emit("after_provider_response", { status: 200, headers: planHeaders });
 	const [status, context] = cards();
 	assert.equal(status.length, 5, "nothing of the context left in Status");
-	assert.match(context.at(-1), /^claude 5h \S 38% · week \S 31%$/u);
-	const plan = raw().find((row) => plain(row).includes("claude 5h"));
-	assert.ok(painted(plan, "muted", "claude 5h") && painted(plan, "muted", "week"), "window labels muted");
-	assert.ok(painted(plan, "dim", " · "), "joined with a dim dot");
+	assert.ok(!context.some((row) => /claude 5h|week/.test(row)), "no plan row");
 });
 
 test("labels keep the status line's muted role and sections are split by blank rows only", async () => {

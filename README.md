@@ -19,7 +19,7 @@ same; only how it is drawn changes.
   holds the status line as two cards that always stay on top. **Status** has the project and branch
   under a label column, then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
-  the tokens spent with the cost, and the plan windows on one row. Jobs and Todos scroll under them. The Todos card shows every
+  and the tokens spent with the cost (the plan usage is in the PROF tab). Jobs and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
   The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
