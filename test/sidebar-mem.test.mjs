@@ -178,12 +178,12 @@ test("onShow loads Engram's health and projects from the local server and redraw
 	assert.deepEqual(card.map((row) => row.replace(/ {2,}/g, "  ")), [
 		"│ Local (7437)  ● Online · v3.6.0 │",
 		"│ This project  27 memories · 72 sessions · 284 prompts │",
-		"│ All projects  347 memories · 3 projects │",
-		"│ Database  21.9 MB │",
+		"│ Database (all projects)  21.9 MB │",
 	]);
 	const joined = rows().join("\n");
 	assert.ok(painted(joined, "success", "● Online"), "online in success");
-	for (const label of ["Local (7437)", "This project", "All projects", "Database"]) assert.ok(painted(joined, "muted", label), `${label} muted`);
+	assert.ok(!joined.includes("All projects"), "only this project's counts: no sum over every project");
+	for (const label of ["Local (7437)", "This project", "Database (all projects)"]) assert.ok(painted(joined, "muted", label), `${label} muted`);
 	assert.ok(rows().every((row) => [...plain(row)].length === WIDTH), "every row as wide as the column");
 });
 
@@ -197,7 +197,7 @@ test("the database size is engram.db with its -wal and -shm, stat only; ENGRAM_D
 	tab.onShow();
 	await flush();
 	assert.ok(moved.stat.includes("/data/engram.db"));
-	assert.ok(tab.render(WIDTH, 40).map(plain).some((row) => /│ Database +2\.0 KB │/.test(row)), "missing -wal and -shm count as nothing");
+	assert.ok(tab.render(WIDTH, 40).map(plain).some((row) => /│ Database \(all projects\) +2\.0 KB │/.test(row)), "missing -wal and -shm count as nothing");
 	const none = await shown({ sizes: {} });
 	assert.ok(!none.text().some((row) => /Database/.test(row)), "no database file: no row");
 });
@@ -212,14 +212,12 @@ test("sizes read as B, KB, MB and GB", () => {
 	assert.equal(formatBytes(Number.NaN), undefined);
 });
 
-test("one memory, session, prompt or project reads in the singular", async () => {
+test("one memory, session or prompt reads in the singular", async () => {
 	const projects = { count: 1, projects: [{ name: "my-app", observation_count: 1, session_count: 1, prompt_count: 1 }] };
 	const { text } = await shown({ projects });
 	assert.ok(text().some((row) => /│ This project +1 memory · 1 session · 1 prompt │/.test(row)));
-	assert.ok(text().some((row) => /│ All projects +1 memory · 1 project │/.test(row)));
 	const fresh = await shown({ projects: { count: 1, projects: [{ name: "other", observation_count: 5, session_count: 2, prompt_count: 3 }] } });
 	assert.ok(fresh.text().some((row) => /│ This project +0 memories · 0 sessions · 0 prompts │/.test(row)), "a project Engram has not seen yet");
-	assert.ok(fresh.text().some((row) => /│ All projects +5 memories · 1 project │/.test(row)));
 });
 
 test("the project comes from the Engram server first, then cute's chain: identity file, .engram/config.json, package.json, folder", async () => {
@@ -237,8 +235,8 @@ test("a daemon that is down shows offline in warning, without throwing; the data
 	const { text, rows } = await shown({ health: null, projects: null });
 	assert.ok(text().some((row) => /│ Local \(7437\) +○ Offline │/.test(row)));
 	assert.ok(painted(rows().join(""), "warning", "○ Offline"));
-	assert.ok(!text().some((row) => /This project|All projects/.test(row)), "no counts without the server");
-	assert.ok(text().some((row) => /│ Database +21\.9 MB │/.test(row)));
+	assert.ok(!text().some((row) => /This project/.test(row)), "no counts without the server");
+	assert.ok(text().some((row) => /│ Database \(all projects\) +21\.9 MB │/.test(row)));
 });
 
 test("no Cloud section: no host, state, dashboard or enroll/sync actions, and clicks on the card spawn nothing", async () => {
@@ -247,7 +245,7 @@ test("no Cloud section: no host, state, dashboard or enroll/sync actions, and cl
 	assert.ok(!calls.fetch.some((url) => /^\/(sync|stats|cloud)\b/.test(new URL(url).pathname)), "no sync state, no /stats, no cloud route");
 	assert.ok(!calls.read.some((file) => /cloud\.json/.test(file)));
 	const before = calls.run.length;
-	for (const pattern of [/Local \(7437\)/, /This project/, /All projects/, /Database/, /⚑ 2 to review/]) assert.equal(await click(pattern), false, `${pattern} is not an action`);
+	for (const pattern of [/Local \(7437\)/, /This project/, /Database/, /⚑ 2 to review/]) assert.equal(await click(pattern), false, `${pattern} is not an action`);
 	assert.equal(calls.run.length, before, "no command ran");
 	assert.ok(calls.run.every((call) => call[0] === "engram" && call[1] === "search"), "the handoff search is the only command");
 });
@@ -464,7 +462,7 @@ test("without gentle-engram the Engram and handoff cards are left out", async ()
 test("with the outline off the same rows are clickable, and the wheel is left to the column", async () => {
 	const { click, text, tab } = await shown({}, { outline: false });
 	assert.match(text()[0], /^ M Engram: my-app/);
-	assert.ok(text().some((row) => /^ Database +21\.9 MB$/.test(row)));
+	assert.ok(text().some((row) => /^ Database \(all projects\) +21\.9 MB$/.test(row)));
 	await click(/^ M Engram/);
 	assert.ok(text().some((row) => /● 27 memories · 21\.9 MB/.test(row)));
 	assert.equal(tab.handleWheel?.(1, 0, 0) ?? false, false);

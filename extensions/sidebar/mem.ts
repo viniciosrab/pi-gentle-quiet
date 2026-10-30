@@ -1,8 +1,8 @@
 // The MEM tab of gentle-quiet's side column, after pi-cinlodev-cute's MEM tab; the contract is in ./tabs.ts.
 // Cards, top to bottom, as cute stacks them:
 //   Engram          local essentials only, no cloud: the local server's status and version, this project's
-//                   memories, sessions and prompts, the memories across all projects, the database's size on
-//                   disk, and "⚑ 3 to review · 1 conflict" when Engram has observations due for review or
+//                   memories, sessions and prompts, the size on disk of the database all projects share,
+//                   and "⚑ 3 to review · 1 conflict" when Engram has observations due for review or
 //                   relations waiting for judgment. A click on the title collapses it to one row; its rows
 //                   are not actions.
 //   Active Handoff  the project's latest session summary, folded to one row (`#920 · 1h ago · <goal>`); a
@@ -192,11 +192,11 @@ export function createMemTab(host, deps) {
 			: fg("warning", "○ Offline");
 		items.push(row(`Local (${snap.endpoint?.label ?? "private"})`, daemon));
 		if (snap.counts) {
-			const { project, all } = snap.counts;
+			// Only this project's counts; the database below is the one file every project shares.
+			const { project } = snap.counts;
 			items.push(row("This project", fg("text", `${memoriesOf(project.observations)} · ${plural(project.sessions, "session")} · ${plural(project.prompts, "prompt")}`)));
-			items.push(row("All projects", fg("text", `${memoriesOf(all.observations)} · ${plural(all.projects, "project")}`)));
 		}
-		if (size) items.push(row("Database", fg("text", size)));
+		if (size) items.push(row("Database (all projects)", fg("text", size)));
 		const { review = 0, conflicts = 0 } = snap.pending ?? {};
 		const pending = [review && `${review} to review`, conflicts && `${conflicts} conflict${conflicts === 1 ? "" : "s"}`].filter(Boolean);
 		if (pending.length) items.push({ text: fg("warning", truncateToWidth(`⚑ ${pending.join(" · ")}`, inner, "…")) });
