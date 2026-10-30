@@ -52,7 +52,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T16 | S11 (L16) | worker after T15 (both edit gentle-quiet.ts): tab order in /gentle-quiet | f0c6b1f |
 | T17 | S12 (L17) | worker: drag a tab in the bar to reorder | 76d8b37 |
 | T18 | S13 (L18) | worker: Engram card local essentials, no Cloud | 9b97658 |
-| T19 | S10 (L19) | worker: Nerd Font glyphs in Symbols' colors; drop GentleSymbols.ttf | pending |
+| T19 | S10 (L19) | worker: Nerd Font glyphs in Symbols' colors; drop GentleSymbols.ttf | e6222c9 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
