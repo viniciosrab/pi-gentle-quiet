@@ -2234,7 +2234,9 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 			const flat = text.replace(/[\r\n\t]/g, " ");
 			return key === KEYS.jobs ? flat.replace(JOBS_LEAD, `${jobsFrame()} `) : flat;
 		});
-	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
+	// The status line's "MCP n/m" follows its setting; the side column's MCP section has its own collapse.
+	const servers = mcpCounts(ctx);
+	const mcp = config.statusLine.mcp ? servers : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
 	const mcpPainted = mcp ? fg(t, mcp.online < mcp.total ? "warning" : "dim", mcpPlain) : "";
 	const ownItems = statuses.map((text) => fg(t, "dim", text)); // the statuses without MCP's count
@@ -2242,7 +2244,7 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp };
+	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
 }
 
 // Statuses sit on the left after the location, Perm first (the model closes the Working row
@@ -2302,7 +2304,7 @@ function statusCardRows(t, footerData, width, options) {
 
 	// MCP has a section of its own here: a header with the online count, which a click collapses, then one
 	// row per server. Its "MCP n/m" leaves the statuses.
-	const mcp = p.mcp?.servers?.length ? p.mcp : undefined;
+	const mcp = p.servers?.servers?.length ? p.servers : undefined;
 	const collapsed = Boolean(config.sidebar.mcpCollapsed);
 	const mcpHeader = mcp && [`${collapsed ? "▸" : "▾"} MCP`, fg(t, mcp.online < mcp.total ? "warning" : "dim", `${mcp.online}/${mcp.total} online`)];
 	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));

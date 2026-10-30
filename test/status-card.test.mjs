@@ -240,10 +240,11 @@ test("without MCP servers there is no MCP section", async () => {
 	assert.ok(!cards()[0].some((row) => /MCP/.test(row)));
 });
 
-test("with MCP off in the status line settings the section is left out too", async (t) => {
+test("with MCP off in the status line settings the card still lists the servers (the setting is the status line's)", async (t) => {
 	t.after(() => writeMcp({}));
 	const { cards } = await withMcp({ config: { statusLine: { mcp: false } } });
-	assert.ok(!cards()[0].some((row) => /MCP|codegraph/.test(row)));
+	assert.ok(cards()[0].some((row) => /MCP/.test(row)));
+	assert.ok(cards()[0].some((row) => /codegraph/.test(row)));
 });
 
 test("below the breakpoint the status line keeps MCP n/m among the statuses, with no server rows", async (t) => {
