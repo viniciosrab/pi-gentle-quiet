@@ -22,6 +22,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - **S9 — MEM tab, what is useful:** replace the Stack · Ecosystem and Tools cards with (1) "Saved this session": the memories the agent saved or updated in this session (mem_save / mem_update), title and type, a click opens the memory in the read-only pop-up; (2) "Recalled this session": the memories the agent searched or read into the conversation (mem_search / mem_get_observation / mem_context); (3) Engram pending items (observations due for review, relations waiting for judgment) as a count, shown only when there are some. The Active Handoff folds to one row (`#920 · 1h ago · <goal first line>`) that a click expands to the full text. Stack shows only when an update is available. The Engram status card stays.
 - **S10 — Symbols icon theme in TREE:** the TREE tab can draw its file and folder icons with Miguel Solorio's "Symbols" VS Code icon theme (MIT): its SVG icons are turned into a private-use icon font (one color per glyph, painted in the color Symbols gives that icon), installed like fonts/GentleIcons.ttf, and picked per file name, extension and folder name as Symbols maps them. A setting chooses emoji (today) or Symbols.
 - **S11 — tab order setting:** the /gentle-quiet settings offer the side column's tab order: the user moves any tab up or down (for example PR to the second place); the tab bar shows the tabs in that order, numbered by position (1, 2, …), and the order is saved in gentle-quiet.json and survives /reload. A reset puts the default order back.
+- **S12 — drag to reorder tabs:** in the tab bar the user presses on a tab, drags it sideways and releases it at a new place; while dragging the tab follows and the others make room; on release the order is saved like the Tab order setting (numbers follow position). A plain click without moving still switches tabs.
 
 ## Decisions
 
@@ -48,6 +49,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T14 | S9 (L14) | worker: MEM tab — saved/recalled this session, pending count, folded handoff; Tools dropped; Stack dropped (no offline latest-version source) | 942a52e |
 | T15 | S10 (L15) | worker: Symbols icon font build, mapping module, TREE icon setting | 73028b8 |
 | T16 | S11 (L16) | worker after T15 (both edit gentle-quiet.ts): tab order in /gentle-quiet | f0c6b1f |
+| T17 | S12 (L17) | worker: drag a tab in the bar to reorder | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -68,3 +70,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L14 (user, verbatim): "Outra coisa, aqui na parte do Nen, que é do Engram Qual coisa aqui você acha útil pra mim? Ou que tá faltando, que seria realmente útil? E esse negócio de active end-off, o que que é e tal?" Recommendation: replace Stack and Tools with saved/recalled memories of this session, pending count, handoff folded to one row, Stack only with updates. User: "sim". S9, T14.
 - L15 (user, verbatim): "Eu queria colocar esse tema nesse negócio aí, entendeu? Que isso é uma extensão do VS Code, sabe? Esse tema symbol, não tem como fazer?" Options given: (1) convert Symbols SVGs into an icon font, (2) Nerd Font look-alike, (3) real images. User: "1". vscode-symbols license checked: MIT.
 - L16 (user, verbatim): "Ali no Gente Quiete, nas opções do Gente Quiete, coloca a opção também para poder alterar a ordem, tipo eu mudar o Peri para a segunda opção, etc." (Peri = PR). S11, T16, queued after T15.
+- L17 (user, verbatim): "uma dúvida, teria um jeito de eu só arrastando com mouse eu mudar o lugar dela? tipo vou para 1, para 3 ou tem que ser mesmo usando o nosso gently quiet as configurações dele??" Pi delivers press/drag/release/move mouse events. User: "sim". S12, T17.
