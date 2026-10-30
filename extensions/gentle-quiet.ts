@@ -93,6 +93,8 @@ const DEFAULTS = {
 	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
 	// mcpCollapsed: the Status card's MCP section shows only its divider, ending in "MCP n/m".
+	// treeIcons (not written until changed, read through treeIcons()): the TREE tab's icons, "emoji" or "symbols"
+	// (the Symbols theme's glyphs from fonts/GentleSymbols.ttf, which must be installed like GentleIcons.ttf).
 	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
@@ -156,6 +158,9 @@ function merge(user = {}) {
 		prompt: { ...DEFAULTS.prompt, ...user.prompt },
 	};
 }
+
+const TREE_ICONS = ["emoji", "symbols"];
+const treeIcons = () => (TREE_ICONS.includes(config.sidebar.treeIcons) ? config.sidebar.treeIcons : "emoji");
 
 const TONE_MODES = ["claude", "theme", "soft"];
 function toneMode(tools) {
@@ -953,6 +958,7 @@ function menuSections(ctx) {
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
 			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Jobs and Todos under them; the Agents card stays above the editor."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
+			[`Tree icons: ${treeIcons()}`, () => { config.sidebar.treeIcons = TREE_ICONS[(TREE_ICONS.indexOf(treeIcons()) + 1) % TREE_ICONS.length]; }, "The file and folder icons of the side column's TREE tab: emoji, or Miguel Solorio's Symbols icons in their colors. Symbols needs fonts/GentleSymbols.ttf installed in ~/.local/share/fonts."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
 		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : group === "branch" ? BRANCH_ICONS : group === "jobs" ? JOBS_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
@@ -2765,6 +2771,9 @@ function tabHost(tui) {
 		gauge: (percent) => gauge(percent, theme),
 		get icons() {
 			return { ...config.icons };
+		},
+		get treeIcons() {
+			return treeIcons();
 		},
 	};
 	return host;

@@ -108,6 +108,8 @@ export interface SidebarHost {
 	usage(): { name: string; windows: { label: string; percent: number; resetAt: number | null }[] };
 	gauge(percent: number | null): string;
 	readonly icons: Record<string, string>;
+	/** TREE's icon theme: "emoji", or "symbols" (fonts/GentleSymbols.ttf). */
+	readonly treeIcons: "emoji" | "symbols";
 }
 
 export interface SidebarTab {

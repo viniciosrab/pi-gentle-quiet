@@ -37,6 +37,13 @@ same; only how it is drawn changes.
   the current branch's PR first with its detail (state, mergeability, each CI check, the review decision and
   unresolved review comments), a click opening the PR or a check in the browser. Files and diffs open in your editor in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
+- **Symbols icons in TREE.** The TREE tab can draw its file and folder icons with
+  [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
+  ([MIT](fonts/LICENSE-vscode-symbols)), each in its own color and picked by file name, extension and folder
+  name as Symbols does. Its icons are turned into the `GentleSymbols.ttf` font: install it with
+  `cp fonts/GentleSymbols.ttf ~/.local/share/fonts/ && fc-cache -f`, reopen the terminal, then pick
+  **Blocks** → Tree icons: symbols in `/gentle-quiet` (emoji by default). `fonts/build-symbols-icons.py`
+  rebuilds the font.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in

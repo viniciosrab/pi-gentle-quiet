@@ -20,6 +20,8 @@
 	"files": [
 		"extensions/",
 		"fonts/GentleIcons.ttf",
+		"fonts/GentleSymbols.ttf",
+		"fonts/LICENSE-vscode-symbols",
 		"README.md",
 		"LICENSE"
 	],
