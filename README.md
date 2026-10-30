@@ -26,7 +26,8 @@ same; only how it is drawn changes.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
-  tree (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
+  tree, each file with TREE's icon for it (emoji or nerd, as Tree icons) and its path, then `+n −n` and its status letter
+  (`M`, `A`, `D`, `R`, `U`, `!`) last on the right, as VS Code's (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
   usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile
   selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
   on its effort steps to the next level that model allows; edits stay unsaved (•, ● N unsaved, in warning) until
