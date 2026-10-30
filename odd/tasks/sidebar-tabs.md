@@ -46,7 +46,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T12 | S8 (L11) | worker: 6:PR tab (pr.ts, pr-data.ts); tab contract gains optional onHide() | f48d1a4 |
 | T13 | S8 (L12) | worker: PR tab lists the open PRs, current branch's PR first; no branch/ahead-behind | f541c22 |
 | T14 | S9 (L14) | worker: MEM tab — saved/recalled this session, pending count, folded handoff; Tools dropped; Stack dropped (no offline latest-version source) | 942a52e |
-| T15 | S10 (L15) | worker: Symbols icon font build, mapping module, TREE icon setting | pending |
+| T15 | S10 (L15) | worker: Symbols icon font build, mapping module, TREE icon setting | 73028b8 |
 | T16 | S11 (L16) | worker after T15 (both edit gentle-quiet.ts): tab order in /gentle-quiet | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
