@@ -2306,7 +2306,7 @@ function statusCardRows(t, footerData, width, options) {
 	// row per server. Its "MCP n/m" leaves the statuses.
 	const mcp = p.servers?.servers?.length ? p.servers : undefined;
 	const collapsed = Boolean(config.sidebar.mcpCollapsed);
-	const mcpHeader = mcp && [`${collapsed ? "▸" : "▾"} MCP`, fg(t, mcp.online < mcp.total ? "warning" : "dim", `${mcp.online}/${mcp.total} online`)];
+	const mcpHeader = mcp && ["MCP", fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total} online`)];
 	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));
 	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => ["", spread(`  ${fg(t, "text", server.name)}`, serverState(server))]) : [];
 

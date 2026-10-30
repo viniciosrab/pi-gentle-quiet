@@ -180,7 +180,7 @@ async function withMcp(options = {}) {
 	writeMcp(mcpServers);
 	const loaded = await wide({ statuses: { "gentle:mode": "Perm: Yolo" }, ...options, session: { tools: mcpTools, ...options.session } });
 	const status = () => loaded.side().entries[1].component; // relays the layout, so the rows are fresh
-	const headerY = () => loaded.raw().map(plain).findIndex((row) => /^│ [▾▸] MCP /u.test(row));
+	const headerY = () => loaded.raw().map(plain).findIndex((row) => /^│ MCP /u.test(row));
 	const click = (y = headerY()) => status().handleMouse({ type: "click", button: "left", x: 4, y, width: 60, height: loaded.raw().length, screenX: 124, screenY: y + 2 });
 	return { ...loaded, status, headerY, click };
 }
@@ -199,13 +199,13 @@ test("the MCP section: a header with the online count, then one row per server w
 		status[11],
 	]);
 	assert.equal(status.length, 12, "no MCP n/m left among the statuses");
-	assert.match(status[8], /^▾ MCP {2,}2\/3 online$/u);
+	assert.match(status[8], /^MCP {2,}2\/3 online$/u);
 	assert.match(status[9], /^ {2}codegraph {2,}active · 2 tools$/);
 	assert.match(status[10], /^ {2}context7 {2,}offline$/, "a server whose tools Pi hid is offline");
 	assert.match(status[11], /^ {2}my-db {2,}active · 1 tool$/);
 	for (const row of status.slice(8)) assert.equal([...row].length, 55, row);
 	const rows = raw();
-	assert.ok(rows.some((row) => painted(row, "muted", "▾ MCP")), "the header like the other labels");
+	assert.ok(rows.some((row) => painted(row, "muted", "MCP")), "the header like the other labels");
 	assert.ok(rows.some((row) => painted(row, "warning", "2/3 online")), "warns while a server is offline");
 	assert.ok(rows.some((row) => painted(row, "text", "codegraph") && painted(row, "dim", "active · 2 tools")));
 	assert.ok(rows.some((row) => painted(row, "warning", "offline")));
@@ -221,7 +221,7 @@ test("clicking the MCP header collapses it to the header and saves that; clickin
 	assert.deepEqual(click(), { handled: true, render: true });
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
 	const collapsed = cards()[0];
-	assert.match(collapsed.at(-1), /^▸ MCP {2,}2\/3 online$/u, "only the header, with the count");
+	assert.match(collapsed.at(-1), /^MCP {2,}2\/3 online$/u, "only the header, with the count");
 	assert.equal(collapsed.length, 9);
 	click();
 	assert.equal(readConfig().sidebar.mcpCollapsed, false);
@@ -231,7 +231,7 @@ test("clicking the MCP header collapses it to the header and saves that; clickin
 test("the collapsed MCP section stays collapsed after a reload", async (t) => {
 	t.after(() => writeMcp({}));
 	const { cards } = await withMcp({ config: { sidebar: { mcpCollapsed: true } } });
-	assert.match(cards()[0].at(-1), /^▸ MCP {2,}2\/3 online$/u);
+	assert.match(cards()[0].at(-1), /^MCP {2,}2\/3 online$/u);
 });
 
 test("without MCP servers there is no MCP section", async () => {
@@ -259,12 +259,12 @@ test("below the breakpoint the status line keeps MCP n/m among the statuses, wit
 test("without the outline the MCP header is still the row a click toggles; the wheel is left alone", async (t) => {
 	t.after(() => writeMcp({}));
 	const { raw, status } = await withMcp({ config: { blocks: { border: false } } });
-	const y = raw().map(plain).findIndex((row) => /^ ▾ MCP /u.test(row));
+	const y = raw().map(plain).findIndex((row) => /^ MCP /u.test(row));
 	assert.ok(y > 0);
 	const event = (type, extra = {}) => status().handleMouse({ type, button: "left", x: 4, y, width: 60, height: 20, screenX: 124, screenY: y, ...extra });
 	assert.equal(event("wheel", { button: "none", wheelDelta: 1 }), undefined, "the wheel does what it did");
 	assert.equal(status().handleMouse({ type: "click", button: "left", x: 4, y: y + 1, width: 60, height: 20, screenX: 124, screenY: y }), undefined, "a server row is not the toggle");
 	assert.deepEqual(event("click"), { handled: true, render: true });
-	assert.match(plain(raw()[y]), /^ ▸ MCP {2,}2\/3 online$/u);
+	assert.match(plain(raw()[y]), /^ MCP {2,}2\/3 online$/u);
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
 });
