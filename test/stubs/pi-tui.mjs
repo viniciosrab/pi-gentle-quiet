@@ -75,3 +75,17 @@ export class ScrollView {
 	scrollBy() {}
 	setScrollbar() {}
 }
+
+// Terminal capabilities: no image protocol unless a test sets globalThis.testImageProtocol.
+export const getCapabilities = () => ({ images: globalThis.testImageProtocol ?? null, trueColor: true, hyperlinks: true });
+
+// Like Pi's: an inline image, here drawn as its size so tests can see where it lands.
+export class Image {
+	constructor(base64Data, mimeType, theme, options = {}) {
+		Object.assign(this, { base64Data, mimeType, theme, options });
+	}
+	render() {
+		return [`<image ${this.mimeType} ${this.options.maxWidthCells}x${this.options.maxHeightCells}>`, ""];
+	}
+	invalidate() {}
+}
