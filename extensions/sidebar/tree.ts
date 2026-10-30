@@ -1,10 +1,13 @@
 // The TREE tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's
-// project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ PROYECTO · <project>
+// project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ PROJECT · <project>
 // ══ [ ↗ nvim ]" in the card title style, then the project's tree with git badges on the right ("M", "?",
 // "A", "U" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
-// (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), Nerd Font glyphs picked and colored as
-// Miguel Solorio's Symbols theme picks its icons (./nerd-icons.ts), one cell wide, each in its own 24-bit color.
-// With fonts/GentleNerdIcons.ttf installed (largeIconFont) the rows draw the same glyphs 20% larger from it.
+// (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), the icons Neo-tree draws in LazyVim
+// (./nerd-icons.ts): mini.icons' glyph for the file, Neo-tree's folders, one cell of the terminal's Nerd Font,
+// painted with a theme role.
+// Hidden entries are Neo-tree's (./tree-scan.ts): dotfiles, git-ignored entries (git ls-files, once per read) and
+// the always-skipped folders. Each level that hid some ends with a dim "(n hidden items)" row; a click on it, or
+// /gentle-quiet's Tree hidden items on show (host.treeHidden), lists them, dim.
 //
 // Mouse: the header (or its badge) opens the editor on the project; a folder opens or closes; a file opens in
 // a read-only preview over Pi (./tree-preview.ts), whose e key opens it in the editor (straight in the editor
@@ -14,36 +17,24 @@
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { existsSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { editorCommand, launchDeps } from "./tree-launch.ts";
 import { nerdIcon } from "./nerd-icons.ts";
 import { openPreview } from "./tree-preview.ts";
-import { collectDirs, flattenTree, parseGitStatus, projectName, scanTree } from "./tree-scan.ts";
+import { collectDirs, flattenTree, parseGitStatus, parseIgnored, projectName, scanTree } from "./tree-scan.ts";
 
 /** How often the tree is read again while shown, and how long a launch failure stays on the card. */
 export const treeTiming = { rescanMs: 3000, noticeMs: 8000 };
-
-/**
- * Whether GentleNerdIcons.ttf, the Nerd icons 20% larger, is installed in ~/.local/share/fonts or ~/.fonts:
- * looked up once per process (`installed` keeps the answer); home and exists are seams for tests.
- */
-export const largeIconFont = {
-	home: () => os.homedir(),
-	exists: (file: string) => existsSync(file),
-	installed: undefined as boolean | undefined,
-	isInstalled(): boolean {
-		largeIconFont.installed ??= [".local/share/fonts", ".fonts"].some((dir) => largeIconFont.exists(path.join(largeIconFont.home(), dir, "GentleNerdIcons.ttf")));
-		return largeIconFont.installed;
-	},
-};
 
 const ICON = "⌂";
 const COMPACT_WIDTH = 38; // cute's: under it the badge is "[ ↗ ]"
 const CODE = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
 const DATA = new Set(["json", "yaml", "yml", "toml", "lock"]);
+// What a "(n hidden items)" row holds in the click map.
+const HIDDEN_ROW = { hiddenRow: true };
+// The git-ignored entries under the session's folder, folders once with a trailing "/".
+const IGNORED_ARGS = ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"];
 const BADGES = { modified: ["warning", "M"], added: ["success", "A"], untracked: ["accent", "?"], conflict: ["error", "U"], deleted: ["error", "D"] };
 
 export function createTab(host: SidebarHost): SidebarTab {
@@ -56,6 +47,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		error: undefined,
 		git: parseGitStatus(""),
 		gitFailed: false,
+		ignored: new Set(),
 		expanded: new Set(["src"]),
 		firstScan: true,
 		scroll: 0,
@@ -77,13 +69,12 @@ export function createTab(host: SidebarHost): SidebarTab {
 	};
 
 	const paint = (role, text) => host.fg(role, text);
-	// The row's icon and the space after it.
+	// The row's icon and the space after it; a listed hidden entry has it dim, as Neo-tree does.
 	const icon = (node, open) => {
 		if (host.treeIcons !== "nerd") return `${node.isDirectory ? (open ? "📂" : "📁") : "📄"} `;
-		const { char, large, color } = nerdIcon(node.name, { isDirectory: node.isDirectory, open });
-		const [r, g, b] = [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
+		const { char, color } = nerdIcon(node.name, { isDirectory: node.isDirectory, open, empty: node.isDirectory && node.itemCount === 0 });
 		// The glyph is one cell; two spaces start the name where an emoji row (a two-cell emoji and a space) starts it.
-		return `\x1b[38;2;${r};${g};${b}m${largeIconFont.isInstalled() ? large : char}\x1b[39m  `;
+		return `${paint(node.hidden ? "dim" : color, char)}  `;
 	};
 	const changed = () => {
 		state.version++;
@@ -109,8 +100,10 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 		if (cwd !== state.cwd) reset(cwd);
 		const quiet = (promise) => Promise.resolve().then(() => promise).catch(() => undefined);
+		const showHidden = host.treeHidden === true;
+		const ignored = quiet(host.git(IGNORED_ARGS, cwd)).then(parseIgnored);
 		const [read, status, prefix, name] = await Promise.all([
-			scanTree(cwd, state.expanded).then((tree) => ({ tree }), (error) => ({ error })),
+			ignored.then((set) => ((state.ignored = set), scanTree(cwd, state.expanded, undefined, { showHidden, ignored: set }))).then((tree) => ({ tree }), (error) => ({ error })),
 			quiet(host.git(["status", "--porcelain=v1"], cwd)),
 			state.prefix ?? quiet(host.git(["rev-parse", "--show-prefix"], cwd)),
 			state.name ?? projectName(cwd).catch(() => path.basename(cwd)),
@@ -126,8 +119,8 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 		state.gitFailed = typeof status !== "string";
 		state.git = parseGitStatus(status ?? "", state.prefix ?? "");
-		const shape = (nodes) => (nodes ?? []).map((node) => [node.relPath, node.itemCount, shape(node.children)]);
-		const signature = JSON.stringify([name, read.error?.code ?? read.error?.message, shape(read.tree), status ?? null]);
+		const shape = (nodes) => [nodes?.hiddenCount ?? 0, (nodes ?? []).map((node) => [node.relPath, node.itemCount, node.hidden === true, shape(node.children)])];
+		const signature = JSON.stringify([name, read.error?.code ?? read.error?.message, shape(read.tree), status ?? null, showHidden]);
 		if (signature !== state.signature) {
 			state.signature = signature;
 			changed();
@@ -196,7 +189,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 		const cwd = state.cwd;
 		if (!cwd) return;
-		scanTree(cwd)
+		scanTree(cwd, undefined, undefined, { showHidden: host.treeHidden === true, ignored: state.ignored })
 			.then((tree) => {
 				if (state.disposed || cwd !== state.cwd) return;
 				state.expanded = collectDirs(tree);
@@ -226,13 +219,13 @@ export function createTab(host: SidebarHost): SidebarTab {
 		const badge = compact ? `${paint("dim", "[")} ${paint("accent", "↗")} ${paint("dim", "]")}` : `${paint("dim", "[")} ${paint("accent", "↗")} ${paint("toolTitle", label)} ${paint("dim", "]")}`;
 		const badgeWidth = visibleWidth(compact ? "[ ↗ ]" : `[ ↗ ${label} ]`);
 		const room = inner - badgeWidth - 3; // a space, at least one "═", a space
-		const prefix = `${ICON} PROYECTO · `;
+		const prefix = `${ICON} PROJECT · `;
 		let title = "";
 		if (room >= 18) {
 			const name = state.name ?? path.basename(state.cwd ?? "") ?? "";
 			const space = room - visibleWidth(prefix);
 			title = `${prefix}${visibleWidth(name) > space ? truncateToWidth(name, space, "…") : name}`;
-		} else if (room >= 11) title = `${ICON} PROYECTO`;
+		} else if (room >= 10) title = `${ICON} PROJECT`;
 		else if (room >= 6) title = `${ICON} TREE`;
 		else if (room >= 1) title = ICON;
 		const lead = title ? `${paint("toolTitle", host.bold(title))} ` : "";
@@ -243,15 +236,16 @@ export function createTab(host: SidebarHost): SidebarTab {
 	const fileRow = (row, inner) => {
 		const node = row.node;
 		const guides = paint("dim", row.prefix);
+		if (!node) return `${guides}${paint("dim", `(${row.hiddenCount} hidden ${row.hiddenCount === 1 ? "item" : "items"})`)}`;
 		if (node.isDirectory) {
 			const open = state.expanded.has(node.relPath);
 			const dirty = state.git.dirty(node.relPath);
-			const name = paint(dirty ? "warning" : "accent", node.name);
+			const name = paint(dirty ? "warning" : node.hidden ? "dim" : "accent", node.name);
 			const count = typeof node.itemCount === "number" ? paint("dim", ` (${node.itemCount} items)`) : "";
 			return spread(`${guides}${icon(node, open)}${name}${count}`, dirty ? paint("warning", "●") : "", inner);
 		}
 		const status = state.git.status(node.relPath);
-		const [role, mark] = BADGES[status] ?? [CODE.has(node.extension) ? "text" : DATA.has(node.extension) ? "muted" : "text", ""];
+		const [role, mark] = BADGES[status] ?? [node.hidden ? "dim" : CODE.has(node.extension) ? "text" : DATA.has(node.extension) ? "muted" : "text", ""];
 		const name = state.selected === node.relPath ? paint("accent", host.bold(node.name)) : paint(role, node.name);
 		return spread(`${guides}${icon(node, false)}${name}`, mark ? paint(role, mark) : "", inner);
 	};
@@ -281,7 +275,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 				const shown = overflow ? Math.max(1, capacity - 1) : capacity;
 				state.scroll = Math.max(0, Math.min(state.scroll, rows.length - shown));
 				rows.slice(state.scroll, state.scroll + shown).forEach((row, index) => {
-					state.hits.set(framed + 2 + index, row.node);
+					state.hits.set(framed + 2 + index, row.node ?? HIDDEN_ROW);
 					body.push(fileRow(row, inner));
 				});
 				if (overflow) {
@@ -306,6 +300,11 @@ export function createTab(host: SidebarHost): SidebarTab {
 			}
 			const node = state.hits.get(line);
 			if (!node) return false;
+			if (node === HIDDEN_ROW) {
+				host.setTreeHidden?.(true);
+				toggled();
+				return true;
+			}
 			if (node.isDirectory) {
 				if (state.expanded.has(node.relPath)) state.expanded.delete(node.relPath);
 				else state.expanded.add(node.relPath);

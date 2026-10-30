@@ -1,7 +1,8 @@
 // The TREE tab's data, after pi-cinlodev-cute's src/tree/tree-scanner.ts: the project folder read with
-// fs/promises (folders first, build and dependency folders left out, five levels deep, only the open
-// folders read below the first level), the rows it draws with their "├── " guides, and git's
-// `status --porcelain=v1` mapped onto it.
+// fs/promises (folders first, five levels deep, only the open folders read below the first level), the rows it
+// draws with their "├── " guides, and git's `status --porcelain=v1` mapped onto it. Hidden entries are Neo-tree's:
+// dotfiles and dot-folders, git-ignored entries and the build and dependency folders of IGNORED_NAMES; they are
+// left out and counted per level, or listed and marked when shown.
 // @ts-nocheck
 
 import { readdir, readFile } from "node:fs/promises";
@@ -12,15 +13,26 @@ export interface TreeNode {
 	relPath: string;
 	absPath: string;
 	isDirectory: boolean;
-	children?: TreeNode[];
+	children?: TreeNode[] & { hiddenCount?: number };
 	itemCount?: number;
 	extension?: string;
+	/** Listed although hidden (dotfile, git-ignored or in IGNORED_NAMES): only when hidden entries are shown. */
+	hidden?: boolean;
 }
 
+/** A row of the tree: a node, or (no node) the "(n hidden items)" row closing a level. */
 export interface TreeRow {
-	node: TreeNode;
+	node?: TreeNode;
+	hiddenCount?: number;
 	prefix: string;
 	depth: number;
+}
+
+export interface ScanOptions {
+	/** List hidden entries (marked `hidden`) instead of leaving them out. */
+	showHidden?: boolean;
+	/** Git-ignored paths relative to the root, folders without their trailing "/" (parseIgnored). */
+	ignored?: Set<string>;
 }
 
 export const IGNORED_NAMES = new Set([".git", "node_modules", "dist", ".cache", ".next", "coverage", ".turbo", "build"]);
@@ -28,55 +40,70 @@ export const MAX_DEPTH = 5;
 
 /**
  * The folder at `root`, folders first then files, each sorted by name. A folder's children are read when it
- * is in `expanded` (every folder when `expanded` is undefined) and sits less than `maxDepth` levels down;
- * otherwise only its items are counted. An unreadable `root` rejects; an unreadable subfolder is empty.
+ * is in `expanded` (every folder when `expanded` is undefined, hidden ones aside) and sits less than `maxDepth`
+ * levels down; otherwise only its items are counted. Hidden entries are left out, and each level's array (the
+ * result and every `children`) carries how many as `hiddenCount`; with `showHidden` they are listed with
+ * `hidden: true` and `hiddenCount` is 0. Item counts follow the same rule. An unreadable `root` rejects; an
+ * unreadable subfolder is empty.
  */
-export async function scanTree(root, expanded?, maxDepth = MAX_DEPTH) {
-	return scanDir(root, root, expanded, maxDepth, 0);
+export async function scanTree(root, expanded?, maxDepth = MAX_DEPTH, { showHidden = false, ignored = new Set() }: ScanOptions = {}) {
+	return scanDir(root, root, expanded, maxDepth, 0, { showHidden, ignored });
 }
 
-async function scanDir(dir, root, expanded, maxDepth, depth) {
+/** Whether the entry `name` at `relPath` is hidden: a dotfile, an always-skipped name or git-ignored. */
+export const isHidden = (name, relPath, ignored = new Set()) => name.startsWith(".") || IGNORED_NAMES.has(name) || ignored.has(relPath);
+
+/** `git ls-files -z --others --ignored --exclude-standard --directory` as the set of ignored relative paths. */
+export function parseIgnored(output) {
+	return new Set(String(output ?? "").split("\0").filter(Boolean).map((entry) => entry.replace(/\/$/, "")));
+}
+
+async function scanDir(dir, root, expanded, maxDepth, depth, options) {
 	const entries = await readdir(dir, { withFileTypes: true });
+	const visible = (name, relPath) => options.showHidden || !isHidden(name, relPath, options.ignored);
+	const kept = entries.filter((entry) => visible(entry.name, path.relative(root, path.join(dir, entry.name))));
 	const nodes = await Promise.all(
-		entries
-			.filter((entry) => !IGNORED_NAMES.has(entry.name))
-			.map(async (entry) => {
-				const absPath = path.join(dir, entry.name);
-				const relPath = path.relative(root, absPath);
-				if (!entry.isDirectory()) {
-					return { name: entry.name, relPath, absPath, isDirectory: false, extension: path.extname(entry.name).toLowerCase().replace(/^\./, "") };
-				}
-				const node = { name: entry.name, relPath, absPath, isDirectory: true, itemCount: 0 };
-				if (depth < maxDepth && (!expanded || expanded.has(relPath))) {
-					node.children = await scanDir(absPath, root, expanded, maxDepth, depth + 1).catch(() => []);
-					node.itemCount = node.children.length;
-				} else {
-					node.itemCount = await readdir(absPath).then((names) => names.filter((name) => !IGNORED_NAMES.has(name)).length, () => 0);
-				}
-				return node;
-			}),
+		kept.map(async (entry) => {
+			const absPath = path.join(dir, entry.name);
+			const relPath = path.relative(root, absPath);
+			const hidden = isHidden(entry.name, relPath, options.ignored) ? { hidden: true } : {};
+			if (!entry.isDirectory()) {
+				return { name: entry.name, relPath, absPath, isDirectory: false, extension: path.extname(entry.name).toLowerCase().replace(/^\./, ""), ...hidden };
+			}
+			const node = { name: entry.name, relPath, absPath, isDirectory: true, itemCount: 0, ...hidden };
+			if (depth < maxDepth && (expanded ? expanded.has(relPath) : !hidden.hidden)) {
+				node.children = await scanDir(absPath, root, expanded, maxDepth, depth + 1, options).catch(() => Object.assign([], { hiddenCount: 0 }));
+				node.itemCount = node.children.length;
+			} else {
+				node.itemCount = await readdir(absPath).then((names) => names.filter((name) => visible(name, path.join(relPath, name))).length, () => 0);
+			}
+			return node;
+		}),
 	);
 	const byName = (a, b) => a.name.localeCompare(b.name);
-	return [...nodes.filter((node) => node.isDirectory).sort(byName), ...nodes.filter((node) => !node.isDirectory).sort(byName)];
+	const sorted = [...nodes.filter((node) => node.isDirectory).sort(byName), ...nodes.filter((node) => !node.isDirectory).sort(byName)];
+	return Object.assign(sorted, { hiddenCount: entries.length - kept.length });
 }
 
-/** The rows of the open part of the tree, top to bottom, with their guides. */
+/** The rows of the open part of the tree, top to bottom, with their guides; a level that hid entries ends with a hidden row. */
 export function flattenTree(nodes, expanded, parentPrefix = "", depth = 0) {
 	const rows = [];
+	const hiddenCount = nodes.hiddenCount ?? 0;
 	nodes.forEach((node, index) => {
-		const last = index === nodes.length - 1;
+		const last = index === nodes.length - 1 && !hiddenCount;
 		rows.push({ node, prefix: `${parentPrefix}${last ? "└── " : "├── "}`, depth });
-		if (node.isDirectory && expanded.has(node.relPath) && node.children?.length) {
+		if (node.isDirectory && expanded.has(node.relPath) && (node.children?.length || node.children?.hiddenCount)) {
 			rows.push(...flattenTree(node.children, expanded, `${parentPrefix}${last ? "    " : "│   "}`, depth + 1));
 		}
 	});
+	if (hiddenCount) rows.push({ hiddenCount, prefix: `${parentPrefix}└── `, depth });
 	return rows;
 }
 
-/** Every folder's relative path in `nodes`, into `into`. */
+/** Every folder's relative path in `nodes`, into `into`, hidden ones aside. */
 export function collectDirs(nodes, into = new Set()) {
 	for (const node of nodes) {
-		if (!node.isDirectory) continue;
+		if (!node.isDirectory || node.hidden) continue;
 		into.add(node.relPath);
 		if (node.children) collectDirs(node.children, into);
 	}

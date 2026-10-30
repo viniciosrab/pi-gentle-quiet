@@ -82,6 +82,8 @@
 //       The status line's ring gauge for a percentage, painted.
 //   icons: Record<string, string>
 //       gentle-quiet's configured icons (memory, todo, agents, jobs, rdd, other, branch).
+//   treeIcons: "emoji" | "nerd"; treeHidden: boolean; setTreeHidden(value: boolean): void
+//       TREE's settings in /gentle-quiet: its icons, and whether it lists hidden entries (set and saved).
 // ---------------------------------------------------------------------------------------------------
 // @ts-nocheck
 
@@ -109,8 +111,12 @@ export interface SidebarHost {
 	usage(): { name: string; windows: { label: string; percent: number; resetAt: number | null }[] };
 	gauge(percent: number | null): string;
 	readonly icons: Record<string, string>;
-	/** TREE's icon theme: "emoji", or "nerd" (Nerd Font glyphs in Symbols' colors, ./nerd-icons.ts). */
+	/** TREE's icon theme: "emoji", or "nerd" (Nerd Font glyphs as Neo-tree draws them, ./nerd-icons.ts). */
 	readonly treeIcons: "emoji" | "nerd";
+	/** Whether TREE lists its hidden entries (/gentle-quiet's Tree hidden items). */
+	readonly treeHidden: boolean;
+	/** Sets Tree hidden items and saves it in gentle-quiet.json. */
+	setTreeHidden(value: boolean): void;
 }
 
 export interface SidebarTab {

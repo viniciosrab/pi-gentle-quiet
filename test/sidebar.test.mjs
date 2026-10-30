@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ScrollView } from "@earendil-works/pi-tui";
 import { load, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
+import { TAB_FACTORIES } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
@@ -428,4 +429,30 @@ test("in the column the Todos title drops gentle-pi's shortcut hint and keeps �
 	};
 	assert.equal(drawn("▾ Collapse", "ctrl+shift+t"), "│ ≡ Todos ▾ Collapse  0 of 1");
 	assert.equal(drawn("▸ Expand", "ctrl+shift+t expand"), "│ ≡ Todos ▸ Expand  0 of 1");
+});
+
+test("the TREE tab's host reads Tree hidden items live and saves it when the tab sets it", async () => {
+	const original = TAB_FACTORIES.tree;
+	let tabHost;
+	TAB_FACTORIES.tree = (host) => {
+		tabHost = host;
+		return { id: "tree", render: (width) => ["tree".padEnd(width)] };
+	};
+	try {
+		const { root } = await wide({}, { sidebar: { treeIcons: "nerd" } });
+		const side = () => root[NODE]().entries[1].component[NODE]();
+		const bar = side().entries[0].component;
+		const x = plain(bar.render(60)[0]).indexOf("TREE") + 1;
+		bar.handleMouse({ type: "click", button: "left", x, y: 0, width: 60, height: 2, screenX: 120, screenY: 0 });
+		side().entries.at(-1).component.render(60);
+		assert.ok(tabHost, "the TREE tab was opened");
+		assert.equal(tabHost.treeIcons, "nerd");
+		assert.equal(tabHost.treeHidden, false, "hidden entries stay hidden by default");
+		tabHost.setTreeHidden(true);
+		assert.equal(tabHost.treeHidden, true);
+		assert.equal(readConfig().sidebar.treeHidden, true, "saved in gentle-quiet.json");
+		assert.equal(readConfig().sidebar.treeIcons, "nerd", "the rest of the config kept");
+	} finally {
+		TAB_FACTORIES.tree = original;
+	}
 });

@@ -1,506 +1,267 @@
-# Writes extensions/sidebar/nerd-icons.ts: Miguel Solorio's Symbols file icon theme for VS Code
-# (https://github.com/miguelsolorio/vscode-symbols, MIT License, fonts/LICENSE-vscode-symbols) drawn with the Nerd
-# Font glyphs the terminal font already has. Symbols' file name, extension and folder name maps pick the icon and
-# its color; GLYPH below names the Nerd Font glyph that stands for each icon.
+# Writes extensions/sidebar/nerd-icons.ts: the file icons Neo-tree draws in LazyVim, which is what
+# omarchy-launch-editor opens. LazyVim does not install nvim-web-devicons: it mocks it with mini.icons
+# (https://github.com/nvim-mini/mini.icons, MIT License, fonts/LICENSE-mini-icons), so Neo-tree's file icons are
+# mini.icons' glyphs and highlight groups. This script asks mini.icons itself, in a headless Neovim, for the icon of
+# every file name and extension it or Neovim's filetype detection knows, and keeps the ones the module needs.
 #
 # Pinned sources:
-#   vscode-symbols 2c95b15b0a8ef95ac62855e3784a6024ee6e5d2e (v0.0.25): the maps and the icons' SVGs (for the colors).
-#   nerd-fonts v3.5.1 (b894ea7803af6aade63d60a4381e006098ec9c4d) glyphnames.json: glyph name -> codepoint.
-#   nvim-web-devicons ec309a0eaff6ea967e58c275996155ab5c16938d (MIT): the reference for which glyph means which file
-#   type; nothing is read from it.
+#   mini.icons 98faae31e9be1cc054ae63485e58ceb185efcad0, set up with LazyVim c10948c's options (LAZYVIM_OPTS below).
+#   Neovim's runtime lua/vim/filetype.lua (the file names and extensions its filetype detection knows), from the
+#   nvim on PATH (0.12.6 when generated).
 #
-# The glyphs: seti (and devicons where seti has none) for languages and tools, codicons (VS Code's own icon font) for
-# generic things (a page, a folder, a lock, a book), all one cell wide and thin. Folders keep Symbols' color and draw
-# codicons' closed or open folder; their badges have no Nerd Font counterpart. An icon with no fitting glyph (None
-# below) draws the generic file glyph in its own color. The color is the one painting the largest area of the
-# icon's SVG, a grey only when nothing else is painted (a folder's colored badge gives the folder its color).
+# The module resolves a name as mini.icons' 'file' category does: the exact file name (case-sensitive), then the
+# extension after the first dot that is not the leading one (lowercased; "a.test.ts" tries "test.ts", then "ts"),
+# then the default file icon. Names Neovim matches only by a filetype pattern are kept only when listed below.
+# A file name is listed only when its icon differs from what its extension gives. Colors are mini.icons' nine
+# highlight groups (MiniIconsAzure, ...), named by hue; the module paints them with Pi theme roles.
 # Every glyph is checked present in JetBrainsMono Nerd Font's cmap; the module lists the codepoints it checked.
 #
-# It also writes fonts/GentleNerdIcons.ttf ("Gentle Nerd Icons"): the same glyphs, outlines copied from
-# JetBrainsMono Nerd Font 3.5.1 (Version 2.304;...;Nerd Fonts 3.5.1, checked) and scaled 115% about each glyph's own
-# centre, so the vertical centre stays where the Nerd Font puts it, on the text; the left edge stays too, and the
-# extra width runs to the right, into the two spaces TREE puts after the icon. Same em, advance (600) and line
-# metrics as the source, every glyph inside its ascent and descent. They sit at private-use codepoints from
-# U+100400 (plane 16; U+100000, U+100030 and U+100100..U+10023B were used before), in the order of GLYPHS; the
-# module lists them as LARGE. The font is under the SIL Open Font License 1.1 like its source, with the glyph sets'
-# notices in fonts/LICENSE-nerd-fonts. Fixed head dates: the same inputs give the same bytes.
-#
-# Run: uv run --no-project --with fonttools==4.68.0 --with picosvg python fonts/build-nerd-icons.py \
-#        [vscode-symbols checkout] [glyphnames.json] [JetBrainsMonoNerdFont-Regular.ttf]
-# With no checkout or glyphnames.json, the pinned ones are fetched into a temporary directory.
+# Run: uv run --no-project --with fonttools==4.68.0 python fonts/build-nerd-icons.py \
+#        [mini.icons checkout] [JetBrainsMonoNerdFont-Regular.ttf]
+# The checkout defaults to the user's LazyVim one, ~/.local/share/nvim/lazy/mini.icons; it must be at the pin.
 import json
 import re
 import subprocess
 import sys
 import tempfile
-import urllib.request
-from copy import deepcopy
 from pathlib import Path
 
-import pathops
-from fontTools.fontBuilder import FontBuilder
-from fontTools.pens.transformPen import TransformPen
-from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
-from lxml import etree
-from picosvg.svg import SVG
-from picosvg.svg_pathops import skia_path, svg_commands
-from picosvg.svg_types import SVGPath
 
-REPO = "https://github.com/miguelsolorio/vscode-symbols"
-PIN = "2c95b15b0a8ef95ac62855e3784a6024ee6e5d2e"
-NERD_TAG = "v3.5.1"
-GLYPHNAMES = f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_TAG}/glyphnames.json"
+PIN = "98faae31e9be1cc054ae63485e58ceb185efcad0"
+CHECKOUT = Path.home() / ".local/share/nvim/lazy/mini.icons"
 FONT = "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / "extensions" / "sidebar" / "nerd-icons.ts"
-LARGE_FONT = ROOT / "fonts" / "GentleNerdIcons.ttf"
-LARGE_BASE = 0x100400
-LARGE_SCALE = 1.15
-# 2025-01-01T00:00:00Z in the head table's seconds since 1904-01-01.
-FIXED_DATE = 3818707200
+# LazyVim's opts for mini.icons (lua/lazyvim/plugins/ui.lua at c10948c50b18fae7f256433afdef09e432410480).
+LAZYVIM_OPTS = """{
+  file = {
+    ['.keep'] = { glyph = '\\u{F02A2}', hl = 'MiniIconsGrey' },
+    ['devcontainer.json'] = { glyph = '\\u{F4B7}', hl = 'MiniIconsAzure' },
+  },
+  filetype = { dotenv = { glyph = '\\u{EB52}', hl = 'MiniIconsYellow' } },
+}"""
+HUES = ["azure", "blue", "cyan", "green", "grey", "orange", "purple", "red", "yellow"]
+# Names the build checks resolve here as mini.icons resolves them; they are also asked for, with names Neovim matches
+# only by a pattern, so a name such as Makefile keeps its icon.
+SAMPLES = ["package.json", "README.md", "readme.md", "Dockerfile", "Makefile", "LICENSE", ".gitignore", ".bashrc", ".env",
+           "tsconfig.json", "index.ts", "tree.test.ts", "env.d.ts", "app.tsx", "main.go", "Cargo.toml", "lib.rs", "a.py",
+           "notes.md", "data.json", "style.css", "backup.tar.gz", "photo.PNG", "notes.zzzunknown", "x", ".keep",
+           "devcontainer.json", "init.lua", "flake.nix", "go.mod", "yarn.lock", "package-lock.json", ".editorconfig"]
+PATTERN_NAMES = ["makefile", "GNUmakefile", ".env.local", ".env.example", ".env.development", ".env.production", ".env.test"]
 
-FILE = "cod-file"
-FOLDER = "cod-folder"
-FOLDER_OPEN = "cod-folder_opened"
-
-# Symbols icon id -> Nerd Font glyph name (nerd-fonts glyphnames.json), or None for the generic file glyph.
-GLYPH = {
-    "angular": "dev-angular", "angular-component": "dev-angular", "angular-directive": "dev-angular",
-    "angular-guard": "dev-angular", "angular-module": "dev-angular", "angular-pipe": "dev-angular",
-    "angular-service": "dev-angular", "animate": None, "astro": "custom-astro", "audio": "seti-audio",
-    "babel": "seti-babel", "biome": "dev-biome", "brackets-blue": "seti-json", "brackets-orange": "seti-json",
-    "brackets-purple": "seti-json", "brackets-sky": "seti-json", "brackets-yellow": "seti-json",
-    "browserslist": None, "bruno": None, "bun": "dev-bun", "c": "seti-c", "caddy": None,
-    "capacitor": "dev-capacitor", "clapper": "seti-godot", "claude": "cod-claude", "clojure": "seti-clojure",
-    "cloudflare-workers": "dev-cloudflareworkers", "cmake": "dev-cmake", "code-blue": "seti-html",
-    "code-green": "seti-html", "code-orange": "seti-html", "coldfusion": "seti-coldfusion",
-    "compressed": "seti-zip", "contentlayer": None, "cplus": "seti-cpp", "crystal": "seti-crystal",
-    "csharp": "seti-c_sharp", "csv": "seti-csv", "cucumber": "dev-cucumber", "cuda": "seti-cu", "cursor": None,
-    "cypress": "dev-cypressio", "dart": "seti-dart", "database": "seti-db", "deno": "dev-denojs",
-    "docker": "seti-docker", "docker-green": "seti-docker", "docker-pink": "seti-docker", "document": None,
-    "docusaurus": None, "drawio": None, "drizzle": None, "dts": "seti-typescript", "dune": "seti-ocaml",
-    "earthfile": None, "editorconfig": "seti-editorconfig", "elixir": "seti-elixir", "erlang": "dev-erlang",
-    "eslint": "seti-eslint", "exe": "cod-window", "expressive-code": None, "firebase": "seti-firebase",
-    "font": "seti-font", "fortran": "dev-fortran", "fresh": None, "fsharp": "seti-f_sharp", "func": None,
-    "gatsby": "dev-gatsby", "gdextension": "seti-godot", "gdignore": "seti-godot", "gdproject": "seti-godot",
-    "gdscript": "seti-godot", "gdshader": "seti-godot", "gear": "seti-config", "gif": "seti-image",
-    "git": "seti-git", "gitlab": "seti-gitlab", "gleam": "dev-gleam", "globe": "cod-globe", "go": "seti-go", "go-mod": "seti-go",
-    "gradle": "seti-gradle", "graphql": "seti-graphql", "gulp": "seti-gulp", "h": "seti-c", "haml": "seti-haml",
-    "haskell": "seti-haskell", "http": "cod-globe", "hugo": "dev-hugo", "i18n": "md-translate",
-    "ignore": "seti-ignored", "illustrator": "seti-illustrator", "image": "seti-image", "ionic": "seti-ionic",
-    "java": "seti-java", "java-class": "seti-java", "jenkins": "seti-jenkins", "jest": "dev-jest",
-    "js": "seti-javascript", "js-test": "seti-javascript", "julia": "seti-julia", "keystatic": None, "knip": None,
-    "kotlin": "seti-kotlin", "kubb": None, "laravel": "dev-laravel", "license": "md-copyright", "link": "cod-link",
-    "liquid": "seti-liquid", "lock": "cod-lock", "lua": "seti-lua", "luau": "seti-lua", "lunaria": None,
-    "markdoc": "dev-markdown", "markdown": "dev-markdown", "maven": "seti-maven", "mdx": "dev-markdown",
-    "minecraft": None, "mongo": "dev-mongodb", "moon": None, "nest": "dev-nestjs", "netlify": "dev-netlify",
-    "next": "dev-nextjs", "nim": "seti-nim", "nix": "linux-nixos", "node": "md-nodejs",
-    "nodemon": "dev-nodemon", "notebook": "seti-notebook", "npm": "seti-npm", "nunjucks": "seti-nunjucks",
-    "nuxt": "dev-nuxtjs", "nx": None, "ocaml": "seti-ocaml", "orval": None, "oxc": None, "panda": None,
-    "patch": "cod-diff", "pdf": "seti-pdf", "perl": "seti-perl", "photoshop": "seti-photoshop", "php": "seti-php",
-    "pkl": None, "pnpm": "dev-pnpm", "postcss": "dev-postcss", "prettier": "custom-prettier", "prisma": "seti-prisma",
-    "proto": None, "pug": "seti-pug", "pulumi": "dev-pulumi", "puppeteer": "dev-puppeteer",
-    "puzzle": "cod-extensions", "python": "seti-python", "r": "seti-r", "razor": "dev-blazor", "react": "seti-react",
-    "react-test": "seti-react", "react-ts": "seti-react", "readme": "cod-book", "redux-actions": "dev-redux",
-    "redux-effects": "dev-redux", "redux-facade": "dev-redux", "redux-reducer": "dev-redux",
-    "redux-selector": "dev-redux", "renovate": None, "rescript": "seti-rescript",
-    "rescript-interface": "seti-rescript", "resource": "cod-package", "rolldown": None, "rome": None,
-    "rsbuild": None, "rslib": None, "rspack": None, "ruby": "seti-ruby", "rust": "seti-rust", "sanity": "dev-sanity",
-    "sass": "seti-sass", "sbt": "seti-sbt", "scala": "seti-scala", "severless": None, "shadcn": None,
-    "shell": "cod-terminal", "slint": None, "solidity": "dev-solidity", "statamic-antlers": None,
-    "storybook": "dev-storybook", "stylelint": "seti-stylelint", "stylus": "seti-stylus", "svelte": "seti-svelte",
-    "svelte-service": "seti-svelte", "svelte-ts": "seti-svelte", "svg": "seti-svg", "svx": "seti-svelte",
-    "swc": None, "swift": "seti-swift", "tailwind": "dev-tailwindcss", "taskfile": "cod-tasklist", "tauri": "dev-tauri",
-    "terraform": "seti-terraform", "tex": "seti-tex", "text": "seti-text", "ts": "seti-typescript",
-    "ts-test": "seti-typescript", "ts-types": "seti-typescript", "tsconfig": "seti-tsconfig",
-    "turborepo": "dev-turbo", "twig": "seti-twig", "typst": None, "unity-asmdef": "dev-unity",
-    "unity-asmref": "dev-unity", "unity-asset": "dev-unity", "unity-meta": "dev-unity",
-    "unity-package": "dev-unity", "unity-prefab": "dev-unity", "unity-scene": "dev-unity",
-    "unity-shader": "dev-unity", "unocss": None, "uv": None, "v": "custom-v_lang", "vanilla-extract": None,
-    "vercel": "dev-vercel", "video": "seti-video", "visual-studio": "dev-visualstudio", "vite": "dev-vitejs",
-    "vitest": "dev-vitest", "vue": "seti-vue", "webgpu": "dev-webgpu", "webpack": "seti-webpack", "xml": "seti-xml",
-    "yaml": "dev-yaml", "yarn": "seti-yarn", "yummacss": None, "zig": "seti-zig",
-}
-
-# Extensions and file names VS Code gives a language the theme has an icon for (languageIds), where the theme
-# has no fileExtensions or fileNames entry of its own: VS Code's built-in language associations.
-LANGUAGE_EXTENSIONS = {
-    "php": "php", "phtml": "php", "pl": "perl", "pm": "perl", "clj": "clojure", "cljs": "clojure", "cljc": "clojure",
-    "edn": "clojure", "vue": "vue", "hpp": "cpp", "hxx": "cpp", "cxx": "cpp", "ini": "properties",
-    "properties": "properties", "cfg": "properties", "conf": "properties", "mk": "makefile", "psm1": "powershell",
-    "cmd": "bat", "mts": "typescript", "cts": "typescript", "jsonc": "json", "markdown": "markdown",
-    "mkd": "markdown", "rst": "plaintext", "log": "plaintext", "tsv": "tsv",
-}
-LANGUAGE_FILENAMES = {"makefile": "makefile", "gnumakefile": "makefile", "dockerfile": "dockerfile", ".gitignore": "ignore"}
+DUMP = r"""
+local args = vim.json.decode(table.concat(vim.fn.readfile(_G.gq_input), '\n'))
+vim.opt.rtp:prepend(args.checkout)
+require('mini.icons').setup(_G.gq_opts)
+local function get(category, name)
+  local glyph, hl, is_default = MiniIcons.get(category, name)
+  return { glyph, hl, is_default }
+end
+local out = { default = get('default', 'file'), files = {}, extensions = {}, samples = {}, mini_extensions = MiniIcons.list('extension') }
+for _, name in ipairs(vim.list_extend(MiniIcons.list('file'), args.names)) do out.files[name] = get('file', name) end
+for _, ext in ipairs(vim.list_extend(MiniIcons.list('extension'), args.extensions)) do out.extensions[ext:lower()] = get('extension', ext) end
+for _, name in ipairs(args.samples) do out.samples[name] = get('file', name) end
+vim.fn.writefile({ vim.json.encode(out) }, args.output)
+"""
 
 
-def pinned_checkout(argument):
-    if argument:
-        repo = Path(argument)
-        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-        if head != PIN:
-            sys.exit(f"{repo} is at {head or 'no commit'}, not the pinned {PIN}")
-        return repo
-    repo = Path(tempfile.mkdtemp()) / "vscode-symbols"
-    subprocess.run(["git", "clone", "-q", REPO, repo], check=True)
-    subprocess.run(["git", "-C", repo, "checkout", "-q", PIN], check=True)
-    return repo
+def vim_runtime():
+    script = "lua io.stdout:write(vim.env.VIMRUNTIME)"
+    return Path(subprocess.run(["nvim", "--clean", "--headless", "-c", script, "-c", "qa!"], capture_output=True, text=True, check=True).stdout.strip())
 
 
-def glyph_names(argument):
-    if argument:
-        names = json.loads(Path(argument).read_text())
-    else:
-        with urllib.request.urlopen(GLYPHNAMES) as response:
-            names = json.loads(response.read())
-    version = names["METADATA"]["version"]
-    if f"v{version}" != NERD_TAG:
-        sys.exit(f"glyphnames.json is for nerd-fonts {version}, not the pinned {NERD_TAG}")
-    return {name: int(entry["code"], 16) for name, entry in names.items() if name != "METADATA"}
+def filetype_keys(source, table):
+    """The keys of `local <table> = { ... }` in Neovim's lua/vim/filetype.lua."""
+    body = re.search(rf"^local {table} = \{{\n(.*?)^\}}", source, re.S | re.M)
+    if not body:
+        sys.exit(f"no `local {table}` table in filetype.lua")
+    keys = []
+    for line in body.group(1).splitlines():
+        found = re.match(r"\s+(?:\[(['\"])(.+?)\1\]|([A-Za-z_][\w]*))\s*=", line)
+        if found:
+            keys.append(found.group(2) or found.group(3))
+    return keys
 
 
-def theme_json(repo):
-    contribution = json.loads((repo / "package.json").read_text())["contributes"]["iconThemes"][0]["path"]
-    path = repo / contribution
-    # The extension writes symbol-icon-theme.modified.json from the user's settings at run time.
-    return path if path.exists() else repo / contribution.replace(".modified", "")
+def ask_mini_icons(checkout, names, extensions):
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        output = scratch / "out.json"
+        (scratch / "in.json").write_text(json.dumps({"checkout": str(checkout), "names": names, "extensions": extensions, "samples": SAMPLES, "output": str(output)}))
+        (scratch / "dump.lua").write_text(f"_G.gq_input = {json.dumps(str(scratch / 'in.json'))}\n_G.gq_opts = {LAZYVIM_OPTS}\n{DUMP}")
+        subprocess.run(["nvim", "--clean", "--headless", "-c", f"luafile {scratch / 'dump.lua'}", "-c", "qa!"], check=True,
+                       env={"PATH": "/usr/bin:/bin", "HOME": str(scratch), "XDG_STATE_HOME": str(scratch), "XDG_DATA_HOME": str(scratch)})
+        return json.loads(output.read_text())
 
 
-# The icons' colors, from their SVGs: the color painting the largest area.
-
-NAMED = {"white": "#ffffff", "black": "#000000"}
-SVG_NS = "http://www.w3.org/2000/svg"
-
-
-def hex_color(value):
-    value = NAMED.get(value.strip().lower(), value.strip().lower())
-    if value.startswith("rgb("):
-        parts = [part.strip() for part in value[4:-1].split(",")[:3]]
-        r, g, b = (round(float(part[:-1]) * 2.55) if part.endswith("%") else int(float(part)) for part in parts)
-        return f"#{r:02x}{g:02x}{b:02x}"
-    if not value.startswith("#"):
-        return None
-    if len(value) == 4:
-        value = "#" + "".join(c * 2 for c in value[1:])
-    return value[:7]
+def hue(hl):
+    name = hl.removeprefix("MiniIcons").lower()
+    if name not in HUES:
+        sys.exit(f"unexpected highlight group {hl}")
+    return name
 
 
-def shape_color(svg, shape):
-    fill = shape.fill
-    if fill.startswith("url("):
-        # A gradient: its first stop's color (a pattern has none and paints nothing here).
-        ref = fill[fill.index("#") + 1 : fill.rindex(")")]
-        stops = svg.xpath(f"//svg:*[@id='{ref}']/svg:stop")
-        if not stops:
-            return None
-        style = dict(p.split(":", 1) for p in stops[0].get("style", "").replace(" ", "").split(";") if ":" in p)
-        return hex_color(stops[0].get("stop-color") or style.get("stop-color") or "#000")
-    if fill in ("none", "transparent"):
-        return None
-    return hex_color(fill)
-
-
-def luminance(color):
-    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
-    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-
-
-def grey(color):
-    """A mid grey, like the slate of Symbols' folders: a colored badge on it names the icon's color."""
-    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
-    return (max(r, g, b) - min(r, g, b)) / max(r, g, b, 1) < 0.3 and 0.15 < luminance(color) < 0.85
-
-
-def combine(shape, path, operation):
-    try:
-        return pathops.op(shape, path, operation)
-    except pathops.PathOpsError:
-        pass
-    if operation == pathops.PathOp.INTERSECTION:
-        return pathops.Path()
-    merged = pathops.simplify(shape, clockwise=True)
-    merged.addPath(pathops.simplify(path, clockwise=operation == pathops.PathOp.UNION))
-    return merged
-
-
-def painted(svg):
-    """The SVG's filled shapes in paint order, as (Skia path, color, area)."""
-    for item in svg.shapes():
-        color = shape_color(svg, item)
-        if not color or item.opacity * item.fill_opacity <= 0:
-            continue
-        path = skia_path(item.as_cmd_seq(), item.fill_rule)
-        if abs(path.area):
-            yield path, color, abs(path.area)
-
-
-def mask_region(root, mask, view_box):
-    """A mask as the area it lets through: white shapes (any shape for an alpha mask) add, darker ones cut."""
-    alpha = "alpha" in (mask.get("style") or "") or mask.get("mask-type") == "alpha"
-    group = etree.Element(f"{{{SVG_NS}}}g", fill=mask.get("fill", "black"))
-    group.extend(deepcopy(child) for child in mask)
-    mini = etree.Element(f"{{{SVG_NS}}}svg", viewBox=view_box, nsmap={None: SVG_NS})
-    for defs in root.iter(f"{{{SVG_NS}}}defs"):
-        mini.append(deepcopy(defs))
-    mini.append(group)
-    region = pathops.Path()
-    for path, color, _ in painted(SVG.fromstring(etree.tostring(mini).decode()).topicosvg()):
-        region = combine(region, path, pathops.PathOp.UNION if alpha or luminance(color) >= 0.5 else pathops.PathOp.DIFFERENCE)
-    if all(mask.get(key) for key in ("x", "y", "width", "height")):
-        x, y, w, h = (float(mask.get(key)) for key in ("x", "y", "width", "height"))
-        bounds = pathops.Path()
-        bounds.moveTo(x, y), bounds.lineTo(x + w, y), bounds.lineTo(x + w, y + h), bounds.lineTo(x, y + h), bounds.close()
-        region = combine(region, bounds, pathops.PathOp.INTERSECTION)
-    return region
-
-
-def prepared(file):
-    """The SVG with what picosvg does not take turned into what it does: <style> classes inlined, masks as clip paths."""
-    root = etree.parse(str(file)).getroot()
-    for style in list(root.iter(f"{{{SVG_NS}}}style")):
-        for selector, body in re.findall(r"\.([\w-]+)\s*\{([^}]*)\}", style.text or ""):
-            for element in root.xpath(f"//*[contains(concat(' ', @class, ' '), ' {selector} ')]"):
-                for declaration in body.split(";"):
-                    if ":" in declaration:
-                        key, value = (part.strip() for part in declaration.split(":", 1))
-                        if element.get(key) is None:
-                            element.set(key, value)
-        style.getparent().remove(style)
-    for element in root.xpath("//*[@class]"):
-        del element.attrib["class"]
-    view_box = root.get("viewBox") or f"0 0 {root.get('width', 24)} {root.get('height', 24)}"
-    for mask in list(root.iter(f"{{{SVG_NS}}}mask")):
-        region = mask_region(root, mask, view_box)
-        users = root.xpath(f"//*[@mask='url(#{mask.get('id')})']")
-        mask.getparent().remove(mask)
-        for element in users:
-            del element.attrib["mask"]
-            if region.area == 0:
-                element.getparent().remove(element)
-                continue
-            clip = etree.SubElement(root, f"{{{SVG_NS}}}clipPath", id=f"{mask.get('id')}-clip")
-            etree.SubElement(clip, f"{{{SVG_NS}}}path", d=SVGPath.from_commands(svg_commands(region)).d)
-            if element.get("clip-path"):
-                wrapper = etree.Element(f"{{{SVG_NS}}}g", {"clip-path": f"url(#{clip.get('id')})"})
-                element.addprevious(wrapper)
-                wrapper.append(element)
-            else:
-                element.set("clip-path", f"url(#{clip.get('id')})")
-    return SVG.fromstring(etree.tostring(root).decode())
-
-
-def icon_color(file):
-    areas = {}
-    for _, color, area in painted(prepared(file).topicosvg()):
-        areas[color] = areas.get(color, 0) + area
-    if not areas:
-        return None
-    colored = {color: area for color, area in areas.items() if not grey(color)}
-    return max(colored or areas, key=(colored or areas).get)
-
-
-def build_large_font(source, names, codepoints):
-    """GentleNerdIcons.ttf: each named glyph scaled LARGE_SCALE about its centre, left edge kept, at LARGE_BASE + i."""
-    upem, hhea, os2 = source["head"].unitsPerEm, source["hhea"], source["OS/2"]
-    ascent, descent = hhea.ascent, hhea.descent
-    cmap, glyph_set, glyf = source.getBestCmap(), source.getGlyphSet(), source["glyf"]
-    advance = source["hmtx"][cmap[ord("a")]][0]
-    order, glyphs, metrics, mapping = [".notdef"], {".notdef": TTGlyphPen(None).glyph()}, {".notdef": (advance, 0)}, {}
-    for i, name in enumerate(names):
-        box = glyf[cmap[codepoints[name]]]
-        cy = (box.yMin + box.yMax) / 2
-        top, bottom = cy + (box.yMax - cy) * LARGE_SCALE, cy + (box.yMin - cy) * LARGE_SCALE
-        if top > ascent or bottom < descent:
-            sys.exit(f"{name} scaled to {bottom:.0f}..{top:.0f} leaves the line's {descent}..{ascent}")
-        pen = TTGlyphPen(None)
-        glyph_set[cmap[codepoints[name]]].draw(TransformPen(pen, (LARGE_SCALE, 0, 0, LARGE_SCALE, box.xMin * (1 - LARGE_SCALE), cy * (1 - LARGE_SCALE))))
-        glyph = pen.glyph()
-        glyph.recalcBounds(None)
-        order.append(name)
-        glyphs[name], metrics[name], mapping[LARGE_BASE + i] = glyph, (advance, glyph.xMin), name
-    fb = FontBuilder(upem, isTTF=True)
-    fb.setupGlyphOrder(order)
-    fb.setupCharacterMap(mapping)
-    fb.setupGlyf(glyphs)
-    fb.setupHorizontalMetrics(metrics)
-    fb.setupHorizontalHeader(ascent=ascent, descent=descent, lineGap=hhea.lineGap)
-    fb.setupOS2(sTypoAscender=os2.sTypoAscender, sTypoDescender=os2.sTypoDescender, sTypoLineGap=os2.sTypoLineGap,
-                usWinAscent=os2.usWinAscent, usWinDescent=os2.usWinDescent, xAvgCharWidth=advance, achVendID="NONE")
-    fb.setupPost(isFixedPitch=1)
-    fb.setupNameTable({
-        "familyName": "Gentle Nerd Icons",
-        "styleName": "Regular",
-        "copyright": "Glyphs from JetBrainsMono Nerd Font 3.5.1 (Nerd Fonts, https://www.nerdfonts.com), scaled 115%; "
-                     "glyph set notices in LICENSE-nerd-fonts",
-        "version": "Version 1.000",
-        "licenseDescription": "This Font Software is licensed under the SIL Open Font License, Version 1.1.",
-        "licenseInfoURL": "https://openfontlicense.org",
-    })
-    fb.font["head"].created = fb.font["head"].modified = FIXED_DATE
-    fb.save(LARGE_FONT)
-    tops = [glyph.yMax for glyph in glyphs.values() if hasattr(glyph, "yMax")]
-    bottoms = [glyph.yMin for glyph in glyphs.values() if hasattr(glyph, "yMin")]
-    rights = [glyph.xMax for glyph in glyphs.values() if hasattr(glyph, "xMax")]
-    return {code: name for code, name in mapping.items()}, (min(bottoms), max(tops), max(rights), advance)
+def resolve(name, files, extensions, default):
+    """mini.icons' 'file' lookup as the module does it."""
+    if name in files:
+        return files[name]
+    dot = name.find(".", 1)
+    if dot >= 0 and dot + 1 < len(name):
+        ext = name[dot + 1 :].lower()
+        while True:
+            if ext in extensions:
+                return extensions[ext]
+            nxt = ext.find(".")
+            if nxt < 0:
+                break
+            ext = ext[nxt + 1 :]
+    return default
 
 
 def grouped(entries):
-    """{key: icon} as {icon: "key key ..."}, keys sorted."""
+    """(glyph, hue) -> the keys drawn with it, in a stable order."""
     groups = {}
     for key, icon in sorted(entries.items()):
         groups.setdefault(icon, []).append(key)
-    return {icon: " ".join(keys) for icon, keys in groups.items()}
+    return sorted(groups.items(), key=lambda item: (ord(item[0][0]), item[0][1]))
+
+
+def ts_rows(groups):
+    rows = []
+    for (glyph, color), keys in groups:
+        for key in keys:
+            if " " in key or '"' in key or "\\" in key:
+                sys.exit(f"cannot list {key!r}")
+        rows.append(f'\t[0x{ord(glyph):X}, "{color}", "{" ".join(keys)}"],')
+    return "\n".join(rows)
 
 
 def main():
-    arguments = sys.argv[1:] + [None] * 3
-    repo, codepoints, font = pinned_checkout(arguments[0]), glyph_names(arguments[1]), arguments[2] or FONT
+    arguments = sys.argv[1:] + [None] * 2
+    checkout = Path(arguments[0] or CHECKOUT)
+    font = arguments[1] or FONT
+    head = subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    if head != PIN:
+        sys.exit(f"{checkout} is at {head}, not at the pin {PIN}")
+    source = (vim_runtime() / "lua" / "vim" / "filetype.lua").read_text()
+    dump = ask_mini_icons(checkout, filetype_keys(source, "filename") + SAMPLES + PATTERN_NAMES, filetype_keys(source, "extension"))
+
+    icon = lambda entry: (entry[0], hue(entry[1]))
+    default = icon(dump["default"])
+    extensions = {ext: icon(entry) for ext, entry in dump["extensions"].items() if not entry[2]}
+    # A compound extension mini.icons lists is kept when its own icon differs from its last part's.
+    extensions = {ext: found for ext, found in extensions.items() if "." not in ext or resolve("a." + ext.split(".", 1)[1], {}, extensions, default) != found}
+    files = {}
+    for name, entry in dump["files"].items():
+        if entry[2]:
+            continue
+        found = icon(entry)
+        if resolve(name, {}, extensions, default) != found:
+            files[name] = found
+
+    mismatches = [name for name, entry in dump["samples"].items() if resolve(name, files, extensions, default) != icon(entry)]
+    if mismatches:
+        sys.exit(f"resolved differently from mini.icons: {mismatches}")
+
     cmap = TTFont(font).getBestCmap()
-    theme_path = theme_json(repo)
-    theme = json.loads(theme_path.read_text())
-    definitions = theme["iconDefinitions"]
-    languages = theme.get("languageIds", {})
+    used = {default[0], *(glyph for glyph, _ in files.values()), *(glyph for glyph, _ in extensions.values())}
+    for glyph in used:
+        if len(glyph) != 1:
+            sys.exit(f"{glyph!r} is not one codepoint")
+    missing = sorted(f"U+{ord(glyph):X}" for glyph in used if ord(glyph) not in cmap)
+    if missing:
+        sys.exit(f"not in {font}: {missing}")
+    names = TTFont(font)["name"]
+    family, version = names.getDebugName(4), names.getDebugName(5)
+    # Neo-tree's own folder icons (defaults.lua at 47a8e3e): closed, open, empty, empty and open.
+    folders = [0xE5FF, 0xE5FE, 0xF0256, 0xF0DCF]
+    for code in folders:
+        if code not in cmap:
+            sys.exit(f"folder glyph U+{code:X} not in {font}")
+    codes = sorted({ord(glyph) for glyph in used} | set(folders))
 
-    def lowered(entries):
-        return {key.lower(): value for key, value in entries.items()}
-
-    file_names = lowered(theme.get("fileNames", {}))
-    extensions = lowered(theme.get("fileExtensions", {}))
-    for ext, language in LANGUAGE_EXTENSIONS.items():
-        if ext not in extensions and language in languages:
-            extensions[ext] = languages[language]
-    for name, language in LANGUAGE_FILENAMES.items():
-        if name not in file_names and language in languages:
-            file_names[name] = languages[language]
-    folders = lowered(theme.get("folderNames", {}))
-    folders_open = lowered(theme.get("folderNamesExpanded", {}))
-    defaults = {"file": theme["file"], "folder": theme["folder"], "folderOpen": theme.get("folderExpanded", theme["folder"])}
-
-    referenced = sorted({*defaults.values(), *file_names.values(), *extensions.values(), *folders.values(), *folders_open.values()})
-    colors, skipped = {}, []
-    for icon in referenced:
-        definition = definitions.get(icon)
-        if not definition or "iconPath" not in definition:
-            skipped.append(f"{icon} (no iconPath)")
-            continue
-        try:
-            color = icon_color((theme_path.parent / definition["iconPath"]).resolve())
-        except Exception as error:  # noqa: BLE001 - reported, the icon falls back to the default
-            skipped.append(f"{icon} ({type(error).__name__}: {error})")
-            continue
-        if color is None:
-            skipped.append(f"{icon} (nothing filled)")
-            continue
-        colors[icon] = color
-    for name, icon in defaults.items():
-        if icon not in colors:
-            sys.exit(f"the default {name} icon {icon} has no color")
-
-    file_icons = sorted(icon for icon in colors if not icon.startswith("folder"))
-    unmapped = [icon for icon in file_icons if icon not in GLYPH]
-    if unmapped:
-        sys.exit(f"Symbols icons with no GLYPH entry (add one, None for the generic file glyph): {', '.join(unmapped)}")
-    glyph = {icon: GLYPH[icon] or FILE for icon in file_icons}
-    used = sorted({FILE, FOLDER, FOLDER_OPEN, *glyph.values()})
-    for name in used:
-        if name not in codepoints:
-            sys.exit(f"{name} is not in nerd-fonts {NERD_TAG} glyphnames.json")
-        if codepoints[name] not in cmap:
-            sys.exit(f"{name} (U+{codepoints[name]:X}) is not in {font}")
-    family = TTFont(font)["name"].getDebugName(4)
-    version = TTFont(font)["name"].getDebugName(5)
-    if not version.endswith(f"Nerd Fonts {NERD_TAG[1:]}"):
-        sys.exit(f"{font} is {version}, not Nerd Fonts {NERD_TAG[1:]}")
-    large, (lowest, highest, rightmost, advance) = build_large_font(TTFont(font), used, codepoints)
-    large_code = {name: code for code, name in large.items()}
-
-    keep = lambda entries: {key: value for key, value in entries.items() if value in colors}
-    file_names, extensions, folders, folders_open = map(keep, (file_names, extensions, folders, folders_open))
-    by_name, by_extension = grouped(file_names), grouped(extensions)
-    by_folder, by_folder_open = grouped(folders), grouped(folders_open)
-
-    files = "".join(
-        f"\t{json.dumps(icon)}: [{json.dumps(glyph[icon])}, {json.dumps(colors[icon])}, "
-        f"{json.dumps(by_name.get(icon, ''))}, {json.dumps(by_extension.get(icon, ''))}],\n"
-        for icon in file_icons
-        if icon in by_name or icon in by_extension or icon == defaults["file"]
-    )
-    folder_icons = sorted({*by_folder, *by_folder_open, defaults["folder"], defaults["folderOpen"]})
-    folder_rows = "".join(
-        f"\t{json.dumps(icon)}: [{json.dumps(colors[icon])}, {json.dumps(by_folder.get(icon, ''))}, {json.dumps(by_folder_open.get(icon, ''))}],\n"
-        for icon in folder_icons
-    )
-    glyph_rows = "".join(f"\t{json.dumps(name)}: 0x{codepoints[name]:X},\n" for name in used)
-    large_rows = "".join(f"\t{json.dumps(name)}: 0x{large_code[name]:X},\n" for name in used)
     MODULE.write_text(
         "// Generated by fonts/build-nerd-icons.py: do not edit. Regenerate with\n"
-        "//   uv run --no-project --with fonttools==4.68.0 --with picosvg python fonts/build-nerd-icons.py \\\n"
-        "//     [vscode-symbols checkout] [glyphnames.json] [JetBrainsMonoNerdFont-Regular.ttf]\n"
+        "//   uv run --no-project --with fonttools==4.68.0 python fonts/build-nerd-icons.py [mini.icons checkout] [font]\n"
         "//\n"
-        f"// Miguel Solorio's Symbols icon theme for VS Code ({REPO} at {PIN[:7]}, MIT License, see\n"
-        "// fonts/LICENSE-vscode-symbols) drawn with Nerd Font glyphs (nerd-fonts " + NERD_TAG + "): Symbols' maps pick\n"
-        "// the icon and its color, the glyph is the Nerd Font icon standing for it (seti and devicons for languages and\n"
-        "// tools, codicons for the rest), one cell wide. nerdIcon() picks a row's icon as VS Code does: the file name,\n"
-        "// then its longest extension, then the default file icon; folders by name, closed or open.\n"
-        "// Each icon also names its `large` twin: the same glyph 15% larger in fonts/GentleNerdIcons.ttf, for terminals\n"
-        "// with that font installed (the caller picks char or large).\n"
-        "// @ts-nocheck\n\n"
-        "export interface NerdIcon {\n\tchar: string;\n\tlarge: string;\n\tcolor: string;\n}\n\n"
-        f"// Glyph name -> codepoint, each one checked present in {family} {version.split(';')[0]}'s cmap.\n"
-        f"export const GLYPHS: Record<string, number> = {{\n{glyph_rows}}};\n\n"
-        "// Glyph name -> its 115% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).\n"
-        f"export const LARGE: Record<string, number> = {{\n{large_rows}}};\n\n"
-        "// Symbols file icon -> [glyph, color, lowercase file names, lowercase extensions].\n"
-        f"const FILES: Record<string, [string, string, string, string]> = {{\n{files}}};\n\n"
-        "// Symbols folder icon -> [color, lowercase folder names, lowercase names when open].\n"
-        f"const FOLDERS: Record<string, [string, string, string]> = {{\n{folder_rows}}};\n\n"
-        "const icon = (glyph: string, color: string): NerdIcon => ({\n"
-        "\tchar: String.fromCodePoint(GLYPHS[glyph]),\n"
-        "\tlarge: String.fromCodePoint(LARGE[glyph]),\n"
-        "\tcolor,\n"
-        "});\n"
-        "const index = (rows, column: number, make) => {\n"
+        f"// The file icons Neo-tree draws in LazyVim: mini.icons (https://github.com/nvim-mini/mini.icons at {PIN[:7]}, MIT\n"
+        "// License, see fonts/LICENSE-mini-icons; LazyVim mocks nvim-web-devicons with it) with LazyVim's options, read from\n"
+        "// mini.icons itself in a headless Neovim. nerdIcon() resolves a name as mini.icons does: the exact file name\n"
+        "// (case-sensitive), then the extension after the first dot that is not the leading one, longest first\n"
+        "// (\"a.test.ts\" tries \"test.ts\", then \"ts\"; lowercased), then the default file icon. Folders draw Neo-tree's own\n"
+        "// folder icons (closed, open, empty). Glyphs are one cell of the terminal's Nerd Font, at its own size.\n"
+        "// The color is a Pi theme role: mini.icons' highlight groups link to the colorscheme's (MiniIconsAzure to\n"
+        "// Function, MiniIconsRed to DiagnosticError, ...), so they are painted with the closest roles of Pi's theme\n"
+        "// (HUE_ROLES); folders with Neo-tree's Directory color, Pi's accent.\n"
+        "// @ts-nocheck\n"
+        "\n"
+        "export interface NerdIcon {\n"
+        "\tchar: string;\n"
+        "\t/** A Pi theme role, for host.fg. */\n"
+        "\tcolor: string;\n"
+        "}\n"
+        "\n"
+        "export type Hue = " + " | ".join(f'"{name}"' for name in HUES) + ";\n"
+        "\n"
+        "// mini.icons' highlight groups (what each links to in mini.icons) as Pi theme roles.\n"
+        "export const HUE_ROLES: Record<Hue, string> = {\n"
+        '\tazure: "syntaxFunction", // Function\n'
+        '\tblue: "mdLink", // DiagnosticInfo\n'
+        '\tcyan: "mdCode", // DiagnosticHint\n'
+        '\tgreen: "success", // DiagnosticOk\n'
+        '\tgrey: "text", // no color: Normal\n'
+        '\torange: "warning", // DiagnosticWarn\n'
+        '\tpurple: "syntaxNumber", // Constant\n'
+        '\tred: "error", // DiagnosticError\n'
+        '\tyellow: "warning", // DiagnosticWarn\n'
+        "};\n"
+        "// Neo-tree's NeoTreeDirectoryIcon links to Directory, the colorscheme's blue: Pi's accent.\n"
+        'export const FOLDER_ROLE = "accent";\n'
+        "\n"
+        f"// Every codepoint drawn, each one checked present in {family} {version.split(';')[0]}'s cmap.\n"
+        "export const GLYPHS: number[] = [\n" + "".join(f"\t{', '.join(f'0x{code:X}' for code in codes[at:at + 12])},\n" for at in range(0, len(codes), 12)) + "];\n"
+        "\n"
+        "// [codepoint, hue, file names drawn with it] for names whose icon differs from their extension's.\n"
+        "const FILE_NAMES: [number, Hue, string][] = [\n" + ts_rows(grouped(files)) + "\n];\n"
+        "\n"
+        "// [codepoint, hue, extensions drawn with it], lowercase, without the leading dot.\n"
+        "const EXTENSIONS: [number, Hue, string][] = [\n" + ts_rows(grouped(extensions)) + "\n];\n"
+        "\n"
+        "const icon = (code: number, color: string): NerdIcon => ({ char: String.fromCodePoint(code), color });\n"
+        "const index = (rows: [number, Hue, string][]) => {\n"
         "\tconst found: Record<string, NerdIcon> = {};\n"
-        "\tfor (const [id, row] of Object.entries(rows)) for (const key of row[column].split(\" \").filter(Boolean)) found[key] = make(id, row);\n"
+        "\tfor (const [code, hue, keys] of rows) {\n"
+        "\t\tconst made = icon(code, HUE_ROLES[hue]);\n"
+        "\t\tfor (const key of keys.split(\" \")) found[key] = made;\n"
+        "\t}\n"
         "\treturn found;\n"
         "};\n"
-        "const fileIcon = (_id: string, [glyph, color]) => icon(glyph, color);\n\n"
-        f"export const file = fileIcon(\"\", FILES[{json.dumps(defaults['file'])}]);\n"
-        f"export const folder = icon({json.dumps(FOLDER)}, FOLDERS[{json.dumps(defaults['folder'])}][0]);\n"
-        f"export const folderOpen = icon({json.dumps(FOLDER_OPEN)}, FOLDERS[{json.dumps(defaults['folderOpen'])}][0]);\n"
-        "export const byFileName = index(FILES, 2, fileIcon);\n"
-        "export const byExtension = index(FILES, 3, fileIcon);\n"
-        f"export const byFolderName = index(FOLDERS, 1, (_id, [color]) => icon({json.dumps(FOLDER)}, color));\n"
-        f"export const byFolderNameOpen = {{\n"
-        f"\t...index(FOLDERS, 1, (_id, [color]) => icon({json.dumps(FOLDER_OPEN)}, color)),\n"
-        f"\t...index(FOLDERS, 2, (_id, [color]) => icon({json.dumps(FOLDER_OPEN)}, color)),\n"
-        "};\n\n"
-        "/** The icon of a file or folder named `name` (no path): exact name, longest extension, default. */\n"
-        "export function nerdIcon(name: string, { isDirectory = false, open = false } = {}): NerdIcon {\n"
-        "\tconst lower = String(name).toLowerCase();\n"
-        "\tif (isDirectory) return (open ? byFolderNameOpen[lower] || folderOpen : byFolderName[lower] || folder);\n"
-        "\tif (byFileName[lower]) return byFileName[lower];\n"
-        "\t// \"a.test.ts\" tries \"test.ts\", then \"ts\"; \".eslintrc.json\" tries \"eslintrc.json\", then \"json\".\n"
-        "\tfor (let dot = lower.indexOf(\".\"); dot >= 0; dot = lower.indexOf(\".\", dot + 1)) {\n"
-        "\t\tconst found = byExtension[lower.slice(dot + 1)];\n"
-        "\t\tif (found) return found;\n"
+        "\n"
+        f'export const file = icon(0x{ord(default[0]):X}, HUE_ROLES["{default[1]}"]);\n'
+        "export const folder = icon(0xE5FF, FOLDER_ROLE);\n"
+        "export const folderOpen = icon(0xE5FE, FOLDER_ROLE);\n"
+        "export const folderEmpty = icon(0xF0256, FOLDER_ROLE);\n"
+        "export const folderEmptyOpen = icon(0xF0DCF, FOLDER_ROLE);\n"
+        "export const byFileName = index(FILE_NAMES);\n"
+        "export const byExtension = index(EXTENSIONS);\n"
+        "\n"
+        "/** The icon of a file or folder named `name` (no path), as Neo-tree draws it in LazyVim. */\n"
+        "export function nerdIcon(name: string, { isDirectory = false, open = false, empty = false } = {}): NerdIcon {\n"
+        "\tif (isDirectory) return empty ? (open ? folderEmptyOpen : folderEmpty) : open ? folderOpen : folder;\n"
+        "\tname = String(name);\n"
+        "\tif (Object.hasOwn(byFileName, name)) return byFileName[name];\n"
+        "\t// The extension starts after the first dot that is not the name's first character.\n"
+        "\tconst dot = name.indexOf(\".\", 1);\n"
+        "\tif (dot < 0) return file;\n"
+        "\tfor (let ext = name.slice(dot + 1).toLowerCase(); ext; ext = ext.includes(\".\") ? ext.slice(ext.indexOf(\".\") + 1) : \"\") {\n"
+        "\t\tif (Object.hasOwn(byExtension, ext)) return byExtension[ext];\n"
         "\t}\n"
         "\treturn file;\n"
         "}\n"
     )
-    fallbacks = sorted(icon for icon in file_icons if GLYPH[icon] is None)
-    print(f"vscode-symbols {PIN} ({theme_path.relative_to(repo)}), nerd-fonts {NERD_TAG}, {family} {version}")
-    print(f"{len(file_icons)} file icons ({len(file_icons) - len(fallbacks)} mapped, {len(fallbacks)} on the generic file glyph), "
-          f"{len(folder_icons)} folder colors, {len(used)} glyphs")
-    print(f"maps: {len(file_names)} file names, {len(extensions)} extensions, {len(folders)} folder names, {len(folders_open)} open folder names")
-    print(f"fallbacks: {' '.join(fallbacks)}")
-    for line in skipped:
-        print(f"skipped {line}")
-    print(f"wrote {MODULE.relative_to(ROOT)}")
-    print(f"wrote {LARGE_FONT.relative_to(ROOT)}: {len(large)} glyphs at U+{min(large):X}..U+{max(large):X}, "
-          f"ink {lowest}..{highest} (line {TTFont(font)['hhea'].descent}..{TTFont(font)['hhea'].ascent}), "
-          f"rightmost {rightmost} (advance {advance}, icon and two spaces {advance * 3})")
+    print(f"{len(files)} file names, {len(extensions)} extensions, {len(codes)} glyphs checked in {family} {version.split(';')[0]}")
 
 
-main()
+if __name__ == "__main__":
+    main()

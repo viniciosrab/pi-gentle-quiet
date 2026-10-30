@@ -29,7 +29,7 @@ same; only how it is drawn changes.
   tree (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
   usage (a click opens `/gentle:profiles`); **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
   some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
-  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
+  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source); **PR** the repository's open pull requests from `gh`, one per row with a checks summary (✓ ✗ ⧗),
@@ -40,14 +40,15 @@ same; only how it is drawn changes.
   `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order. You can also
   drag a tab sideways in the bar and drop it at a new place; the order is saved the same way.
 - **Nerd Font icons in TREE.** With **Blocks** → Tree icons: nerd in `/gentle-quiet` (emoji by default),
-  the TREE tab draws its file and folder icons with your terminal's Nerd Font glyphs, picked and colored as
-  [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
-  ([MIT](fonts/LICENSE-vscode-symbols)), picks its icons: by file name, extension and folder name, each in
-  Symbols' color. No extra font to install. For icons about 15% larger, optionally install the same glyphs
-  scaled up: `cp fonts/GentleNerdIcons.ttf ~/.local/share/fonts/ && fc-cache -f`, then reopen the terminal
-  (TREE uses it when it is in `~/.local/share/fonts` or `~/.fonts`, and keeps the Nerd Font glyphs otherwise;
-  [OFL 1.1 and glyph set notices](fonts/LICENSE-nerd-fonts)). `fonts/build-nerd-icons.py` regenerates the
-  mapping and the font.
+  the TREE tab draws its file and folder icons as Neo-tree draws them in LazyVim (what `omarchy-launch-editor`
+  opens): the glyph [mini.icons](https://github.com/nvim-mini/mini.icons) picks for the file
+  ([MIT](fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
+  Nerd Font at its own size, painted with your Pi theme's colors. No extra font to install.
+  `fonts/build-nerd-icons.py` regenerates the mapping from mini.icons in a headless Neovim.
+- **Hidden items in TREE, as Neo-tree.** Dotfiles, git-ignored files and build folders (`node_modules`,
+  `dist`, `.git`…) are hidden, and each folder level that hid some ends with a dim "(n hidden items)" row.
+  Click that row, or set **Blocks** → Tree hidden items: show in `/gentle-quiet`, to list them (dim); the
+  setting is saved.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
