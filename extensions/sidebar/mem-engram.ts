@@ -1,21 +1,20 @@
 // The Engram side of the MEM tab, after pi-cinlodev-cute's src/engram/engram-client.ts: the local server's
-// health, stats, sync state and pending items (observations due for review, relations waiting for judgment)
-// over HTTP, one observation by id (GET only), the project's cloud enrollment, the latest session summary from
-// the engram CLI, and the cloud commands behind the card's buttons. Every call has a short timeout and
-// resolves to undefined (or { ok: false }) on any failure; nothing here throws.
+// health, its projects' counts and pending items (observations due for review, relations waiting for judgment)
+// over HTTP, one observation by id (GET only), the database's size on disk (stat only) and the latest session
+// summary from the engram CLI. No cloud: nothing here reads the cloud config or runs a cloud command. Every
+// call has a short timeout and resolves to undefined (or { ok: false }) on any failure; nothing here throws.
 //
 // The I/O goes through `deps` (defaultDeps() below), so tests hand in stand-ins.
 // @ts-nocheck
 
-import { execFile, spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 export const DEFAULT_ENGRAM_PORT = 7437;
 const HTTP_TIMEOUT = 1200;
 const CLI_TIMEOUT = 2500;
-const SYNC_TIMEOUT = 15000;
 
 export function defaultDeps() {
 	return {
@@ -49,15 +48,11 @@ export function defaultDeps() {
 				return undefined;
 			}
 		},
-		open(url) {
+		async statSize(file) {
 			try {
-				const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-				const child = spawn(opener, [url], { detached: true, stdio: "ignore" });
-				child.on("error", () => {});
-				child.unref();
-				return true;
+				return (await stat(file)).size;
 			} catch {
-				return false;
+				return undefined;
 			}
 		},
 	};
@@ -119,39 +114,38 @@ export async function detectProjectName(cwd, deps, endpoint = engramEndpoint(dep
 	return path.basename(path.resolve(cwd));
 }
 
-/** The cloud server from ~/.engram/cloud.json: only its URL is kept. */
-export async function loadCloudConfig(deps) {
-	const serverUrl = given((await readJson(deps, path.join(dataDir(deps), "cloud.json")))?.server_url);
-	return serverUrl ? { serverUrl } : undefined;
-}
-
-/** The project's dashboard: on the cloud server when one is configured, else on the local one. */
-export function dashboardUrl(cloud, project, endpoint) {
-	const base = cloud?.serverUrl ? cloud.serverUrl.replace(/\/+$/, "") : (endpoint?.url ?? `http://127.0.0.1:${DEFAULT_ENGRAM_PORT}`);
-	return project ? `${base}/dashboard/projects/${encodeURIComponent(project)}` : `${base}/dashboard/`;
-}
-
-/** The host the Cloud row names: the cloud server's, or "localhost". */
-export function cloudHost(cloud, endpoint) {
-	try {
-		if (cloud?.serverUrl) return new URL(cloud.serverUrl).hostname;
-		const host = endpoint ? new URL(endpoint.url).hostname : "localhost";
-		return host === "127.0.0.1" || host === "::1" ? "localhost" : host;
-	} catch {
-		return "localhost";
+/** Bytes as "512 B", "1.5 KB", "21.9 MB", "2.0 GB" (1024-based); undefined for no number. */
+export function formatBytes(bytes) {
+	if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return undefined;
+	if (bytes < 1024) return `${Math.round(bytes)} B`;
+	const units = ["KB", "MB", "GB", "TB"];
+	let value = bytes / 1024;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit++;
 	}
+	return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-/** Enrolled for cloud sync: sqlite3 on Engram's store first (fast), else `engram cloud status`. */
-export async function checkEnrolled(project, deps) {
+/** Engram's store on disk: engram.db with its -wal and -shm; undefined without engram.db. */
+export async function databaseSize(deps) {
 	const db = path.join(dataDir(deps), "engram.db");
-	const query = `SELECT 1 FROM sync_enrolled_projects WHERE project = '${project.replace(/'/g, "''")}' LIMIT 1;`;
-	const sqlite = await deps.run("sqlite3", ["-readonly", db, query], 1500);
-	if (sqlite.ok) return sqlite.stdout.trim() === "1";
-	const status = await deps.run(engramBin(deps.env), ["cloud", "status", "--project", project], cliTimeout(deps));
-	if (!status.ok) return false;
-	const line = (status.stdout.match(/Project enrollment:\s*(.*)/i)?.[1] ?? "").trim().toLowerCase();
-	return line.startsWith("enrolled");
+	const [main, wal, shm] = await Promise.all(["", "-wal", "-shm"].map((suffix) => deps.statSize(`${db}${suffix}`)));
+	if (typeof main !== "number") return undefined;
+	return [main, wal, shm].reduce((sum, size) => sum + (typeof size === "number" ? size : 0), 0);
+}
+
+const count = (value) => (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0);
+
+/** GET /projects as this project's counts and the totals across projects; undefined without an answer. */
+export function projectCounts(answer, project) {
+	if (!Array.isArray(answer?.projects)) return undefined;
+	const entry = answer.projects.find((item) => item?.name === project);
+	return {
+		project: { observations: count(entry?.observation_count), sessions: count(entry?.session_count), prompts: count(entry?.prompt_count) },
+		all: { observations: answer.projects.reduce((sum, item) => sum + count(item?.observation_count), 0), projects: answer.projects.length },
+	};
 }
 
 /** Everything the Engram card draws, for the project at `cwd`. */
@@ -161,25 +155,20 @@ export async function fetchSnapshot(cwd, deps) {
 	if (!project) return { project: undefined, endpoint, at: deps.now() };
 	const get = (route) => (endpoint ? deps.fetchJson(`${endpoint.url}${route}`, httpTimeout(deps)) : Promise.resolve(undefined));
 	const query = `?project=${encodeURIComponent(project)}`;
-	const [health, stats, sync, enrolled, cloud, review, conflicts] = await Promise.all([
+	const [health, projects, review, conflicts, dbSize] = await Promise.all([
 		get("/health"),
-		get(`/stats${query}`),
-		get(`/sync/status${query}`),
-		checkEnrolled(project, deps),
-		loadCloudConfig(deps),
+		get("/projects"),
 		get(`/review${query}&limit=100`),
 		get(`/conflicts/stats${query}`),
+		databaseSize(deps).catch(() => undefined),
 	]);
-	const count = (value) => (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0);
 	return {
 		project,
 		endpoint,
 		healthy: health?.status === "ok",
-		version: health?.version,
-		stats: stats ? { observations: Number(stats.total_observations ?? 0), sessions: Number(stats.total_sessions ?? 0), prompts: Number(stats.total_prompts ?? 0) } : undefined,
-		sync: sync ? { enabled: Boolean(sync.enabled), phase: String(sync.phase || "idle"), lastSyncAt: sync.last_sync_at ? String(sync.last_sync_at) : null } : undefined,
-		enrolled,
-		cloud,
+		version: given(health?.version),
+		counts: projectCounts(projects, project),
+		dbSize,
 		pending: { review: count(review?.count ?? review?.observations?.length), conflicts: count(conflicts?.by_judgment_status?.pending) },
 		at: deps.now(),
 	};
@@ -233,18 +222,6 @@ export async function fetchHandoff(project, deps) {
 	const records = parseHandoffs(result.stdout);
 	if (!records.length) return null;
 	return records.reduce((best, record) => (recordTime(record) > recordTime(best) || (recordTime(record) === recordTime(best) && Number(record.id) > Number(best.id)) ? record : best));
-}
-
-/** The card's cloud buttons: enroll, unenroll, sync now. */
-export async function cloudCommand(kind, project, deps) {
-	const bin = engramBin(deps.env);
-	const result =
-		kind === "sync" ? await deps.run(bin, ["sync", "--cloud", "--project", project], SYNC_TIMEOUT)
-		: await deps.run(bin, ["cloud", kind, project], 5000);
-	const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-	const success = result.ok && (kind === "sync" ? !/failed|error/i.test(output) : /enrolled|✓/.test(output));
-	const message = (success ? output : result.message || output || "failed").split("\n")[0].trim();
-	return { success, message };
 }
 
 /** "just now", "30s ago", "5m ago", "3h ago", "2d ago"; "never" without a date. */

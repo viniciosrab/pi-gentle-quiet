@@ -1,10 +1,10 @@
 // The MEM tab of gentle-quiet's side column, after pi-cinlodev-cute's MEM tab; the contract is in ./tabs.ts.
 // Cards, top to bottom, as cute stacks them:
-//   Engram          the local server's health and observation count, the cloud host with "dashboard ↗"
-//                   (opens the project's dashboard), sync state and the enroll / unsync / sync now buttons
-//                   (enroll and unsync ask for a second click), and "⚑ 3 to review · 1 conflict" when Engram
-//                   has observations due for review or relations waiting for judgment. A click on the title
-//                   collapses it to one row.
+//   Engram          local essentials only, no cloud: the local server's status and version, this project's
+//                   memories, sessions and prompts, the memories across all projects, the database's size on
+//                   disk, and "⚑ 3 to review · 1 conflict" when Engram has observations due for review or
+//                   relations waiting for judgment. A click on the title collapses it to one row; its rows
+//                   are not actions.
 //   Active Handoff  the project's latest session summary, folded to one row (`#920 · 1h ago · <goal>`); a
 //                   click on the title or the card toggles the full text. Without one, a click fetches again.
 //   Saved this session     the memories the agent saved or updated in this Pi session (./mem-session.ts).
@@ -17,12 +17,11 @@
 // package of this stack writes that store.
 //
 // Data loads asynchronously (./mem-engram.ts) and is cached: Engram for 10 s, the handoff for 15 s, the
-// session's memories until the session changes. render() only reads the caches. Nothing here writes to Engram
-// but the card's cloud buttons.
+// session's memories until the session changes. render() only reads the caches. Nothing here writes to Engram.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { cloudCommand, cloudHost, dashboardUrl, defaultDeps, fetchHandoff, fetchObservation, fetchSnapshot, relativeTime } from "./mem-engram.ts";
+import { defaultDeps, fetchHandoff, fetchObservation, fetchSnapshot, formatBytes, relativeTime } from "./mem-engram.ts";
 import { scanSession } from "./mem-session.ts";
 import { engramInstalled } from "./mem-stack.ts";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
@@ -30,10 +29,10 @@ import { openPreview } from "./tree-preview.ts";
 
 const ENGRAM_TTL = 10_000;
 const HANDOFF_TTL = 15_000;
-const NOTICE_MS = 4000;
-const CONFIRM_MS = 6000;
 
 const join = (icon, text) => (icon ? `${icon} ${text}` : text);
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const memoriesOf = (n) => `${n} ${n === 1 ? "memory" : "memories"}`;
 
 /** `left` and `right` on one row `inner` wide, `right` flush right; `left` is cut first. */
 function pair(left, right, inner) {
@@ -83,14 +82,10 @@ export function createMemTab(host, deps) {
 		loadingHandoff: false,
 		engramOpen: true,
 		handoffOpen: false,
-		confirming: null, // "enroll" | "unenroll"
-		notice: null,
 		session: { key: undefined, memories: undefined },
 		targets: new Map(), // row -> action, from the last render
 		disposed: false,
 	};
-	let noticeTimer;
-	let confirmTimer;
 	const redraw = () => {
 		if (!s.disposed) host.requestRender();
 	};
@@ -151,40 +146,6 @@ export function createMemTab(host, deps) {
 		}
 	};
 
-	const flash = (message) => {
-		s.notice = message;
-		clearTimeout(noticeTimer);
-		noticeTimer = setTimeout(() => {
-			s.notice = null;
-			redraw();
-		}, NOTICE_MS);
-		noticeTimer.unref?.();
-		redraw();
-	};
-	const resetConfirm = () => {
-		clearTimeout(confirmTimer);
-		s.confirming = null;
-	};
-	const confirm = (kind) => {
-		s.confirming = kind;
-		clearTimeout(confirmTimer);
-		confirmTimer = setTimeout(() => {
-			s.confirming = null;
-			redraw();
-		}, CONFIRM_MS);
-		confirmTimer.unref?.();
-		redraw();
-	};
-	const runCloud = async (kind, project, doing, done, failed) => {
-		resetConfirm();
-		flash(`${doing} ${project}…`);
-		const result = await cloudCommand(kind, project, deps).catch((error) => ({ success: false, message: String(error?.message ?? error) }));
-		if (result.success) {
-			flash(`✓ ${project} ${done}`);
-			loadSnapshot(true);
-		} else flash(`⚠ ${failed}: ${result.message.slice(0, 30)}`);
-	};
-
 	// A card from host.card, with its title and rows' actions placed at the rows they landed on. The
 	// outline adds a row above the title (and one under the rows); without it the title is the first row.
 	const place = (out, title, items, width, titleAction) => {
@@ -204,7 +165,6 @@ export function createMemTab(host, deps) {
 		const snap = s.snapshot;
 		const icon = host.icons?.memory;
 		const toggle = () => {
-			resetConfirm();
 			s.engramOpen = !s.engramOpen;
 			redraw();
 		};
@@ -216,58 +176,30 @@ export function createMemTab(host, deps) {
 			place(out, join(icon, "Engram"), [{ text: fg("muted", snap.failed ? "Engram could not be read" : "No project: Pi has no working directory") }], width);
 			return;
 		}
-		const project = snap.project;
-		const title = pair(`${icon ? `${icon} ` : ""}Engram: ${project}`, fg("dim", s.engramOpen ? "▲" : "▼"), inner);
-		const observations = snap.stats?.observations ?? 0;
+		const title = pair(`${icon ? `${icon} ` : ""}Engram: ${snap.project}`, fg("dim", s.engramOpen ? "▲" : "▼"), inner);
+		const size = formatBytes(snap.dbSize);
 		if (!s.engramOpen) {
-			const dot = snap.healthy ? fg("success", "●") : fg("error", "○");
-			const badge = snap.enrolled ? fg("success", "cloud✓") : fg("dim", "local");
-			place(out, title, [{ text: `${dot} ${observations} obs · ${badge}` }], width, toggle);
+			const dot = snap.healthy ? fg("success", "●") : fg("warning", "○");
+			const summary = [snap.counts && memoriesOf(snap.counts.project.observations), size].filter(Boolean).join(" · ");
+			place(out, title, [{ text: summary ? `${dot} ${summary}` : dot }], width, toggle);
 			return;
 		}
+		const row = (label, value) => ({ text: pair(fg("muted", label), value, inner) });
 		const items = [];
-		if (s.notice) items.push({ text: fg("warning", /^[✓⚠]/.test(s.notice) ? s.notice : `⚡ ${s.notice}`) });
 		const daemon =
-			!snap.endpoint ? fg("error", "○ Unreachable")
-			: snap.healthy ? `${fg("success", "● Online")} · ${fg("accent", `${observations} obs`)}`
-			: fg("error", "○ Down");
-		items.push({ text: pair(fg("text", `Local (${snap.endpoint?.label ?? "private"})`), daemon, inner) });
+			!snap.endpoint ? fg("warning", "○ Unreachable")
+			: snap.healthy ? `${fg("success", "● Online")}${snap.version ? fg("muted", ` · v${snap.version.replace(/^v/, "")}`) : ""}`
+			: fg("warning", "○ Offline");
+		items.push(row(`Local (${snap.endpoint?.label ?? "private"})`, daemon));
+		if (snap.counts) {
+			const { project, all } = snap.counts;
+			items.push(row("This project", fg("text", `${memoriesOf(project.observations)} · ${plural(project.sessions, "session")} · ${plural(project.prompts, "prompt")}`)));
+			items.push(row("All projects", fg("text", `${memoriesOf(all.observations)} · ${plural(all.projects, "project")}`)));
+		}
+		if (size) items.push(row("Database", fg("text", size)));
 		const { review = 0, conflicts = 0 } = snap.pending ?? {};
 		const pending = [review && `${review} to review`, conflicts && `${conflicts} conflict${conflicts === 1 ? "" : "s"}`].filter(Boolean);
 		if (pending.length) items.push({ text: fg("warning", truncateToWidth(`⚑ ${pending.join(" · ")}`, inner, "…")) });
-		items.push({ text: fg("border", "─".repeat(Math.max(0, inner))) });
-		items.push({
-			text: pair(`${fg("text", "Cloud:")} ${fg("dim", cloudHost(snap.cloud, snap.endpoint))}`, fg("accent", "dashboard ↗"), inner),
-			action: () => {
-				resetConfirm();
-				const opened = (() => {
-					try {
-						return deps.open(dashboardUrl(snap.cloud, project, snap.endpoint));
-					} catch {
-						return false;
-					}
-				})();
-				flash(opened ? `Opening ${project} in the browser…` : "Could not open the browser.");
-			},
-		});
-		const label = (text) => `   ${fg("dim", text)}`;
-		if (snap.enrolled) {
-			const state = snap.sync?.phase === "syncing" ? fg("warning", "⟳ Syncing…") : fg("success", `● Enrolled (${relativeTime(snap.sync?.lastSyncAt, deps.now())})`);
-			items.push({ text: pair(label("Sync:"), state, inner) });
-			items.push({ text: pair(label("Push:"), fg("accent", "sync now ⟳"), inner), action: () => runCloud("sync", project, "Syncing", "synced", "Sync failed") });
-			const asking = s.confirming === "unenroll";
-			items.push({
-				text: pair(label("Action:"), fg("error", asking ? "Unsync? [click = yes]" : "unsync ✕"), inner),
-				action: () => (asking ? runCloud("unenroll", project, "Unsyncing", "unsynced", "Unsync failed") : confirm("unenroll")),
-			});
-		} else {
-			items.push({ text: pair(label("State:"), fg("dim", "○ Not synced"), inner) });
-			const asking = s.confirming === "enroll";
-			items.push({
-				text: pair(label("Action:"), fg("success", asking ? "Enroll repo? [click = yes]" : "+ enroll repo"), inner),
-				action: () => (asking ? runCloud("enroll", project, "Enrolling", "enrolled", "Enroll failed") : confirm("enroll")),
-			});
-		}
 		place(out, title, items, width, toggle);
 	};
 
@@ -410,11 +342,6 @@ export function createMemTab(host, deps) {
 					.catch(() => {});
 				return true;
 			}
-			if (s.confirming) {
-				resetConfirm();
-				redraw();
-				return true;
-			}
 			return false;
 		},
 		onShow() {
@@ -425,8 +352,6 @@ export function createMemTab(host, deps) {
 		},
 		dispose() {
 			s.disposed = true;
-			clearTimeout(noticeTimer);
-			clearTimeout(confirmTimer);
 		},
 	};
 }
