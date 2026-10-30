@@ -17,7 +17,7 @@
 # Every glyph is checked present in JetBrainsMono Nerd Font's cmap; the module lists the codepoints it checked.
 #
 # It also writes fonts/GentleNerdIcons.ttf ("Gentle Nerd Icons"): the same glyphs, outlines copied from
-# JetBrainsMono Nerd Font 3.5.1 (Version 2.304;...;Nerd Fonts 3.5.1, checked) and scaled 120% about each glyph's own
+# JetBrainsMono Nerd Font 3.5.1 (Version 2.304;...;Nerd Fonts 3.5.1, checked) and scaled 115% about each glyph's own
 # centre, so the vertical centre stays where the Nerd Font puts it, on the text; the left edge stays too, and the
 # extra width runs to the right, into the two spaces TREE puts after the icon. Same em, advance (600) and line
 # metrics as the source, every glyph inside its ascent and descent. They sit at private-use codepoints from
@@ -56,7 +56,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / "extensions" / "sidebar" / "nerd-icons.ts"
 LARGE_FONT = ROOT / "fonts" / "GentleNerdIcons.ttf"
 LARGE_BASE = 0x100400
-LARGE_SCALE = 1.2
+LARGE_SCALE = 1.15
 # 2025-01-01T00:00:00Z in the head table's seconds since 1904-01-01.
 FIXED_DATE = 3818707200
 
@@ -331,7 +331,7 @@ def build_large_font(source, names, codepoints):
     fb.setupNameTable({
         "familyName": "Gentle Nerd Icons",
         "styleName": "Regular",
-        "copyright": "Glyphs from JetBrainsMono Nerd Font 3.5.1 (Nerd Fonts, https://www.nerdfonts.com), scaled 120%; "
+        "copyright": "Glyphs from JetBrainsMono Nerd Font 3.5.1 (Nerd Fonts, https://www.nerdfonts.com), scaled 115%; "
                      "glyph set notices in LICENSE-nerd-fonts",
         "version": "Version 1.000",
         "licenseDescription": "This Font Software is licensed under the SIL Open Font License, Version 1.1.",
@@ -443,13 +443,13 @@ def main():
         "// the icon and its color, the glyph is the Nerd Font icon standing for it (seti and devicons for languages and\n"
         "// tools, codicons for the rest), one cell wide. nerdIcon() picks a row's icon as VS Code does: the file name,\n"
         "// then its longest extension, then the default file icon; folders by name, closed or open.\n"
-        "// Each icon also names its `large` twin: the same glyph 20% larger in fonts/GentleNerdIcons.ttf, for terminals\n"
+        "// Each icon also names its `large` twin: the same glyph 15% larger in fonts/GentleNerdIcons.ttf, for terminals\n"
         "// with that font installed (the caller picks char or large).\n"
         "// @ts-nocheck\n\n"
         "export interface NerdIcon {\n\tchar: string;\n\tlarge: string;\n\tcolor: string;\n}\n\n"
         f"// Glyph name -> codepoint, each one checked present in {family} {version.split(';')[0]}'s cmap.\n"
         f"export const GLYPHS: Record<string, number> = {{\n{glyph_rows}}};\n\n"
-        "// Glyph name -> its 120% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).\n"
+        "// Glyph name -> its 115% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).\n"
         f"export const LARGE: Record<string, number> = {{\n{large_rows}}};\n\n"
         "// Symbols file icon -> [glyph, color, lowercase file names, lowercase extensions].\n"
         f"const FILES: Record<string, [string, string, string, string]> = {{\n{files}}};\n\n"

@@ -7,7 +7,7 @@
 // the icon and its color, the glyph is the Nerd Font icon standing for it (seti and devicons for languages and
 // tools, codicons for the rest), one cell wide. nerdIcon() picks a row's icon as VS Code does: the file name,
 // then its longest extension, then the default file icon; folders by name, closed or open.
-// Each icon also names its `large` twin: the same glyph 20% larger in fonts/GentleNerdIcons.ttf, for terminals
+// Each icon also names its `large` twin: the same glyph 15% larger in fonts/GentleNerdIcons.ttf, for terminals
 // with that font installed (the caller picks char or large).
 // @ts-nocheck
 
@@ -165,7 +165,7 @@ export const GLYPHS: Record<string, number> = {
 	"seti-zip": 0xE6AA,
 };
 
-// Glyph name -> its 120% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).
+// Glyph name -> its 115% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).
 export const LARGE: Record<string, number> = {
 	"cod-book": 0x100400,
 	"cod-claude": 0x100401,
