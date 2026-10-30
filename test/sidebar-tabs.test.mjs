@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { load, painted, plain, role, theme, writeConfig } from "./helpers.mjs";
-import { renderTabBar, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
+import { cycleTab, DEFAULT_TAB_ORDER, moveTab, normalizeTabOrder, renderTabBar, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 
@@ -267,4 +267,49 @@ test("below the breakpoint nothing changes, whatever tab was open", async () => 
 	assert.ok(loaded.todo.render(60).length > 0, "Todos back in place");
 	loaded.terminal.columns = 180;
 	assert.match(loaded.barRows()[0], /\[ 2:GIT \]/, "the tab is remembered while the column is closed");
+});
+
+test("a tab order keeps the known ids once, in their order, and appends the missing tabs in the default order", () => {
+	assert.deepEqual(DEFAULT_TAB_ORDER, ["main", "git", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(normalizeTabOrder(undefined), DEFAULT_TAB_ORDER);
+	assert.deepEqual(normalizeTabOrder("pr"), DEFAULT_TAB_ORDER, "not an array");
+	assert.deepEqual(normalizeTabOrder(["main", "pr"]), ["main", "pr", "git", "prof", "mem", "tree"], "partial");
+	assert.deepEqual(normalizeTabOrder(["yt", "pr", 3, null, "agents"]), ["pr", "main", "git", "prof", "mem", "tree"], "unknown ids dropped");
+	assert.deepEqual(normalizeTabOrder(["tree", "pr", "tree", "main", "pr"]), ["tree", "pr", "main", "git", "prof", "mem"], "duplicates once");
+});
+
+test("moving a tab up or down swaps it with its neighbour and stops at the ends", () => {
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "pr", -1), ["main", "git", "prof", "mem", "pr", "tree"]);
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "main", 1), ["git", "main", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "main", -1), DEFAULT_TAB_ORDER, "first stays first");
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "pr", 1), DEFAULT_TAB_ORDER, "last stays last");
+	assert.deepEqual(moveTab(["pr"], "pr", -1), ["pr", "main", "git", "prof", "mem", "tree"], "on a normalised order");
+});
+
+test("with a custom order the tab bar draws the tabs in it, numbered by position, and the wheel follows it", () => {
+	const order = ["main", "pr", "git", "prof", "mem", "tree"];
+	const { line, hitboxes } = renderTabBar(58, "pr", theme, order);
+	assert.match(plain(line), /^1:MAIN +\[ 2:PR \] +3:GIT +4:PROF +5:MEM +6:TREE$/);
+	assert.deepEqual(hitboxes.map((box) => box.id), order, "the ids stay the same");
+	assert.match(plain(renderTabBar(58, "main", theme, ["tree"]).line), /^1:TREE +\[ 2:MAIN \] +3:GIT +4:PROF +5:MEM +6:PR$/, "a partial order");
+	assert.equal(cycleTab("main", 1, order), "pr");
+	assert.equal(cycleTab("tree", 1, order), "main", "wraps");
+	assert.equal(cycleTab("main", -1, order), "tree");
+	assert.equal(cycleTab("main", 1), "git", "the default order without one");
+	assert.match(plain(renderTabBar(58, "main", theme).line), /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR$/, "default unchanged");
+});
+
+test("the column's tab bar, clicks and wheel follow sidebar.tabOrder from gentle-quiet.json", async () => {
+	const { barRows, clickTab, wheelBar, side } = await wide({}, { sidebar: { tabOrder: ["main", "pr"] } });
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT +4:PROF +5:MEM +6:TREE$/);
+	assert.equal(clickTab("2:PR")?.handled, true);
+	assert.match(barRows()[0], /\[ 2:PR \]/);
+	assert.equal(side().entries.length, 2, "the PR tab's content, not MAIN");
+	wheelBar(1);
+	assert.match(barRows()[0], /\[ 3:GIT \]/, "PR on to GIT");
+	wheelBar(-1);
+	wheelBar(-1);
+	assert.match(barRows()[0], /\[ 1:MAIN \]/);
+	wheelBar(-1);
+	assert.match(barRows()[0], /\[ 6:TREE \]/, "MAIN back to TREE");
 });

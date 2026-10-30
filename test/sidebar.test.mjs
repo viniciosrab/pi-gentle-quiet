@@ -312,6 +312,35 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
 });
 
+test("/gentle-quiet moves a tab in the side column's tab order and saves it", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Blocks and agents ›$/, /^Tab order: MAIN GIT PROF MEM TREE PR$/, /^6:PR$/, /^Move up$/, /^Move up$/, /^Move up$/, /^Move up$/, /^← Back$/, /^← Back$/, /^Tab order: MAIN PR GIT PROF MEM TREE$/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "pr", "git", "prof", "mem", "tree"]);
+	const tabs = seen.filter(({ title }) => /^Tab order/.test(title));
+	assert.deepEqual(tabs.at(-1).items, ["1:MAIN", "2:PR", "3:GIT", "4:PROF", "5:MEM", "6:TREE", "Reset to default order", "← Back"], "numbered by position");
+	const moves = seen.filter(({ title }) => title.startsWith("Tab order › PR"));
+	assert.deepEqual(moves.map(({ title }) => title), ["Tab order › PR (6 of 6)", "Tab order › PR (5 of 6)", "Tab order › PR (4 of 6)", "Tab order › PR (3 of 6)", "Tab order › PR (2 of 6)"]);
+	assert.deepEqual(moves[0].items, ["Move up", "← Back"], "the last tab cannot move down");
+	assert.deepEqual(moves.at(-1).items, ["Move up", "Move down", "← Back"]);
+	assert.equal(readConfig().sidebar.enabled, true, "the other side column settings untouched");
+});
+
+test("/gentle-quiet's tab order moves MAIN down and resets to the default order, which leaves gentle-quiet.json without one", async () => {
+	writeConfig({ sidebar: { tabOrder: ["pr", "main"] } });
+	const { select, seen } = picker(/^Blocks and agents ›$/, /^Tab order: PR MAIN GIT PROF MEM TREE$/, /^2:MAIN$/, /^Move down$/, /^← Back$/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["pr", "git", "main", "prof", "mem", "tree"]);
+	assert.deepEqual(seen.find(({ title }) => title.startsWith("Tab order › MAIN")).items, ["Move up", "Move down", "← Back"]);
+	const reset = picker(/^Blocks and agents ›$/, /^Tab order: PR GIT MAIN/, /^Reset to default order$/);
+	const again = await load({ select: reset.select });
+	await again.commands["gentle-quiet"].handler("", again.ctx);
+	assert.deepEqual(readConfig().sidebar, { enabled: true, minColumns: 140, mcpCollapsed: false });
+	assert.ok(reset.seen.some(({ items }) => items.includes("Tab order: MAIN GIT PROF MEM TREE PR")), "the menu shows the default order back");
+});
+
 // A Todos card like gentle-pi's: only a click on its title row toggles it; the title is row `titleRow` of the card.
 async function clickable(titleRow) {
 	const loaded = await wide();

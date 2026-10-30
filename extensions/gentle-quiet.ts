@@ -46,7 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { cycleTab, renderTabBar, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
+import { cycleTab, moveTab, normalizeTabOrder, orderedTabs, renderTabBar, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
 const AGENT_DIR = (() => {
@@ -95,6 +95,7 @@ const DEFAULTS = {
 	// mcpCollapsed: the Status card's MCP section shows only its divider, ending in "MCP n/m".
 	// treeIcons (not written until changed, read through treeIcons()): the TREE tab's icons, "emoji" or "symbols"
 	// (the Symbols theme's glyphs from fonts/GentleSymbols.ttf, which must be installed like GentleIcons.ttf).
+	// tabOrder (not written until changed, read through tabOrder()): the tab ids in the order the tab bar shows them.
 	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
@@ -161,6 +162,7 @@ function merge(user = {}) {
 
 const TREE_ICONS = ["emoji", "symbols"];
 const treeIcons = () => (TREE_ICONS.includes(config.sidebar.treeIcons) ? config.sidebar.treeIcons : "emoji");
+const tabOrder = () => normalizeTabOrder(config.sidebar.tabOrder);
 
 const TONE_MODES = ["claude", "theme", "soft"];
 function toneMode(tools) {
@@ -959,6 +961,7 @@ function menuSections(ctx) {
 			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Jobs and Todos under them; the Agents card stays above the editor."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Tree icons: ${treeIcons()}`, () => { config.sidebar.treeIcons = TREE_ICONS[(TREE_ICONS.indexOf(treeIcons()) + 1) % TREE_ICONS.length]; }, "The file and folder icons of the side column's TREE tab: emoji, or Miguel Solorio's Symbols icons in their colors. Symbols needs fonts/GentleSymbols.ttf installed in ~/.local/share/fonts."],
+			[`Tab order: ${tabOrder().map(tabLabel).join(" ")}`, async () => { await configureTabOrder(ctx); }, "The order of the side column's tabs, numbered by position in the tab bar. Pick a tab and move it up or down, or reset to the default order."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
 		["Icons", "Icons", () => ICON_GROUPS.map(([group, title]) => [`${title}: ${shown(config.icons[group])}`, async () => { config.icons[group] = await pickIcon(ctx, title, group === "memory" ? MEMORY_ICONS : group === "rdd" ? RDD_ICONS : group === "branch" ? BRANCH_ICONS : group === "jobs" ? JOBS_ICONS : CARD_ICONS, config.icons[group]); }, ICON_HELP[group]])],
@@ -975,6 +978,11 @@ const BACK = "← Back";
 
 async function applyChange(ctx, action) {
 	await action();
+	persist(ctx);
+}
+
+/** Saves the config and redraws what it changes. */
+function persist(ctx) {
 	try {
 		saveConfig();
 	} catch (error) {
@@ -983,6 +991,35 @@ async function applyChange(ctx, action) {
 	redraw();
 	applyEditor(ctx);
 	applyFooter(ctx);
+}
+
+/**
+ * The side column's tab order: the tabs numbered by position, then a reset. A picked tab opens Move up / Move
+ * down, which stays on that tab so it can move several places; every move is saved and the column redrawn.
+ */
+async function configureTabOrder(ctx) {
+	const RESET = "Reset to default order";
+	while (true) {
+		const tabs = orderedTabs(config.sidebar.tabOrder);
+		const choice = await ctx.ui.select("Tab order", [...tabs.map((tab) => `${tab.key}:${tab.label}`), RESET, BACK]);
+		if (choice === RESET) {
+			delete config.sidebar.tabOrder;
+			persist(ctx);
+			continue;
+		}
+		const picked = tabs.find((tab) => `${tab.key}:${tab.label}` === choice);
+		if (!picked) return;
+		while (true) {
+			const order = tabOrder();
+			const at = order.indexOf(picked.id);
+			const moves = [...(at > 0 ? [["Move up", -1]] : []), ...(at < order.length - 1 ? [["Move down", 1]] : [])];
+			const move = await ctx.ui.select(`Tab order${SECTION_MARK} ${picked.label} (${at + 1} of ${order.length})`, [...moves.map(([label]) => label), BACK]);
+			const step = moves.find(([label]) => label === move)?.[1];
+			if (!step) break;
+			config.sidebar.tabOrder = moveTab(order, picked.id, step);
+			persist(ctx);
+		}
+	}
 }
 
 /** One section's items; stays open after each change, Back or escape returns to the sections. */
@@ -2857,7 +2894,7 @@ function installSidebar(tui) {
 		render: () => bar.rows,
 		invalidate() {},
 		handleMouse(event) {
-			if (event.type === "wheel") return event.wheelDelta ? select(cycleTab(tab, event.wheelDelta)) : undefined;
+			if (event.type === "wheel") return event.wheelDelta ? select(cycleTab(tab, event.wheelDelta, tabOrder())) : undefined;
 			if (event.button !== "left" || event.y >= TAB_BAR_ROWS) return undefined;
 			// Pi sends the click to the component that took the press.
 			if (event.type === "press") return { handled: true, render: false };
@@ -2983,7 +3020,7 @@ function installSidebar(tui) {
 					// MAIN's cards decide whether the column opens, whatever tab is showing.
 					if (statusLines.length || lines.length) {
 						// The tabs span the column; the divider ends mid-cell, like the cards' ┌ ┐ corners under it.
-						const drawnBar = renderTabBar(width, tab, theme);
+						const drawnBar = renderTabBar(width, tab, theme, tabOrder());
 						bar = { rows: [drawnBar.line, fg(theme, "border", `╶${"─".repeat(Math.max(0, width - 2))}╴`)], hitboxes: drawnBar.hitboxes };
 						if (tab !== "main") drawTab(view(tab), width, fit);
 						else show("main");

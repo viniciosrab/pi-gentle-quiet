@@ -2,7 +2,8 @@
 // "1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR", the active tab drawn "[ 5:TREE ]" in accent bold, the
 // others with a dim key and a muted label, then a "─" divider row. A left click on the bar (or its divider)
 // picks the nearest tab; the wheel over it cycles the tabs, wrapping at both ends. The active tab lives in
-// memory and starts at MAIN.
+// memory and starts at MAIN. The order is the user's (sidebar.tabOrder in /gentle-quiet, normalised by
+// normalizeTabOrder); a tab's number is its position in it, while its id never changes.
 //
 // MAIN (today's column: Status, Context, Jobs, Todos) is drawn by gentle-quiet.ts; the Agents card stays
 // inline above the editor, as in cute. GIT, PROF, MEM, TREE and PR are modules in this folder, one file each, registered in TAB_FACTORIES below; a tab
@@ -164,21 +165,46 @@ const strong = (t, text) => {
 
 export const tabLabel = (id) => TABS.find((tab) => tab.id === id)?.label ?? id.toUpperCase();
 
-/** The tab `delta` steps from `id`, wrapping at both ends. */
-export function cycleTab(id, delta) {
-	const index = Math.max(0, TABS.findIndex((tab) => tab.id === id));
+export const DEFAULT_TAB_ORDER = TABS.map((tab) => tab.id);
+
+/**
+ * A saved tab order made safe: the known ids once each, in their order, then the tabs it leaves out in the
+ * default order, so an old, partial or broken value never hides a tab.
+ */
+export function normalizeTabOrder(order) {
+	const known = Array.isArray(order) ? order.filter((id) => DEFAULT_TAB_ORDER.includes(id)) : [];
+	return [...new Set([...known, ...DEFAULT_TAB_ORDER])];
+}
+
+/** `order` with `id` swapped with its neighbour `step` (-1 up, 1 down) away; unchanged at the ends. */
+export function moveTab(order, id, step) {
+	const next = normalizeTabOrder(order);
+	const from = next.indexOf(id);
+	const to = from + (step > 0 ? 1 : -1);
+	if (from < 0 || to < 0 || to >= next.length) return next;
+	[next[from], next[to]] = [next[to], next[from]];
+	return next;
+}
+
+/** The tabs in `order`, each keyed by its position: "1", "2", … */
+export const orderedTabs = (order) => normalizeTabOrder(order).map((id, i) => ({ ...TABS.find((tab) => tab.id === id), key: String(i + 1) }));
+
+/** The tab `delta` steps from `id` in `order`, wrapping at both ends. */
+export function cycleTab(id, delta, order = DEFAULT_TAB_ORDER) {
+	const ids = normalizeTabOrder(order);
+	const index = Math.max(0, ids.indexOf(id));
 	const step = delta > 0 ? 1 : -1;
-	return TABS[(index + step + TABS.length) % TABS.length].id;
+	return ids[(index + step + ids.length) % ids.length];
 }
 
 /**
  * Cute's tab bar at `width`: the active tab "[ 1:MAIN ]" ("[1:MAIN]" under 44 columns) in accent bold, the
  * others "2:GIT" with a dim key and a muted label, equal gaps between them; the divider row under it; and
- * where each tab sits ([startX, endX) columns), for the mouse.
+ * where each tab sits ([startX, endX) columns), for the mouse. The tabs follow `order`, numbered by position.
  */
-export function renderTabBar(width, activeId, t) {
+export function renderTabBar(width, activeId, t, order = DEFAULT_TAB_ORDER) {
 	const compact = width < COMPACT_WIDTH;
-	const items = TABS.map((tab) => {
+	const items = orderedTabs(order).map((tab) => {
 		if (tab.id === activeId) {
 			const label = compact ? `[${tab.key}:${tab.label}]` : `[ ${tab.key}:${tab.label} ]`;
 			return { tab, styled: paint(t, "accent", strong(t, label)), len: visibleWidth(label) };

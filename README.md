@@ -36,7 +36,9 @@ same; only how it is drawn changes.
   source); **PR** the repository's open pull requests from `gh`, one per row with a checks summary (✓ ✗ ⧗),
   the current branch's PR first with its detail (state, mergeability, each CI check, the review decision and
   unresolved review comments), a click opening the PR or a check in the browser. Files and diffs open in your editor in a herdr tab
-  inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
+  inside herdr, else in a new terminal. Narrower terminals keep everything as it is. **Blocks** → Tab order
+  in `/gentle-quiet` reorders the tabs: pick one, Move up / Move down (PR second gives
+  `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order.
 - **Symbols icons in TREE.** The TREE tab can draw its file and folder icons with
   [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
   ([MIT](fonts/LICENSE-vscode-symbols)), each in its own color and picked by file name, extension and folder
