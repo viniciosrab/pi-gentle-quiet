@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, plain, role, theme, writeConfig } from "./helpers.mjs";
-import { cycleTab, DEFAULT_TAB_ORDER, moveTab, normalizeTabOrder, renderTabBar, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
+import { load, painted, plain, readConfig, role, theme, writeConfig } from "./helpers.mjs";
+import { cycleTab, DEFAULT_TAB_ORDER, moveTab, moveTabTo, normalizeTabOrder, renderTabBar, slotAt, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 
@@ -312,4 +312,93 @@ test("the column's tab bar, clicks and wheel follow sidebar.tabOrder from gentle
 	assert.match(barRows()[0], /\[ 1:MAIN \]/);
 	wheelBar(-1);
 	assert.match(barRows()[0], /\[ 6:TREE \]/, "MAIN back to TREE");
+});
+
+// Drag to reorder (S12): Pi sends the press, then drag events (motion with the button held) and the release to
+// the component that captured the press, wherever the pointer goes; a click follows only when nothing moved.
+function dragger(bar) {
+	const send = (type, x, y = 0) => bar().handleMouse({ type, button: "left", x, y, width: 60, height: 2, screenX: 120 + x, screenY: y });
+	return { press: (x, y) => send("press", x, y), drag: (x, y) => send("drag", x, y), release: (x, y) => send("release", x, y), click: (x, y) => send("click", x, y) };
+}
+const INVERSE = "\x1b[7m";
+
+test("dragging a tab sideways moves it live, the others make room, and the release saves sidebar.tabOrder", async () => {
+	const { bar, barRows, tabX, side } = await wide();
+	const { press, drag, release, click } = dragger(bar);
+	const from = tabX("6:PR");
+	const to = tabX("2:GIT");
+	assert.equal(press(from)?.capture, true, "the press captures the drag and the release");
+	const moving = drag(to, 5); // below the bar: still the bar's, captured
+	assert.equal(moving?.handled, true);
+	assert.equal(moving?.render, true);
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT +4:PROF +5:MEM +6:TREE$/, "PR already in the second place, numbered by position");
+	const raw = bar().render(60)[0];
+	assert.ok(raw.includes(`${INVERSE}${role("accent")}`) && /2:PR/.test(plain(raw.slice(raw.indexOf(INVERSE)))), "the dragged tab is highlighted");
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined, "nothing saved while dragging");
+	assert.equal(release(to, 5)?.handled, true);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "pr", "git", "prof", "mem", "tree"]);
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT/, "MAIN still active, PR stays second");
+	assert.ok(!bar().render(60)[0].includes(INVERSE), "no highlight after the drop");
+	assert.equal(click(to)?.handled, true, "a click after a drag is swallowed");
+	assert.match(barRows()[0], /^\[ 1:MAIN \]/, "the click did not switch tabs");
+	assert.equal(side().entries.length, 3, "MAIN's content");
+});
+
+test("a press and release without moving still switches tabs and keeps the order; a jitter under 2 columns is a click", async () => {
+	const { bar, barRows, tabX } = await wide();
+	const { press, drag, release, click } = dragger(bar);
+	const git = tabX("2:GIT");
+	press(git);
+	release(git);
+	click(git);
+	assert.match(barRows()[0], /^1:MAIN +\[ 2:GIT \] +3:PROF/);
+	const prof = tabX("3:PROF");
+	press(prof);
+	assert.equal(drag(prof + 1)?.render, false, "a 1-column jitter does not start a drag");
+	assert.ok(!bar().render(60)[0].includes(INVERSE));
+	release(prof + 1); // Pi sends no click once the pointer moved
+	assert.match(barRows()[0], /\[ 3:PROF \]/, "the release picks the pressed tab");
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined, "order unchanged and not saved");
+});
+
+test("a drag past either end clamps to the first or last place; the active tab stays the same", async () => {
+	const { bar, barRows, tabX, clickTab } = await wide();
+	const { press, drag, release } = dragger(bar);
+	clickTab("4:MEM");
+	press(tabX("4:MEM"));
+	drag(500);
+	assert.match(barRows()[0], /^1:MAIN +2:GIT +3:PROF +4:TREE +5:PR +\[ 6:MEM \]$/);
+	release(500);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "git", "prof", "tree", "pr", "mem"]);
+	press(tabX("4:TREE"));
+	drag(-40, -3);
+	release(-40, -3);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["tree", "main", "git", "prof", "pr", "mem"]);
+	assert.match(barRows()[0], /^1:TREE +2:MAIN +3:GIT +4:PROF +5:PR +\[ 6:MEM \]$/, "MEM still active");
+});
+
+test("a press after a drag that never got its release starts afresh", async () => {
+	const { bar, barRows, tabX } = await wide();
+	const { press, drag, release } = dragger(bar);
+	const prof = tabX("3:PROF");
+	press(tabX("6:PR"));
+	drag(tabX("2:GIT"));
+	assert.match(barRows()[0], /2:PR/);
+	assert.equal(press(prof)?.render, true, "the release was lost: the bar is redrawn"); // PROF's place in the saved order
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR$/, "the saved order back");
+	release(prof);
+	assert.match(barRows()[0], /\[ 3:PROF \]/);
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined);
+});
+
+test("moveTabTo puts a tab at a place, clamped, and slotAt finds the nearest slot", () => {
+	assert.deepEqual(moveTabTo(undefined, "pr", 1), ["main", "pr", "git", "prof", "mem", "tree"]);
+	assert.deepEqual(moveTabTo(undefined, "main", 99), ["git", "prof", "mem", "tree", "pr", "main"]);
+	assert.deepEqual(moveTabTo(undefined, "git", -5), ["git", "main", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(moveTabTo(undefined, "nope", 0), DEFAULT_TAB_ORDER);
+	const slots = [{ startX: 0, endX: 4 }, { startX: 10, endX: 14 }, { startX: 20, endX: 24 }];
+	assert.equal(slotAt(slots, -9), 0);
+	assert.equal(slotAt(slots, 8), 1);
+	assert.equal(slotAt(slots, 18), 2);
+	assert.equal(slotAt(slots, 99), 2);
 });

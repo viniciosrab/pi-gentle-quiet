@@ -38,7 +38,8 @@ same; only how it is drawn changes.
   unresolved review comments), a click opening the PR or a check in the browser. Files and diffs open in your editor in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is. **Blocks** → Tab order
   in `/gentle-quiet` reorders the tabs: pick one, Move up / Move down (PR second gives
-  `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order.
+  `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order. You can also
+  drag a tab sideways in the bar and drop it at a new place; the order is saved the same way.
 - **Symbols icons in TREE.** The TREE tab can draw its file and folder icons with
   [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
   ([MIT](fonts/LICENSE-vscode-symbols)), each in its own color and picked by file name, extension and folder

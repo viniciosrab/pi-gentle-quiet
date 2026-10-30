@@ -46,7 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { cycleTab, moveTab, normalizeTabOrder, orderedTabs, renderTabBar, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
+import { cycleTab, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
 const AGENT_DIR = (() => {
@@ -2868,7 +2868,8 @@ function installSidebar(tui) {
 		},
 	};
 
-	// The tab bar, fixed on top: a left click picks the tab under it (or the nearest), the wheel cycles them.
+	// The tab bar, fixed on top: a left click picks the tab under it (or the nearest), the wheel cycles them,
+	// a drag moves one to another place.
 	// The active tab is kept here, in memory: every new column opens on MAIN.
 	let tab = "main";
 	let shown = "main"; // the tab whose onShow ran last
@@ -2890,15 +2891,66 @@ function installSidebar(tui) {
 		tui.requestRender?.();
 		return { handled: true, render: true };
 	};
+	// Drag to reorder: a left press on a tab captures the mouse, so Pi sends the drag (motion with the button
+	// held) and the release here wherever the pointer goes. Two columns away from the press the tab follows the
+	// pointer to the nearest slot of the bar as it was at the press; the release saves the order like the Tab
+	// order setting. Without that move the release picks the tab (Pi sends no click once the pointer moved).
+	const DRAG_START = 2;
+	let drag; // { id, x, slots, order, live, moving }
+	let swallowClick = false; // the click Pi may send after a drop must not switch tabs
+	const barOrder = () => (drag?.moving ? drag.live : tabOrder());
+	const dropTab = () => {
+		const { live } = drag;
+		drag = undefined;
+		swallowClick = true;
+		if (live.join() !== tabOrder().join()) {
+			config.sidebar.tabOrder = live;
+			try {
+				saveConfig();
+			} catch {
+				// the order still holds for this session
+			}
+		}
+		tui.requestRender?.();
+		return { handled: true, render: true };
+	};
 	const tabBar = {
 		render: () => bar.rows,
 		invalidate() {},
 		handleMouse(event) {
 			if (event.type === "wheel") return event.wheelDelta ? select(cycleTab(tab, event.wheelDelta, tabOrder())) : undefined;
-			if (event.button !== "left" || event.y >= TAB_BAR_ROWS) return undefined;
-			// Pi sends the click to the component that took the press.
-			if (event.type === "press") return { handled: true, render: false };
-			return event.type === "click" ? select(tabAt(bar.hitboxes, event.x)) : undefined;
+			// Captured: the drag and the release come here even off the bar.
+			if (drag && event.type === "drag") {
+				if (!drag.moving && Math.abs(event.x - drag.x) < DRAG_START) return { handled: true, render: false };
+				drag.moving = true;
+				drag.live = moveTabTo(drag.order, drag.id, slotAt(drag.slots, event.x));
+				tui.requestRender?.();
+				return { handled: true, render: true };
+			}
+			if (drag && event.type === "release") {
+				if (drag.moving) return dropTab();
+				const { id } = drag;
+				drag = undefined;
+				return select(id);
+			}
+			if (event.button !== "left" || event.y < 0 || event.y >= TAB_BAR_ROWS) return undefined;
+			if (event.type === "press") {
+				// A press also ends a drag whose release never came: the bar goes back to the saved order, as it
+				// was at that drag's press.
+				const moving = drag?.moving;
+				const slots = moving ? drag.slots : bar.hitboxes;
+				const id = tabAt(slots, event.x);
+				drag = id ? { id, x: event.x, slots, order: tabOrder(), moving: false } : undefined;
+				swallowClick = false;
+				if (moving) tui.requestRender?.();
+				return { handled: true, render: Boolean(moving), capture: true };
+			}
+			if (event.type !== "click") return undefined;
+			if (swallowClick) {
+				swallowClick = false;
+				return { handled: true, render: false };
+			}
+			return select(tabAt(bar.hitboxes, event.x));
 		},
 	};
 
@@ -3020,7 +3072,7 @@ function installSidebar(tui) {
 					// MAIN's cards decide whether the column opens, whatever tab is showing.
 					if (statusLines.length || lines.length) {
 						// The tabs span the column; the divider ends mid-cell, like the cards' ┌ ┐ corners under it.
-						const drawnBar = renderTabBar(width, tab, theme, tabOrder());
+						const drawnBar = renderTabBar(width, tab, theme, barOrder(), drag?.moving ? drag.id : undefined);
 						bar = { rows: [drawnBar.line, fg(theme, "border", `╶${"─".repeat(Math.max(0, width - 2))}╴`)], hitboxes: drawnBar.hitboxes };
 						if (tab !== "main") drawTab(view(tab), width, fit);
 						else show("main");

@@ -147,6 +147,8 @@ export const TAB_FACTORIES: Record<string, CreateTab> = {
 /** Rows the tab bar takes on top of the column: the bar and its divider. */
 export const TAB_BAR_ROWS = 2;
 const COMPACT_WIDTH = 44;
+const INVERSE = "\x1b[7m";
+const INVERSE_OFF = "\x1b[27m";
 
 const paint = (t, role, text) => {
 	try {
@@ -186,6 +188,26 @@ export function moveTab(order, id, step) {
 	return next;
 }
 
+/** `order` with `id` taken out and put back at `index` (clamped to the ends); unchanged for an unknown id. */
+export function moveTabTo(order, id, index) {
+	const next = normalizeTabOrder(order);
+	if (!next.includes(id)) return next;
+	const rest = next.filter((other) => other !== id);
+	rest.splice(Math.max(0, Math.min(rest.length, index)), 0, id);
+	return rest;
+}
+
+/** The index of the slot (a tab bar hitbox) whose middle is nearest column `x`; the ends past either side. */
+export function slotAt(slots, x) {
+	let best = 0;
+	slots.forEach((slot, i) => {
+		const mid = (slot.startX + slot.endX) / 2;
+		const bestMid = (slots[best].startX + slots[best].endX) / 2;
+		if (Math.abs(x - mid) < Math.abs(x - bestMid)) best = i;
+	});
+	return best;
+}
+
 /** The tabs in `order`, each keyed by its position: "1", "2", … */
 export const orderedTabs = (order) => normalizeTabOrder(order).map((id, i) => ({ ...TABS.find((tab) => tab.id === id), key: String(i + 1) }));
 
@@ -201,10 +223,15 @@ export function cycleTab(id, delta, order = DEFAULT_TAB_ORDER) {
  * Cute's tab bar at `width`: the active tab "[ 1:MAIN ]" ("[1:MAIN]" under 44 columns) in accent bold, the
  * others "2:GIT" with a dim key and a muted label, equal gaps between them; the divider row under it; and
  * where each tab sits ([startX, endX) columns), for the mouse. The tabs follow `order`, numbered by position.
+ * The tab being dragged (`draggedId`) is drawn in reverse video in the accent colour, so it shows where it goes.
  */
-export function renderTabBar(width, activeId, t, order = DEFAULT_TAB_ORDER) {
+export function renderTabBar(width, activeId, t, order = DEFAULT_TAB_ORDER, draggedId = undefined) {
 	const compact = width < COMPACT_WIDTH;
 	const items = orderedTabs(order).map((tab) => {
+		if (tab.id === draggedId) {
+			const label = tab.id !== activeId ? `${tab.key}:${tab.label}` : compact ? `[${tab.key}:${tab.label}]` : `[ ${tab.key}:${tab.label} ]`;
+			return { tab, styled: `${INVERSE}${paint(t, "accent", strong(t, label))}${INVERSE_OFF}`, len: visibleWidth(label) };
+		}
 		if (tab.id === activeId) {
 			const label = compact ? `[${tab.key}:${tab.label}]` : `[ ${tab.key}:${tab.label} ]`;
 			return { tab, styled: paint(t, "accent", strong(t, label)), len: visibleWidth(label) };
