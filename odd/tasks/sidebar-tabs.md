@@ -50,7 +50,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T14 | S9 (L14) | worker: MEM tab — saved/recalled this session, pending count, folded handoff; Tools dropped; Stack dropped (no offline latest-version source) | 942a52e |
 | T15 | S10 (L15) | worker: Symbols icon font build, mapping module, TREE icon setting | 73028b8 |
 | T16 | S11 (L16) | worker after T15 (both edit gentle-quiet.ts): tab order in /gentle-quiet | f0c6b1f |
-| T17 | S12 (L17) | worker: drag a tab in the bar to reorder | pending |
+| T17 | S12 (L17) | worker: drag a tab in the bar to reorder | 76d8b37 |
 | T18 | S13 (L18) | worker: Engram card local essentials, no Cloud | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
