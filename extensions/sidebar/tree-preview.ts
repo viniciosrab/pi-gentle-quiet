@@ -293,9 +293,9 @@ class FilePreview {
  * Opens the read-only preview of `file` (shown as `relPath`) over Pi. `onEdit` runs when e closes it. Returns
  * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
  */
-/** The pop-up's width on a terminal `columns` wide: 70% of it, between 60 and 140 columns, so lines stay readable. */
+/** The pop-up's width on a terminal `columns` wide: 65% of it, between 60 and 125 columns, so lines stay readable. */
 export function previewWidthFor(columns) {
-	return Math.max(60, Math.min(140, Math.floor((Number(columns) || 0) * 0.7)));
+	return Math.max(60, Math.min(125, Math.floor((Number(columns) || 0) * 0.65)));
 }
 
 export function openPreview(ctx, { file, relPath, onEdit }) {
