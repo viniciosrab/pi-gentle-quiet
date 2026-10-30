@@ -1,0 +1,251 @@
+// The TREE tab's file preview: a read-only pop-up over Pi, opened by a click on a file (./tree.ts). A square
+// outline in the border color around "Read-only — <language>", the file's path, then its numbered lines (no
+// wrap, long lines cut with "…", tabs as spaces) and the footer "Esc close · e edit · ↑↓ PgUp/PgDn Home/End
+// · 43-64 / 168". Esc or q closes it, ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel
+// three lines; e closes it and opens the file in the editor tab, as a click did before.
+//
+// At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
+// row. Pi's highlighter colors the code when this Pi exports it; otherwise the lines are plain.
+// @ts-nocheck
+
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { open } from "node:fs/promises";
+import path from "node:path";
+
+/** How much of a file is read, how much is checked for NUL bytes, and up to what size it is highlighted. */
+export const previewLimits = { maxBytes: 1024 * 1024, sniffBytes: 8192, highlightBytes: 256 * 1024 };
+
+const LANGUAGES = {
+	TypeScript: ["ts", "tsx", "mts", "cts"],
+	JavaScript: ["js", "jsx", "mjs", "cjs"],
+	JSON: ["json"],
+	Markdown: ["md"],
+	Python: ["py"],
+	Go: ["go"],
+	Rust: ["rs"],
+	Shell: ["sh", "bash", "zsh"],
+	CSS: ["css"],
+	HTML: ["html", "htm"],
+	YAML: ["yaml", "yml"],
+	TOML: ["toml"],
+};
+const BY_EXTENSION = new Map(Object.entries(LANGUAGES).flatMap(([name, extensions]) => extensions.map((extension) => [extension, name])));
+
+/** The language named on the title row, from the file's extension. */
+export function languageOf(file) {
+	return BY_EXTENSION.get(path.extname(String(file)).slice(1).toLowerCase()) ?? "Text";
+}
+
+// Raw sequences next to Pi's key ids, for terminals (and tests) that send them as they are.
+const RAW = { pageUp: ["\x1b[5~"], pageDown: ["\x1b[6~"], home: ["\x1b[H", "\x1b[1~", "\x1bOH"], end: ["\x1b[F", "\x1b[4~", "\x1bOF"] };
+const pressed = (data, name) => {
+	try {
+		if (matchesKey(data, Key?.[name] ?? name)) return true;
+	} catch {
+		// an id this pi-tui does not know
+	}
+	return (RAW[name] ?? []).includes(data);
+};
+const letter = (data, char) => data === char || pressed(data, char === char.toLowerCase() ? char : `shift+${char.toLowerCase()}`);
+
+const CHROME = 6; // top, title, path, blank row, footer, bottom
+const WHEEL_LINES = 3;
+const TAB_STOP = 4;
+
+const expandTabs = (line) => {
+	if (!line.includes("\t")) return line;
+	let out = "";
+	for (const char of line) out += char === "\t" ? " ".repeat(TAB_STOP - (visibleWidth(out) % TAB_STOP)) : char;
+	return out;
+};
+// Escape sequences and other control characters in the file would drive the terminal: draw them as "�".
+const sanitize = (line) => expandTabs(line).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "�");
+
+const sizeLabel = (bytes) => (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0 ? `${bytes / (1024 * 1024)} MB` : bytes >= 1024 && bytes % 1024 === 0 ? `${bytes / 1024} KB` : `${bytes} bytes`);
+
+/** Reads `file` for the preview: { lines, cut } for text, or { binary }, { empty }, { error }. */
+export async function readPreview(file) {
+	let handle;
+	try {
+		handle = await open(file, "r");
+		const size = (await handle.stat()).size;
+		const length = Math.min(size, previewLimits.maxBytes);
+		const buffer = Buffer.alloc(length);
+		let read = 0;
+		while (read < length) {
+			const { bytesRead } = await handle.read(buffer, read, length - read, read);
+			if (!bytesRead) break;
+			read += bytesRead;
+		}
+		const bytes = buffer.subarray(0, read);
+		if (!bytes.length) return { empty: true };
+		if (bytes.subarray(0, previewLimits.sniffBytes).includes(0)) return { binary: true };
+		const lines = bytes.toString("utf8").split(/\r?\n/);
+		if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+		return { lines: lines.map(sanitize), cut: size > read ? read : 0 };
+	} catch (error) {
+		return { error: error?.message ?? String(error) };
+	} finally {
+		await handle?.close().catch(() => undefined);
+	}
+}
+
+// Pi's highlighter, when this Pi exports it and the file is small enough; the plain lines otherwise.
+function highlighted(file, lines) {
+	try {
+		const { highlightCode, getLanguageFromPath } = PiCodingAgent;
+		if (typeof highlightCode !== "function") return lines;
+		if (lines.reduce((sum, line) => sum + line.length + 1, 0) > previewLimits.highlightBytes) return lines;
+		const language = typeof getLanguageFromPath === "function" ? getLanguageFromPath(file) : undefined;
+		if (!language) return lines;
+		const colored = highlightCode(lines.join("\n"), language);
+		return Array.isArray(colored) && colored.length === lines.length ? colored.map(String) : lines;
+	} catch {
+		return lines;
+	}
+}
+
+class FilePreview {
+	constructor({ file, relPath, tui, theme, done, onEdit, loading }) {
+		Object.assign(this, { file, relPath, tui, theme, done, onEdit });
+		this.top = 0;
+		this.content = undefined;
+		this.closed = false;
+		this.ready = loading.then((content) => {
+			this.content = content.lines ? { ...content, shown: highlighted(file, content.lines) } : content;
+			this.redraw();
+		});
+	}
+
+	paint(role, text) {
+		try {
+			return this.theme?.fg ? this.theme.fg(role, text) : text;
+		} catch {
+			return text;
+		}
+	}
+
+	bold(text) {
+		try {
+			return this.theme?.bold ? this.theme.bold(text) : text;
+		} catch {
+			return text;
+		}
+	}
+
+	redraw(force) {
+		try {
+			this.tui?.requestRender?.(force);
+		} catch {
+			// a dead terminal must not break the preview
+		}
+	}
+
+	// Rows of code the overlay has room for: Pi caps it at 85% of the terminal.
+	page() {
+		const rows = Number(this.tui?.terminal?.rows) || 24;
+		return Math.max(1, Math.floor(rows * 0.85) - CHROME);
+	}
+
+	total() {
+		return this.content?.lines?.length ?? 0;
+	}
+
+	scrollTo(top) {
+		const next = Math.max(0, Math.min(top, this.total() - this.page()));
+		if (next === this.top) return false;
+		this.top = next;
+		this.redraw();
+		return true;
+	}
+
+	close(edit = false) {
+		if (this.closed) return;
+		this.closed = true;
+		this.done(undefined);
+		this.redraw(true); // repaint every cell behind the closed overlay
+		if (edit) this.onEdit?.();
+	}
+
+	handleInput(data) {
+		if (pressed(data, "escape") || letter(data, "q")) return this.close();
+		if (letter(data, "e")) return this.close(true);
+		if (pressed(data, "down") || letter(data, "j")) return this.scrollTo(this.top + 1);
+		if (pressed(data, "up") || letter(data, "k")) return this.scrollTo(this.top - 1);
+		if (pressed(data, "pageDown")) return this.scrollTo(this.top + this.page());
+		if (pressed(data, "pageUp")) return this.scrollTo(this.top - this.page());
+		if (pressed(data, "home") || letter(data, "g")) return this.scrollTo(0);
+		if (pressed(data, "end") || letter(data, "G")) return this.scrollTo(this.total());
+	}
+
+	handleMouse(event) {
+		if (event?.type !== "wheel" || !event.wheelDelta) return undefined;
+		this.scrollTo(this.top + (event.wheelDelta > 0 ? WHEEL_LINES : -WHEEL_LINES));
+		return { handled: true, render: true };
+	}
+
+	render(width) {
+		const inner = Math.max(1, width - 4);
+		const fit = (row) => {
+			const cut = visibleWidth(row) > inner ? truncateToWidth(row, inner, "…") : row;
+			return `${this.paint("border", "│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${this.paint("border", "│")}`;
+		};
+		// Plain text cut before it is painted, so the color reaches the "…".
+		const text = (role, plain, bold = false) => {
+			const cut = visibleWidth(plain) > inner ? truncateToWidth(plain, inner, "…") : plain;
+			return this.paint(role, bold ? this.bold(cut) : cut);
+		};
+		const content = this.content;
+		const cut = content?.cut ? ` · first ${sizeLabel(content.cut)}` : "";
+		const body = [];
+		let range = "";
+		if (!content) body.push(text("dim", "Reading…"));
+		else if (content.error) body.push(text("warning", `Cannot read the file: ${content.error}`));
+		else if (content.binary) body.push(text("muted", "Binary file — press e to open it in the editor"));
+		else if (content.empty) body.push(text("muted", "(empty file)"));
+		else {
+			const total = this.total();
+			this.top = Math.max(0, Math.min(this.top, total - this.page()));
+			const to = Math.min(total, this.top + this.page());
+			const digits = String(total).length;
+			const room = Math.max(1, inner - digits - 1);
+			for (let index = this.top; index < to; index++) {
+				const code = content.shown[index];
+				const line = visibleWidth(code) > room ? truncateToWidth(code, room, "…") : code;
+				body.push(`${this.paint("dim", String(index + 1).padStart(digits))} ${line}`);
+			}
+			range = ` · ↑↓ PgUp/PgDn Home/End · ${this.top + 1}-${to} / ${total}`;
+		}
+		return [
+			this.paint("border", `┌${"─".repeat(inner + 2)}┐`),
+			fit(text("toolTitle", `Read-only — ${languageOf(this.file)}`, true)),
+			fit(text("muted", `${this.relPath}${cut}`)),
+			fit(""),
+			...body.map(fit),
+			fit(text("dim", `Esc close · e edit${range}`)),
+			this.paint("border", `└${"─".repeat(inner + 2)}┘`),
+		];
+	}
+
+	invalidate() {}
+}
+
+/**
+ * Opens the read-only preview of `file` (shown as `relPath`) over Pi. `onEdit` runs when e closes it. Returns
+ * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
+ */
+export function openPreview(ctx, { file, relPath, onEdit }) {
+	try {
+		if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
+		const loading = readPreview(file);
+		const result = ctx.ui.custom(
+			(tui, theme, _keybindings, done) => new FilePreview({ file, relPath, tui, theme, done, onEdit, loading }),
+			{ overlay: true, overlayOptions: { anchor: "center", width: "80%", minWidth: 60, maxHeight: "85%" } },
+		);
+		Promise.resolve(result).catch(() => undefined);
+		return true;
+	} catch {
+		return false; // a stale ctx or a UI without overlays
+	}
+}

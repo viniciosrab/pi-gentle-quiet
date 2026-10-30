@@ -4,7 +4,8 @@
 // "A", "U" on files, "●" on folders holding a change). Only src is open at first.
 //
 // Mouse: the header (or its badge) opens the editor on the project; a folder opens or closes; a file opens in
-// the editor; a right click closes every folder, or opens them all when none is open; the wheel scrolls the
+// a read-only preview over Pi (./tree-preview.ts), whose e key opens it in the editor (straight in the editor
+// when Pi has no overlay UI); a right click closes every folder, or opens them all when none is open; the wheel scrolls the
 // tree one line. The data is read in the background (./tree-scan.ts) when the tab is shown, every 3 s while it
 // stays shown, and right after a folder is toggled; render() only draws what was read.
 // @ts-nocheck
@@ -13,6 +14,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import path from "node:path";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { editorCommand, launchDeps } from "./tree-launch.ts";
+import { openPreview } from "./tree-preview.ts";
 import { collectDirs, flattenTree, parseGitStatus, projectName, scanTree } from "./tree-scan.ts";
 
 /** How often the tree is read again while shown, and how long a launch failure stays on the card. */
@@ -284,7 +286,8 @@ export function createTab(host: SidebarHost): SidebarTab {
 			}
 			state.selected = node.relPath;
 			state.version++;
-			launch(node.absPath);
+			const edit = () => launch(node.absPath);
+			if (!openPreview(host.ctx(), { file: node.absPath, relPath: node.relPath, onEdit: edit })) edit();
 			return true;
 		},
 

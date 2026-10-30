@@ -40,7 +40,7 @@ function boxed(rows, width) {
 }
 
 // A stand-in for gentle-quiet's SidebarHost; `git` answers by the first git argument after any "-c" pair.
-function fakeHost({ cwd, git = {}, border = true } = {}) {
+function fakeHost({ cwd, git = {}, border = true, ctx } = {}) {
 	const calls = { git: [], renders: 0 };
 	const host = {
 		theme,
@@ -50,7 +50,7 @@ function fakeHost({ cwd, git = {}, border = true } = {}) {
 		box: (rows, width) => (border ? boxed(rows, width) : rows.map((row) => ` ${row}`)),
 		card: (title, rows, width) => boxed([theme.fg("toolTitle", theme.bold(title)), ...(rows.length ? ["", ...rows] : [])], width),
 		cwd: () => cwd,
-		ctx: () => undefined,
+		ctx: () => ctx,
 		pi: undefined,
 		agentDir: "/nowhere",
 		requestRender: () => calls.renders++,
@@ -226,24 +226,68 @@ test("a click on a folder toggles it and asks for a redraw", async (t) => {
 	assert.match(rows()[line("src")], /📁 src/);
 });
 
-test("a click on a file opens it in the editor and marks it; the header row or the badge opens the project", async (t) => {
+// A Pi context whose ui.custom records the overlays it is asked for.
+function overlayCtx() {
+	const overlays = [];
+	return { overlays, hasUI: true, ui: { custom: (factory, options) => (overlays.push({ factory, options }), new Promise(() => {})) } };
+}
+const fakeTui = { terminal: { rows: 30, columns: 120 }, requestRender() {} };
+
+test("a click on a file opens the read-only preview, not the editor, and marks the file", async (t) => {
 	const launches = recordLaunches(t);
 	const root = project(FILES);
-	const { tab, rows, raw } = await opened({ cwd: root, git: STATUS("") });
+	writeFileSync(path.join(root, "README.md"), "# Demo\nhello\n");
+	const ctx = overlayCtx();
+	const { tab, rows, raw } = await opened({ cwd: root, git: STATUS(""), ctx });
 	t.after(() => tab.dispose());
 	const line = rows().findIndex((row) => row.includes("README.md"));
 	assert.equal(tab.handleClick(line, "left", 12), true);
-	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root]);
-	assert.ok(painted(raw()[line], "accent", theme.bold("README.md")), "the opened file in accent bold");
+	assert.equal(launches.length, 0, "no editor tab");
+	assert.equal(ctx.overlays.length, 1);
+	assert.equal(ctx.overlays[0].options.overlay, true);
+	assert.ok(painted(raw()[line], "accent", theme.bold("README.md")), "the clicked file in accent bold");
 
+	const closed = [];
+	const preview = ctx.overlays[0].factory(fakeTui, theme, {}, (value) => closed.push(value));
+	await preview.ready;
+	const out = preview.render(70).map(plain);
+	assert.match(out[1], /Read-only — Markdown/);
+	assert.match(out[2], /README\.md/);
+	assert.match(out[4], /1 # Demo/);
+	preview.handleInput("e");
+	assert.equal(closed.length, 1, "e closes the preview");
+	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root], "and opens the file as a click did before");
+});
+
+test("the header row or the badge opens the editor on the project, a folder still toggles, with an overlay UI", async (t) => {
+	const launches = recordLaunches(t);
+	const root = project(FILES);
+	const ctx = overlayCtx();
+	const { tab, rows } = await opened({ cwd: root, git: STATUS(""), ctx });
+	t.after(() => tab.dispose());
 	const badgeX = rows()[1].indexOf("[ ↗");
 	assert.equal(tab.handleClick(1, "left", badgeX + 2), true, "the badge");
 	assert.deepEqual(launches.at(-1), [undefined, root]);
 	assert.equal(tab.handleClick(0, "left", 3), true, "the top row");
 	assert.equal(tab.handleClick(1, "left", 3), true, "the title");
-	assert.equal(launches.length, 4);
+	assert.equal(launches.length, 3);
 	assert.equal(tab.handleClick(2, "left", 3), false, "the blank row under the header does nothing");
 	assert.equal(tab.handleClick(rows().length - 1, "left", 3), false, "the bottom border does nothing");
+	const docs = rows().findIndex((row) => row.includes(" docs ("));
+	assert.equal(tab.handleClick(docs, "left", 10), true);
+	await until(() => rows().some((row) => row.includes("guide.md")), "docs expanded");
+	assert.equal(ctx.overlays.length, 0, "no preview for folders or the header");
+});
+
+test("without an overlay UI a click on a file opens it in the editor as before", async (t) => {
+	const launches = recordLaunches(t);
+	const root = project(FILES);
+	const { tab, rows, raw } = await opened({ cwd: root, git: STATUS(""), ctx: { hasUI: false, ui: { custom: () => assert.fail("no overlay") } } });
+	t.after(() => tab.dispose());
+	const line = rows().findIndex((row) => row.includes("README.md"));
+	assert.equal(tab.handleClick(line, "left", 12), true);
+	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root]);
+	assert.ok(painted(raw()[line], "accent", theme.bold("README.md")), "the opened file in accent bold");
 });
 
 test("an editor that fails to open shows a short warning instead of throwing", async (t) => {
