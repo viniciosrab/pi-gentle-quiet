@@ -92,7 +92,7 @@ const DEFAULTS = {
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
 	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
-	// mcpCollapsed: the Status card's MCP section shows only its header.
+	// mcpCollapsed: the Status card's MCP section shows only its divider, ending in "MCP n/m".
 	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
@@ -2302,24 +2302,28 @@ function statusCardRows(t, footerData, width, options) {
 	const title = (text) => [fg(t, "toolTitle", bold(t, text)), ""];
 	const draw = (card) => (outlined ? boxed(card, width, t) : card.map((line) => ` ${line}`));
 
-	// MCP has a section of its own here: a header with the online count, which a click collapses, then one
-	// row per server. Its "MCP n/m" leaves the statuses.
+	// MCP has a section of its own here: a divider across the card, which a click collapses, then one row
+	// per server. Collapsed, the divider ends in "MCP n/m". Its "MCP n/m" leaves the statuses.
 	const mcp = p.servers?.servers?.length ? p.servers : undefined;
 	const collapsed = Boolean(config.sidebar.mcpCollapsed);
-	const mcpHeader = mcp && ["MCP", fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total} online`)];
+	const folded = mcp && collapsed ? ` MCP ${mcp.online}/${mcp.total}` : "";
+	const divider = mcp && [
+		fg(t, "border", "─".repeat(Math.max(0, inner - visibleWidth(folded)))),
+		folded && ` ${fg(t, "muted", "MCP")} ${fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total}`)}`,
+	].join("");
 	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));
-	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => ["", spread(`  ${fg(t, "text", server.name)}`, serverState(server))]) : [];
+	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => spread(fg(t, "text", server.name), serverState(server))) : [];
 
 	// [label, value] rows; a row without a label is drawn as it is.
 	const sections = [
 		[["Project", p.project && fg(t, "text", p.project.replace(SGR, ""))], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "text", modelLabel())]],
 		(mcp ? p.ownItems : p.statusItems).map((item) => ["", item]),
-		mcp ? [mcpHeader, ...mcpRows] : [],
 	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
 	// A labelled row: the label at the start, its value flush with the card's end, as in pi-cinlodev-cute.
 	const row = ([label, value]) => (label ? spread(fg(t, "muted", label), value) : cut(value));
-	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
-	// Where the MCP header is drawn, counting the outline's top row, for the click that collapses it.
+	// Sections are split by blank rows; only MCP's comes after its divider.
+	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)]), ...(mcp ? [divider, ...mcpRows] : [])];
+	// Where the MCP divider is drawn, counting the outline's top row, for the click that collapses it.
 	const mcpRow = mcp ? status.length - 1 - mcpRows.length + (outlined ? 1 : 0) : -1;
 
 	const { percent, used, window, percentText } = p.context;
@@ -2792,7 +2796,7 @@ function installSidebar(tui) {
 		return result?.handled ? result : nativeMouse?.(event);
 	};
 	// The Status and Context cards stay on top of the column, outside its scrolling: they never go away.
-	// A left click on its MCP header row collapses or opens the MCP section, and the choice is saved.
+	// A left click on its MCP divider row collapses or opens the MCP section, and the choice is saved.
 	const statusCard = {
 		render: () => statusLines,
 		invalidate() {},

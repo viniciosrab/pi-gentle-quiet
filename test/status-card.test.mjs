@@ -171,49 +171,48 @@ test("labelled rows: the label at the start, the value flush with the card's end
 	assert.match(status.find((r) => r.startsWith("Model")), /^Model {2,}claude-opus-5-5 · high$/);
 });
 
-// MCP: a section of its own after the statuses, one row per server under a header that collapses.
+// MCP: a section of its own after the statuses, under a divider across the card that collapses it.
 const mcpFile = path.join(path.dirname(configFile), "mcp.json");
 const writeMcp = (servers) => writeFileSync(mcpFile, JSON.stringify({ mcpServers: servers }));
 const mcpServers = { codegraph: { command: "codegraph" }, context7: { command: "npx" }, "my-db": { url: "https://example.com/mcp" }, off: { command: "x", enabled: false } };
 const mcpTools = ["mcp__codegraph__query", "mcp__codegraph__explore", "mcp__my_db__list", { name: "mcp__context7__resolve", exposure: "hidden", namespace: { name: "mcp__context7" } }];
+const DIVIDER = "─".repeat(55);
+const FOLDED = /^─{2,} MCP 2\/3$/u;
 async function withMcp(options = {}) {
 	writeMcp(mcpServers);
 	const loaded = await wide({ statuses: { "gentle:mode": "Perm: Yolo" }, ...options, session: { tools: mcpTools, ...options.session } });
 	const status = () => loaded.side().entries[1].component; // relays the layout, so the rows are fresh
-	const headerY = () => loaded.raw().map(plain).findIndex((row) => /^│ MCP /u.test(row));
+	const headerY = () => loaded.raw().map(plain).findIndex((row) => /^│ ─/u.test(row));
 	const click = (y = headerY()) => status().handleMouse({ type: "click", button: "left", x: 4, y, width: 60, height: loaded.raw().length, screenX: 124, screenY: y + 2 });
 	return { ...loaded, status, headerY, click };
 }
 
-test("the MCP section: a header with the online count, then one row per server with its state", async (t) => {
+test("the MCP section: a divider across the card, then one row per server with its state", async (t) => {
 	t.after(() => writeMcp({}));
 	const { cards, raw } = await withMcp();
 	const [status] = cards();
 	assert.deepEqual(status.slice(5), [
 		"",
 		"Perm: Yolo",
-		"",
+		DIVIDER,
 		status[8],
 		status[9],
 		status[10],
-		status[11],
 	]);
-	assert.equal(status.length, 12, "no MCP n/m left among the statuses");
-	assert.match(status[8], /^MCP {2,}2\/3 online$/u);
-	assert.match(status[9], /^ {2}codegraph {2,}active · 2 tools$/);
-	assert.match(status[10], /^ {2}context7 {2,}offline$/, "a server whose tools Pi hid is offline");
-	assert.match(status[11], /^ {2}my-db {2,}active · 1 tool$/);
-	for (const row of status.slice(8)) assert.equal([...row].length, 55, row);
+	assert.equal(status.length, 11, "no MCP n/m left among the statuses, and no header row");
+	assert.match(status[8], /^codegraph {2,}active · 2 tools$/);
+	assert.match(status[9], /^context7 {2,}offline$/, "a server whose tools Pi hid is offline");
+	assert.match(status[10], /^my-db {2,}active · 1 tool$/);
+	for (const row of status.slice(7)) assert.equal([...row].length, 55, row);
 	const rows = raw();
-	assert.ok(rows.some((row) => painted(row, "muted", "MCP")), "the header like the other labels");
-	assert.ok(rows.some((row) => painted(row, "warning", "2/3 online")), "warns while a server is offline");
+	assert.ok(rows.some((row) => painted(row, "border", DIVIDER)), "the divider in the outline's color");
 	assert.ok(rows.some((row) => painted(row, "text", "codegraph") && painted(row, "dim", "active · 2 tools")));
 	assert.ok(rows.some((row) => painted(row, "warning", "offline")));
 });
 
-test("clicking the MCP header collapses it to the header and saves that; clicking again opens it", async (t) => {
+test("clicking the MCP divider folds the servers into it and saves that; clicking again opens it", async (t) => {
 	t.after(() => writeMcp({}));
-	const { cards, click, headerY, status } = await withMcp();
+	const { cards, click, headerY, status, raw } = await withMcp();
 	const y = headerY();
 	assert.deepEqual(status().handleMouse({ type: "press", button: "left", x: 4, y, width: 60, height: 20, screenX: 124, screenY: y }), { handled: true, render: false }, "takes the press so the click comes here");
 	assert.equal(status().handleMouse({ type: "click", button: "left", x: 4, y: y - 1, width: 60, height: 20, screenX: 124, screenY: y }), undefined, "other rows do nothing");
@@ -221,17 +220,31 @@ test("clicking the MCP header collapses it to the header and saves that; clickin
 	assert.deepEqual(click(), { handled: true, render: true });
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
 	const collapsed = cards()[0];
-	assert.match(collapsed.at(-1), /^MCP {2,}2\/3 online$/u, "only the header, with the count");
-	assert.equal(collapsed.length, 9);
+	assert.match(collapsed.at(-1), FOLDED, "only the divider, with the online count at its end");
+	assert.equal([...collapsed.at(-1)].length, 55, "flush with the card's end");
+	assert.equal(collapsed.length, 8);
+	const folded = raw()[y];
+	assert.ok(painted(folded, "border", "─") && painted(folded, "muted", "MCP"), "the line, then a muted label");
+	assert.ok(painted(folded, "warning", "2/3"), "warns while a server is offline");
 	click();
 	assert.equal(readConfig().sidebar.mcpCollapsed, false);
-	assert.equal(cards()[0].length, 12);
+	assert.equal(cards()[0].length, 11);
+	assert.equal(cards()[0][7], DIVIDER, "open, the plain line again");
+});
+
+test("folded with every server online the count is in text", async (t) => {
+	t.after(() => writeMcp({}));
+	writeMcp({ codegraph: { command: "codegraph" } });
+	const loaded = await wide({ config: { sidebar: { mcpCollapsed: true } }, session: { tools: ["mcp__codegraph__query"] } });
+	const row = loaded.raw().find((r) => plain(r).includes(" MCP "));
+	assert.match(plain(row), /^│ ─{2,} MCP 1\/1 │$/u);
+	assert.ok(painted(row, "text", "1/1"));
 });
 
 test("the collapsed MCP section stays collapsed after a reload", async (t) => {
 	t.after(() => writeMcp({}));
 	const { cards } = await withMcp({ config: { sidebar: { mcpCollapsed: true } } });
-	assert.match(cards()[0].at(-1), /^MCP {2,}2\/3 online$/u);
+	assert.match(cards()[0].at(-1), FOLDED);
 });
 
 test("without MCP servers there is no MCP section", async () => {
@@ -243,7 +256,7 @@ test("without MCP servers there is no MCP section", async () => {
 test("with MCP off in the status line settings the card still lists the servers (the setting is the status line's)", async (t) => {
 	t.after(() => writeMcp({}));
 	const { cards } = await withMcp({ config: { statusLine: { mcp: false } } });
-	assert.ok(cards()[0].some((row) => /MCP/.test(row)));
+	assert.ok(cards()[0].includes(DIVIDER));
 	assert.ok(cards()[0].some((row) => /codegraph/.test(row)));
 });
 
@@ -256,15 +269,15 @@ test("below the breakpoint the status line keeps MCP n/m among the statuses, wit
 	assert.doesNotMatch(out[0], /codegraph|online/);
 });
 
-test("without the outline the MCP header is still the row a click toggles; the wheel is left alone", async (t) => {
+test("without the outline the MCP divider is still the row a click toggles; the wheel is left alone", async (t) => {
 	t.after(() => writeMcp({}));
 	const { raw, status } = await withMcp({ config: { blocks: { border: false } } });
-	const y = raw().map(plain).findIndex((row) => /^ MCP /u.test(row));
+	const y = raw().map(plain).findIndex((row) => /^ ─/u.test(row));
 	assert.ok(y > 0);
 	const event = (type, extra = {}) => status().handleMouse({ type, button: "left", x: 4, y, width: 60, height: 20, screenX: 124, screenY: y, ...extra });
 	assert.equal(event("wheel", { button: "none", wheelDelta: 1 }), undefined, "the wheel does what it did");
 	assert.equal(status().handleMouse({ type: "click", button: "left", x: 4, y: y + 1, width: 60, height: 20, screenX: 124, screenY: y }), undefined, "a server row is not the toggle");
 	assert.deepEqual(event("click"), { handled: true, render: true });
-	assert.match(plain(raw()[y]), /^ MCP {2,}2\/3 online$/u);
+	assert.match(plain(raw()[y]), /^ ─{2,} MCP 2\/3$/u);
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
 });
