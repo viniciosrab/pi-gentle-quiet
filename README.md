@@ -19,14 +19,13 @@ same; only how it is drawn changes.
   holds the status line as two cards that always stay on top. **Status** has the project and branch
   under a label column, then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
-  the tokens spent with the cost, and the plan windows on one row. Jobs, Agents and Todos scroll under them. The Todos card shows every
-  task. Click a card's title to collapse or expand it (Agents and Todos keep gentle-pi's own state
-  and shortcuts).
+  the tokens spent with the cost, and the plan windows on one row. Jobs and Todos scroll under them. The Todos card shows every
+  task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
+  The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
-  `1:MAIN 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE` on top of the column. Click a tab, or turn the wheel over
+  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
-  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **AGENTS**
-  the Agents card alone; **PROF** gentle-pi's profiles with the active profile's roster, and the plan
+  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
   usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
   and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]`. Files and
   diffs open in a herdr tab inside herdr, else in a new terminal. Narrower terminals keep everything as it is.

@@ -16,10 +16,11 @@
 //           padding rows, line up with that same margin and get a square
 //           outline in the theme's border color
 //   sidebar fullscreen terminals with 140+ columns: a column on the right holds the status line as Status
-//           and Context cards that stay on top, then Agents and Todos (Gentle Shell's layout, drawn in this style); narrower
+//           and Context cards that stay on top, then Todos (Gentle Shell's layout, drawn in this style); narrower
 //           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it).
-//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE" (pi-cinlodev-cute's), switches the
-//           column: MAIN is the column above, AGENTS the Agents card alone, the others live in ./sidebar/
+//           The Agents card stays inline above the editor, as in pi-cinlodev-cute.
+//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE" (pi-cinlodev-cute's), switches the
+//           column: MAIN is the column above, the others live in ./sidebar/
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
@@ -89,7 +90,7 @@ const DEFAULTS = {
 	statusLine: { enabled: true, changes: true, contextTokens: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
-	// Status, Agents and Todos in a column beside the conversation once the fullscreen terminal
+	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
 	sidebar: { enabled: true, minColumns: 140 },
 	prompt: { icon: "❯", editor: true, userMessage: true },
@@ -489,8 +490,7 @@ const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–⠋⠙⠹⠸⠼�
 const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
 
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
-// (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
-// move to their own row instead of being cut off.
+// (`rail`) a blank row separates the title from the list.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
@@ -499,15 +499,14 @@ function drawBlock(target, width, options, t, rail = {}) {
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
-	// A stacked panel renders wide so it still lists everything before its rows are split.
-	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
+	// Todos renders wide so it still lists everything before its rows are wrapped.
+	const render = () => target.render(rail.hang ? STACK_WIDTH : inner + 5);
 	// A long Todos list ends in gentle-pi's scroll row, drawn at column 0 outside the panel: it goes before
 	// flatten(), or it shrinks the shared indent to nothing and every task keeps a space no task row matches.
 	const raw = rail.grow ? fullHeight(render) : render();
 	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
 	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
 	if (rail.agents) rows = rows.map(agentGap);
-	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
 	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
@@ -533,14 +532,16 @@ function fullHeight(render) {
 	}
 }
 
-// A panel component drawn flattened. While the side column is open the panel is
-// drawn there instead (see railBlocks) and leaves its own place empty.
+// A panel component drawn flattened. While the side column is open the Todos panel is
+// drawn there instead (see railBlocks) and leaves its own place empty; the Agents panel stays in place.
+const INLINE_BLOCKS = new Set(["gentle-agents"]);
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, agents: key === "gentle-agents", stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	const inline = INLINE_BLOCKS.has(key);
+	if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
+			if (prop === "render") return (width) => (sidebar.active && !inline ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -941,7 +942,7 @@ function menuSections(ctx) {
 		["Blocks and agents", "Blocks", () => [
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, `${config.blocks.minimal ? "Todos and Agents panels drawn as flat rows." : "Todos and Agents panels as gentle-pi draws them."}`],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
-			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Todos and Agents under them."],
+			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Jobs and Todos under them; the Agents card stays above the editor."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
@@ -2640,7 +2641,7 @@ function applyFooter(ctx, force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Side column: the status line, Jobs, Agents and Todos beside the conversation, on wide terminals
+// Side column: the status line, Jobs and Todos beside the conversation, on wide terminals
 // ---------------------------------------------------------------------------
 
 // Gentle Shell's sidebar layout, kept when Gentle Shell is disabled: in a fullscreen Pi the layout
@@ -2657,8 +2658,8 @@ const sidebar = { tui: undefined, active: false, dispose: undefined };
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Jobs, Agents and Todos (or the cards `keys`) as outlined cards, one right under the other, with where each one sits. */
-function railRows(width, keys = [JOBS_CARD, "gentle-agents", "gentle-todo"]) {
+/** Jobs and Todos as outlined cards, one right under the other, with where each one sits. */
+function railRows(width, keys = [JOBS_CARD, "gentle-todo"]) {
 	const rows = [];
 	const hits = [];
 	for (const key of keys) {
@@ -2792,13 +2793,13 @@ function installSidebar(tui) {
 		},
 	};
 
-	// Every tab but MAIN scrolls in a column of its own, so each keeps its scroll position. AGENTS is the
-	// Agents card as MAIN draws it; the others are tab modules, created the first time they are opened.
+	// Every tab but MAIN scrolls in a column of its own, so each keeps its scroll position. They are tab
+	// modules, created the first time they are opened.
 	const tabHostApi = tabHost(tui);
 	const views = new Map(); // tab id -> { id, tab, error, rows, hits, column }
 	const view = (id) => {
 		if (views.has(id)) return views.get(id);
-		const entry = { id, tab: undefined, error: undefined, rows: [], hits: [] };
+		const entry = { id, tab: undefined, error: undefined, rows: [] };
 		entry.column = scrolling({
 			render: () => entry.rows,
 			invalidate() {
@@ -2813,18 +2814,16 @@ function installSidebar(tui) {
 		entry.column.handleMouse = (event) => {
 			let result;
 			try {
-				result = id === "agents" ? railMouse(event, entry.hits, entry.column.scrollTop ?? 0) : tabMouse(entry, event);
+				result = tabMouse(entry, event);
 			} catch {
 				result = undefined;
 			}
 			return result?.handled ? result : native?.(event);
 		};
-		if (id !== "agents") {
-			try {
-				entry.tab = TAB_FACTORIES[id]?.(tabHostApi);
-			} catch (error) {
-				entry.error = error;
-			}
+		try {
+			entry.tab = TAB_FACTORIES[id]?.(tabHostApi);
+		} catch (error) {
+			entry.error = error;
 		}
 		views.set(id, entry);
 		return entry;
@@ -2839,12 +2838,6 @@ function installSidebar(tui) {
 		return acted ? { handled: true, render: true } : undefined;
 	};
 	const drawTab = (entry, width, fit) => {
-		if (entry.id === "agents") {
-			const drawn = railRows(width, ["gentle-agents"]);
-			entry.hits = drawn.hits;
-			entry.rows = drawn.rows.length ? drawn.rows.map(fit) : railCard(join(config.icons.agents, "Agents"), [fg(theme, "muted", "No agents running")], width, theme);
-			return;
-		}
 		try {
 			if (!entry.tab) throw entry.error ?? new Error("not available");
 			if (shown !== entry.id) {

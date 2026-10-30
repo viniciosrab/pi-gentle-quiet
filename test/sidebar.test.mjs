@@ -61,15 +61,14 @@ test("the status line is a Status card and a Context card on top of the column, 
 	assert.ok(status.render(60).every((row) => [...plain(row)].length <= 60));
 });
 
-test("the column stacks Agents and Todos in the square outline, a blank row under each title", async () => {
+test("the column draws Todos in the square outline, a blank row under its title, and no Agents card", async () => {
 	const { rows } = await wide();
 	const out = rows();
 	const tops = out.flatMap((row, i) => (row.startsWith("┌") ? [i] : []));
-	assert.equal(tops.length, 2);
-	assert.match(out[tops[0] + 1], /^│ ◈ Agents {2}1 active/, "Agents first");
-	assert.deepEqual(out.slice(tops[1] + 1, tops[1] + 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◔ Write it"], "a blank row under the title");
-	assert.equal(out[tops[1] + 4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
-	assert.ok(out[tops[1] - 1].startsWith("└"), "no blank row between the cards");
+	assert.equal(tops.length, 1);
+	assert.deepEqual(out.slice(1, 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◔ Write it"], "a blank row under the title");
+	assert.equal(out[4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
+	assert.ok(!out.some((row) => row.includes("Agents")), "Agents stays above the editor");
 	assert.ok(out.every((row) => [...row].length <= 59), "rows fit the column minus its scrollbar");
 });
 
@@ -87,29 +86,16 @@ test("the Todos card draws the task in progress with ◔, a glyph JetBrains Mono
 	assert.ok(raw.every((row) => !row.includes("◐")), "no ◐ left for the terminal to borrow from a fallback font");
 });
 
-test("the Agents card draws a running agent with ◔ too, keeping its color and leaving ◐ inside a name alone", async () => {
+test("with the column open the Agents card above the editor draws a running agent with ◔, keeping its color and leaving ◐ inside a name alone", async () => {
 	const loaded = await wide();
 	loaded.ui.setWidget("gentle-agents", () => ({ render: panel("Agents  1 active", "\x1b[34m◐\x1b[39m gentle-ai-worker  map ◐ glyphs", "✓ gentle-ai-explore") }));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
-	loaded.root[NODE]();
-	const raw = loaded.rail.render(60);
+	const agents = loaded.widgets["gentle-agents"](loaded.tui, theme);
+	assert.equal(loaded.root[NODE]().type, "hstack");
+	const raw = agents.render(60);
 	const out = raw.map(plain);
 	assert.ok(out.some((row) => row.startsWith("│ ◔ gentle-ai-worker  map ◐ glyphs")), "running");
 	assert.ok(out.some((row) => row.startsWith("│ ✓ gentle-ai-explore")), "done keeps its glyph");
 	assert.ok(raw.some((row) => row.includes("\x1b[34m◔\x1b[39m")), "the icon keeps gentle-pi's color");
-});
-
-test("the Agents batch clock stays on the title row, right-aligned", async () => {
-	const loaded = await wide();
-	const left = "❀ Agents  1 active · 1 done";
-	const card = (width) => [`   ${left}${" ".repeat(width - 5 - left.length - 6)}16m53s`, "", "   ◐ gentle-ai-worker"];
-	loaded.ui.setWidget("gentle-agents", () => ({ render: card }));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
-	loaded.root[NODE]();
-	const out = loaded.rows();
-	const top = out.findIndex((row) => row.startsWith("┌"));
-	assert.match(out[top + 1], /^│ ◈ Agents {2}1 active · 1 done +16m53s +│$/);
-	assert.equal(out.filter((row) => row.includes("16m53s")).length, 1);
 });
 
 test("a long Todos list still wraps and hangs its tasks when gentle-pi adds its unindented scroll row", async () => {
@@ -246,10 +232,13 @@ test("below the breakpoint the Todos card keeps scrolling inside", async () => {
 	assert.equal(out.filter((row) => /○ T\d+/.test(row)).length, 3);
 });
 
-test("Todos and Agents leave their usual places while the column is open", async () => {
+test("Todos leaves its usual place while the column is open; the Agents card stays inline, drawn as without the column", async () => {
 	const { todo, agents } = await wide();
 	assert.deepEqual(todo.render(100), []);
-	assert.deepEqual(agents.render(100), []);
+	const inline = agents.render(60).map(plain).map((row) => row.replace(/ +│$/, ""));
+	assert.deepEqual(inline, ["┌──────────────────────────────────────────────────────────┐", "│ ◈ Agents  1 active", "│ ◔ gentle-ai-worker", "└──────────────────────────────────────────────────────────┘"]);
+	const narrow = await wide({ columns: 139 });
+	assert.deepEqual(narrow.agents.render(60), agents.render(60), "the same rows as below the breakpoint");
 });
 
 test("the footer draws no row under the editor while the column is open", async () => {
@@ -296,12 +285,14 @@ test("without Agents or Todos the column stays open with the Status card alone: 
 	assert.equal(plain(side.entries[1].component.render(60)[1]).replace(/ +│$/, ""), "│ Status");
 });
 
-test("with Pi's own status line the column holds Agents and Todos, and nothing opens when they are empty", async () => {
+test("with Pi's own status line the column holds Todos, and nothing opens with Agents alone", async () => {
 	const loaded = await wide({}, { statusLine: { enabled: false } });
 	assert.equal(loaded.layout.type, "hstack");
 	assert.equal(loaded.side.entries.length, 2, "the tab bar, no Status card");
-	assert.match(plain(loaded.side.entries[1].component.render(60)[1]), /Agents/);
+	assert.match(plain(loaded.side.entries[1].component.render(60)[1]), /Todos/);
 	loaded.ui.setWidget("gentle-todo", undefined);
+	assert.equal(loaded.root[NODE](), loaded.native, "the Agents card does not open the column");
+	assert.ok(loaded.agents.render(60).length > 0, "it stays above the editor");
 	loaded.ui.setWidget("gentle-agents", undefined);
 	assert.equal(loaded.root[NODE](), loaded.native);
 });
@@ -320,22 +311,6 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
 });
 
-test("an agent's label and model are not cut off in the column: the details go on their own row", async () => {
-	const loaded = await wide();
-	const left = "◐ gentle-ai-worker  Phase 2 home page (resume)";
-	const right = "claude-sonnet-5-5 · high · 3.7M · 7m43s";
-	// gentle-pi lays the row out for the width it is given: details right-aligned when they fit.
-	const card = (width) => ["   ❀ Agents  1 active".padEnd(width), `   ${left}${" ".repeat(Math.max(3, width - 5 - left.length - right.length))}${right}`];
-	loaded.ui.setWidget("gentle-agents", () => ({ render: card }));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
-	loaded.root[NODE](); // the next layout pass reads the new card
-	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
-	const top = out.findIndex((row) => row.startsWith("┌"));
-	assert.deepEqual(out.slice(top + 1, top + 6), ["│ ◈ Agents  1 active", "│", `│ ${left.replace("◐", "◔")}`, `│   ${right}`, out[top + 5]]);
-	assert.ok(out[top + 5].startsWith("└"));
-	assert.ok(loaded.rows().every((row) => [...row].length <= 59));
-});
-
 // A Todos card like gentle-pi's: only a click on its title row toggles it; the title is row `titleRow` of the card.
 async function clickable(titleRow) {
 	const loaded = await wide();
@@ -350,7 +325,7 @@ async function clickable(titleRow) {
 	loaded.widgets["gentle-todo"](loaded.tui, theme);
 	loaded.root[NODE]();
 	const column = loaded.rail;
-	// Agents card: rows 0-4; Todos card from row 5, its title on row 6.
+	// Todos card from row 0, its title on row 1.
 	const mouse = (type, y, extra = {}) => column.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 100, screenY: y, ...extra });
 	return { seen, mouse };
 }
@@ -358,15 +333,14 @@ async function clickable(titleRow) {
 test("clicking the Todos title in the column toggles it, whatever row the card counts its title on", async () => {
 	for (const titleRow of [0, 1]) {
 		const { seen, mouse } = await clickable(titleRow);
-		assert.equal(mouse("click", 6)?.handled, true, `title row ${titleRow}`);
+		assert.equal(mouse("click", 1)?.handled, true, `title row ${titleRow}`);
 		assert.equal(seen.filter((event) => event.type === "click" && event.y === titleRow).length, 1);
 	}
 });
 
 test("clicks elsewhere in the column are not sent to the cards", async () => {
 	const { seen, mouse } = await clickable(0);
-	assert.equal(mouse("click", 8)?.handled, undefined, "on an item");
-	assert.equal(mouse("click", 2)?.handled, undefined, "on the Agents card");
+	assert.equal(mouse("click", 3)?.handled, undefined, "on an item");
 	assert.equal(mouse("click", 20)?.handled, undefined, "below the cards");
 	assert.deepEqual(seen, []);
 });
@@ -384,75 +358,30 @@ async function collapsibleAgents(headerRow) {
 			return { handled: true, render: true };
 		},
 	}));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
+	const agents = loaded.widgets["gentle-agents"](loaded.tui, theme);
 	loaded.root[NODE]();
-	const mouse = (type, y) => loaded.rail.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 100, screenY: y });
-	return { ...loaded, mouse, collapsed: () => collapsed };
+	// Pi hands the click to the card in its place above the editor.
+	const mouse = (type, y) => agents.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 5, screenX: 10, screenY: y });
+	return { ...loaded, agents, mouse, collapsed: () => collapsed };
 }
 
-test("clicking the Agents title in the column collapses gentle-agents' card and clicking again expands it", async () => {
+test("with the column open, clicking the Agents title above the editor still collapses gentle-agents' card and expands it again", async () => {
 	for (const headerRow of [0, 1]) {
-		const { mouse, rows, root, collapsed } = await collapsibleAgents(headerRow);
-		assert.equal(mouse("click", 3)?.handled, undefined, "an agent row is not the control");
-		assert.equal(mouse("click", 1)?.handled, true, `header row ${headerRow}`);
+		const { mouse, agents, root, collapsed } = await collapsibleAgents(headerRow);
+		assert.equal(root[NODE]().type, "hstack");
+		assert.equal(mouse("click", headerRow)?.handled, true, `header row ${headerRow}`);
 		assert.equal(collapsed(), true);
-		root[NODE]();
-		const out = rows();
+		const out = agents.render(60).map(plain);
 		assert.match(out[1], /^│ ◈ Agents ▸ Expand {2}2 active/);
 		assert.ok(!out.some((row) => row.includes("gentle-ai-explore")), "only the first agent stays");
-		assert.equal(mouse("click", 1)?.handled, true);
-		root[NODE]();
-		assert.match(rows()[1], /^│ ◈ Agents ▾ Collapse/);
+		assert.equal(mouse("click", headerRow)?.handled, true);
+		assert.match(plain(agents.render(60)[1]), /^│ ◈ Agents ▾ Collapse/);
 	}
 });
 
 test("the wheel over the Todos card reaches it", async () => {
 	const { seen, mouse } = await clickable(0);
-	assert.equal(mouse("wheel", 8, { wheelDelta: 3 })?.handled, true);
+	assert.equal(mouse("wheel", 3, { wheelDelta: 3 })?.handled, true);
 	assert.equal(seen[0].type, "wheel");
 	assert.equal(seen[0].wheelDelta, 3);
-});
-
-test("an agent's long description goes on under its name instead of being cut off", async () => {
-	const loaded = await wide();
-	const left = "◐  gentle-ai-explore  Auditar conteúdo, acesso e comentários do aluno na área de membros";
-	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  1 active", `   ${left}${" ".repeat(Math.max(3, width - 6 - left.length))}14s`] }));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
-	loaded.root[NODE]();
-	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
-	const first = out.findIndex((row) => row.startsWith("◔ gentle-ai-explore  Auditar"));
-	assert.ok(first > 0);
-	assert.deepEqual(out.slice(first, first + 3), ["◔ gentle-ai-explore  Auditar conteúdo, acesso e", "  comentários do aluno na área de membros", "  14s"], "the rest of the description, then the details, under the name");
-	assert.ok(out.every((row) => !row.includes("…")), "nothing is cut off");
-});
-
-test("an agent's name and details start in the column of the Agents title, past gentle-pi's double gap", async () => {
-	const loaded = await wide();
-	const left = "\x1b[34m◐\x1b[39m  gentle-ai-worker  variant A Atelier";
-	const right = "claude-opus-5-5 · medium · 507k · 3m46s";
-	loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  3 active", `   ${left}${" ".repeat(Math.max(3, width - 5 - plain(left).length - right.length))}${right}`] }));
-	loaded.widgets["gentle-agents"](loaded.tui, theme);
-	loaded.root[NODE]();
-	const out = loaded.rows();
-	const title = out.find((row) => row.includes("Agents  3 active"));
-	const name = out.find((row) => row.includes("gentle-ai-worker"));
-	const details = out[out.indexOf(name) + 1];
-	assert.equal(name.indexOf("gentle-ai-worker"), title.indexOf("Agents"));
-	assert.equal(details.indexOf("claude-opus-5-5"), title.indexOf("Agents"));
-	assert.equal(name.indexOf("◔"), title.indexOf("◈"), "the status icon stays under the title icon");
-});
-
-test("an agent's details line up under its name, however far the name sits from the icon", async () => {
-	for (const icon of ["◐ ", "◐  "]) {
-		const loaded = await wide();
-		const left = `${icon}gentle-ai-verify  Verify Phase 2 home`;
-		const right = "claude-opus-5-5 · high · 26k · 15s";
-		loaded.ui.setWidget("gentle-agents", () => ({ render: (width) => ["   ❀ Agents  1 active", `   ${left}${" ".repeat(Math.max(3, width - 5 - left.length - right.length))}${right}`] }));
-		loaded.widgets["gentle-agents"](loaded.tui, theme);
-		loaded.root[NODE]();
-		const out = loaded.rows();
-		const name = out.find((row) => row.includes("gentle-ai-verify"));
-		const details = out[out.indexOf(name) + 1];
-		assert.equal(details.indexOf("claude-opus-5-5"), name.indexOf("gentle-ai-verify"), JSON.stringify(icon));
-	}
 });

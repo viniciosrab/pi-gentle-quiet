@@ -8,10 +8,9 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 
 - **S1 — scope: side column only.** User: "Mas essa implementação só vai valer para a barra lateral, né? Quando não tiver a pétala toda, ele fica como tá, né? Não modifica, é só para a barra lateral, sabe?" Below the side-column breakpoint nothing changes (status line, cards, editor byte-identical).
 - **S2 — existing things unchanged.** User: "o que já existe de nossas coisas a gente não vai alterar certo? A gente só vai tipo aqui o status, o contexto, o jeito que aparece os cards de subagente, enfim os tudo, nada." The Status, Context, Jobs, Agents and Todos cards keep their look and behavior.
-- **S3 — the tabs.** User: "A gente só vai implementar esses negócios aí do single dev, sabe? Aí que aparece tipo o main vai ser o que a gente já tem né? Aí tem a parte do git, prof que é de parte dos arquivos, main que é do engram etc. Tu vai implementar todos, mas com as coisas que a gente tem aqui já do nosso jeito, entendeu? E as coisas que não tem você bota do jeito que tá ali originalmente do single dev, né?" Tabs, as in the user's screenshot: `1:MAIN 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE`, active tab drawn `[ 6:TREE ]`.
-  - MAIN: today's column as it is (Status and Context fixed, then Jobs, Agents, Todos).
+- **S3 — the tabs.** User: "A gente só vai implementar esses negócios aí do single dev, sabe? Aí que aparece tipo o main vai ser o que a gente já tem né? Aí tem a parte do git, prof que é de parte dos arquivos, main que é do engram etc. Tu vai implementar todos, mas com as coisas que a gente tem aqui já do nosso jeito, entendeu? E as coisas que não tem você bota do jeito que tá ali originalmente do single dev, né?" Tabs (revised by L5): `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE`, active tab drawn `[ 5:TREE ]`.
+  - MAIN: Status and Context fixed, then Jobs and Todos. The Agents card is not in the side column: it stays inline above the editor, as without the side column (L5).
   - GIT: cute's Git tab (branches + commit graph card, working tree / branch diff card, editor and diff launchers).
-  - AGENTS: gentle-quiet's Agents card on its own.
   - PROF: cute's profiles tab, with gentle-pi's profiles and gentle-quiet's plan usage instead of pi-sdd-profiles and CLIProxyAPI.
   - MEM: cute's memory tab (Engram card, handoff, ecosystem, tools); cards whose package is not installed are left out.
   - TREE: cute's project explorer (git status badges, folder toggles, `[ ↗ nvim ]` launcher).
@@ -34,6 +33,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T4 | S3 MEM | worker (parallel): `extensions/sidebar/mem.ts` | 030093c |
 | T5 | S3 TREE | worker (parallel): `extensions/sidebar/tree.ts` | 3fb3edd |
 | T6 | all | parent: README, full suite, deploy, live check | |
+| T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | |
 
 ## Log
 
@@ -41,3 +41,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L2 (evidence): cute at a1add72 has tabs `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:YT` (src/sidebar-tabs.ts:24-31); AGENTS was folded into PROF after the user's screenshot. The user's screenshot order is used. Exploration map: subagent task mvuiqm49-1-0f45.
 - L3 (evidence): T1 done (worker mvuiv74b-2-f71c), 252/252 tests; tab contract `createTab(host): SidebarTab` documented in extensions/sidebar/tabs.ts. Slice boundary: T1 is its own commit; T2-T5 one commit each.
 - L4 (evidence): T2-T5 done by parallel workers; full suite 342/342. PROF's quota bar switched from ▰▱ to ■□ to match the Context card the user chose. Deployed: extensions/gentle-quiet.ts and extensions/sidebar/ to ~/.pi/agent/extensions/.
+- L5 (user, verbatim): "no original não tem aquela parte de agentes né, no original a parte do agentes é como original, ela fica inline ali né, não fica na tabela lateral. Pra melhor experiência [...] qual que seria o melhor, como no original, inline né [...] ou nessa aba de agentes??" Recommendation given: inline, drop the AGENTS tab. User: "sim".

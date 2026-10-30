@@ -100,6 +100,27 @@ test("with Gentle Shell off, running jobs get their own card on top of the side 
 	assert.ok(out.slice(2).every((row) => !row.includes("⧗")), "the rows spin with Pi's Working spinner");
 });
 
+test("MAIN holds Jobs then Todos under the Status and Context cards; the Agents card stays inline above the editor", async () => {
+	shellOff();
+	const loaded = await wide();
+	const panel = (title, ...rows) => (width) => [`   ❀ ${title}`, ...rows.map((row) => `   ${row}`)].map((row) => row.padEnd(width));
+	loaded.ui.setWidget("gentle-todo", () => ({ render: panel("Todos  1 of 2", "◐ Write it", "○ Test it") }));
+	loaded.ui.setWidget("gentle-agents", () => ({ render: panel("Agents  1 active", "◐ gentle-ai-worker") }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	const agents = loaded.widgets["gentle-agents"](loaded.tui, theme);
+	loaded.publish([build]);
+	const status = loaded.layout().status.render(60).map(plain).map((row) => row.replace(/ +│$/, ""));
+	assert.ok(status.includes("│ Status") && status.includes("│ Context"));
+	const out = loaded.rows();
+	const titles = out.filter((row, i) => i > 0 && out[i - 1].startsWith("┌")).map((row) => row.replace(/^│ \S+ (\w+).*$/u, "$1"));
+	assert.deepEqual(titles, ["Jobs", "Todos"]);
+	assert.ok(!out.some((row) => row.includes("Agents")));
+	assert.match(plain(agents.render(60)[1]), /^│ ◈ Agents {2}1 active/);
+	// The cards outlive a load: leave the column as the other tests expect it.
+	loaded.ui.setWidget("gentle-todo", undefined);
+	loaded.ui.setWidget("gentle-agents", undefined);
+});
+
 test("the Jobs title icon is an Icons choice, saved: another glyph or none", async () => {
 	shellOff();
 	const { publish, rows } = await wide({ config: { icons: { jobs: "◷" } } });

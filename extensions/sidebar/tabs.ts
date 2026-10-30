@@ -1,11 +1,11 @@
 // Tabs of gentle-quiet's side column, after pi-cinlodev-cute's rail: a tab bar fixed on top of the column,
-// "1:MAIN 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE", the active tab drawn "[ 6:TREE ]" in accent bold, the
+// "1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE", the active tab drawn "[ 5:TREE ]" in accent bold, the
 // others with a dim key and a muted label, then a "─" divider row. A left click on the bar (or its divider)
 // picks the nearest tab; the wheel over it cycles the tabs, wrapping at both ends. The active tab lives in
 // memory and starts at MAIN.
 //
-// MAIN (today's column) and AGENTS (gentle-quiet's Agents card alone) are drawn by gentle-quiet.ts. GIT,
-// PROF, MEM and TREE are modules in this folder, one file each, registered in TAB_FACTORIES below; a tab
+// MAIN (today's column: Status, Context, Jobs, Todos) is drawn by gentle-quiet.ts; the Agents card stays
+// inline above the editor, as in cute. GIT, PROF, MEM and TREE are modules in this folder, one file each, registered in TAB_FACTORIES below; a tab
 // is written without touching gentle-quiet.ts or another tab's file.
 //
 // This folder has no index.ts on purpose: Pi loads only top-level files and folders with an index or a
@@ -51,7 +51,7 @@
 //       Theme painting that degrades to plain text. Roles as Pi's: "accent", "border", "dim", "muted", "text",
 //       "toolTitle", "success", "warning", "error", "toolDiffAdded", "toolDiffRemoved", ...
 //   card(title: string, rows: string[], width: number): string[]
-//       A card as the column draws Status, Agents and Todos: a square outline in the border color, the title
+//       A card as the column draws Status, Jobs and Todos: a square outline in the border color, the title
 //       bold in toolTitle, a blank row, then `rows` (each cut to fit). No rows: the title alone. With the
 //       outline turned off in /gentle-quiet, the same rows indented by one column.
 //   box(rows: string[], width: number): string[]
@@ -121,10 +121,9 @@ export type CreateTab = (host: SidebarHost) => SidebarTab;
 export const TABS = [
 	{ id: "main", key: "1", label: "MAIN" },
 	{ id: "git", key: "2", label: "GIT" },
-	{ id: "agents", key: "3", label: "AGENTS" },
-	{ id: "prof", key: "4", label: "PROF" },
-	{ id: "mem", key: "5", label: "MEM" },
-	{ id: "tree", key: "6", label: "TREE" },
+	{ id: "prof", key: "3", label: "PROF" },
+	{ id: "mem", key: "4", label: "MEM" },
+	{ id: "tree", key: "5", label: "TREE" },
 ];
 
 /** The tabs drawn by their own module, by id. Tests swap entries for stand-ins. */

@@ -428,7 +428,7 @@ test("in gentle-quiet's column: PROF draws the Profiles card and a click on a pr
 	loaded.footer()?.(tui, theme, { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
 	const side = () => root[NODE]().entries?.[1]?.component?.[NODE]?.();
 	const bar = side().entries[0].component;
-	const x = plain(bar.render(60)[0]).indexOf("4:PROF") + 1;
+	const x = plain(bar.render(60)[0]).indexOf("3:PROF") + 1;
 	bar.handleMouse({ type: "click", button: "left", x, y: 0, width: 60, height: 2, screenX: 120, screenY: 0 });
 	const content = () => side().entries.at(-1).component;
 	content().render(60);
