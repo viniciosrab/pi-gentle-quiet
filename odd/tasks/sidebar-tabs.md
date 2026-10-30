@@ -55,6 +55,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T19 | S10 (L19) | worker: Nerd Font glyphs in Symbols' colors; drop GentleSymbols.ttf | e6222c9 |
 | T20 | S2 (L20) | worker: MCP back to a plain labelled row in the Status card | 90ba942 |
 | T21 | S10 (L21) | worker: the same Nerd Font icons about 20% larger, from a small generated font, with fallback | 9638c42 |
+| T22 | S8, S6 (L22) | worker: GIT drops [diff] and its hint; the preview closes on a click outside it | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -80,3 +81,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L19 (user, verbatim): "tudo torto feio isso que voce fez nao tem outra opcao melhor que deixe realmente bons? agora que voce falo Usar ícones da Nerd Font no estilo do Symbol e uma boa?" Converting Symbols SVGs to ~12 px glyphs cannot look clean. Recommendation: Nerd Font glyphs with Symbols' mapping and colors, drop the converted font. User: "ok". S10 revised; T19.
 - L20 (user, verbatim): "e os negocio o mcp aqui de acordem vamos desfazer deix padrao como ta os outros so coloque MCP dai a resposta entendeu [...] como ta os outros entendeu" The MCP divider, server list and fold go; MCP becomes a labelled row like Project/Branch/Model: "MCP" muted, "5/5" flush right (warning when a server is offline). T20.
 - L21 (user, verbatim): "os icones pode aumentar um poquinho ne" Options: (1) pick larger Nerd glyphs, (2) a small font with the same Nerd glyphs ~20% larger. User: "2". T21.
+- L22 (user, verbatim): "E aqui, ali do git que aparece, esse negócio de Diff, ou View Diff, pode tirar isso aí, porque a gente quando clica ali, ele já abre o pop-up com o que a gente quer olhar, né? E aí se a gente clica em View Diff, ele abre uma nova aba para ver, então não faz sentido [...] E quando abre o popup, que a gente abre um arquivo, para a gente fechar ele tem que apertar ESC, né? Continua igual. Só que eu quero também a função, se eu clicar com o mouse fora, eu quero que ele feche, entendeu?" GIT rows lose "[diff]", the "click: … · [diff]: view diff" hint row goes, and diff no longer opens a new tab from GIT; Esc still closes the preview, and a click outside it closes it too. T22.
