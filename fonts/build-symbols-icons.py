@@ -8,12 +8,14 @@
 # Each SVG goes through picosvg (strokes, circles, rects, lines, transforms and clip paths become filled paths),
 # then its shapes are merged in paint order: a shape lying inside what is already drawn, in a color other than
 # the one under it, cuts a hole (the white letters on a colored badge); any other shape adds to the glyph.
-# The glyph is the icon's 24-unit view box drawn SIZE units tall, centred on the cap height like the Nerd Font
-# icons. Its advance is one cell (600 of a 1000 em), so it overflows into the space TREE draws after it, about
-# as wide as the two-cell emoji it stands in for. FreeType does not hint these glyphs across (foot's slight
-# hinting), so the outline is fitted to the pixel grid of the terminal's size here: straight edges and curve
-# extremes go to whole pixels, strokes keep a whole-pixel width and the gaps between parts a pixel at least, the
-# rest of the outline follows them; slivers left by the merges are dropped. The color is the one painting the largest area, a grey only when nothing else is painted
+# The glyph is sized by its ink, not its view box (the SVGs pad their drawings differently): the ink is scaled to
+# HEIGHT units tall, or WIDTH wide when that is the tighter fit, so a page, a folder and a circle read the same
+# size; it is centred on the cap height like the Nerd Font icons. Its advance is one cell (600 of a 1000 em), so it
+# overflows into the space TREE draws after it, about as wide as the two-cell emoji it stands in for. FreeType
+# does not hint these glyphs across (foot's slight hinting), so the outline is fitted to the pixel grid of the
+# terminal's size here: straight edges, curve extremes and the ink's own edges go to whole pixels, strokes keep a
+# whole-pixel width and the gaps between parts a pixel at least, the rest of the outline follows them; slivers
+# left by the merges are dropped. The color is the one painting the largest area, a grey only when nothing else is painted
 # (a folder's colored badge gives the folder its color).
 #
 # Run: uv run --no-project --with fonttools --with picosvg python fonts/build-symbols-icons.py [vscode-symbols checkout]
@@ -31,6 +33,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.misc.timeTools import timestampFromString
 from fontTools.pens.areaPen import AreaPen
 from fontTools.pens.basePen import BasePen
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.reverseContourPen import ReverseContourPen
 from fontTools.pens.transformPen import TransformPen
@@ -48,8 +51,9 @@ ADVANCE = 600
 # (13.73 px per em, 8 px cells), which renders the Symbols icons' 1.5-unit strokes one pixel wide.
 PX = 1000 / (round(10.3 * 64 * 96 / 72) / 64)
 CENTRE_Y = 5 * PX  # about half the cap height (730), where the Nerd Font icons are centred, on a pixel line
-SIZE = 16 * PX  # the view box's side: the icon spans its own cell and the space after it
-CENTRE_X = SIZE / 2  # from the cell's left edge
+HEIGHT = 12 * PX  # the ink's height: about the cap height and a pixel over and under it
+WIDTH = 13 * PX  # the widest ink (folders): its own cell and most of the space after it, 3 px clear of the name
+CENTRE_X = 8 * PX  # from the cell's left edge
 STEM_MAX = 3 * PX  # the widest stroke kept a whole number of pixels wide
 EDGE_MIN = PX  # the shortest straight run or curve put on the grid
 ROOT = Path(__file__).resolve().parent.parent
@@ -368,12 +372,25 @@ def moved(value, pairs):
     return value
 
 
+def with_extremes(pairs, low, high):
+    """The fitted edges with the ink's own extremes on the axis put on pixel lines too, so that a rounded corner
+    or a curve's tip is not dragged off the size the icon was scaled to by the nearest fitted edge."""
+    snap = lambda value: round(value / PX) * PX
+    if not pairs or low < pairs[0][0] - PX / 16:
+        pairs = [(low, min(snap(low), pairs[0][1]) if pairs else snap(low)), *pairs]
+    if high > pairs[-1][0] + PX / 16:
+        pairs = [*pairs, (high, max(snap(high), pairs[-1][1]))]
+    return pairs
+
+
 def grid_fitted(path):
     """The path with its stems on whole pixels at the terminal's size (see PX), so they render as solid lines."""
-    xs, ys = fitted_axis(path, 0), fitted_axis(path, 1)
-    left, _, right, _ = path.bounds
-    if moved(right, xs) > CENTRE_X + SIZE / 2 + PX / 16 and moved(left, xs) >= PX:
-        # Edges pushed apart made it wider than the view box: a pixel to the left, off the file name after it.
+    ink = BoundsPen(None)
+    path.draw(ink)
+    left, bottom, right, top = ink.bounds
+    xs, ys = with_extremes(fitted_axis(path, 0), left, right), with_extremes(fitted_axis(path, 1), bottom, top)
+    if moved(right, xs) > CENTRE_X + WIDTH / 2 + PX / 2 + PX / 16 and moved(left, xs) >= PX:
+        # Edges pushed apart made it wider than WIDTH: a pixel to the left, off the file name after it.
         xs = [(value, fitted - PX) for value, fitted in xs]
     fitted = pathops.Path()
     draw = {"moveTo": fitted.moveTo, "lineTo": fitted.lineTo, "curveTo": fitted.cubicTo}
@@ -387,7 +404,6 @@ def grid_fitted(path):
 
 def icon_glyph(file):
     svg = prepared(file).topicosvg()
-    box = svg.view_box()
     shape = None
     areas = {}
     below = []  # the shapes painted so far, as (path, color)
@@ -413,12 +429,23 @@ def icon_glyph(file):
         pass
     if shape.area == 0:
         return None, None
-    scale = SIZE / max(box.w, box.h)
-    cx, cy = box.x + box.w / 2, box.y + box.h / 2
-    # SVG y grows downwards: flip it, then centre the view box on (CENTRE_X, CENTRE_Y).
-    transform = (scale, 0, 0, -scale, CENTRE_X - cx * scale, CENTRE_Y + cy * scale)
+    # SVG y grows downwards: flip it, at about the final size so that the slivers dropped are the ones too small
+    # to show, then measure the ink that is left.
+    _, top, _, bottom = shape.bounds
+    rough = HEIGHT / (bottom - top)
+    flipped = pathops.Path()
+    shape.draw(TransformPen(CubicPen(flipped), (rough, 0, 0, -rough, 0, 0)))
+    flipped = without_specks(flipped)
+    ink = BoundsPen(None)  # the curves' own extremes, not their control points (Path.bounds)
+    flipped.draw(ink)
+    left, bottom, right, top = ink.bounds
+    scale = min(HEIGHT / (top - bottom), WIDTH / (right - left))
+    # Centred on (CENTRE_X, CENTRE_Y), its left and bottom edges on pixel lines so that icons of one size meet the
+    # grid the same way.
+    x = round((CENTRE_X - (right - left) * scale / 2) / PX) * PX
+    y = round((CENTRE_Y - (top - bottom) * scale / 2) / PX) * PX
     placed = pathops.Path()
-    shape.draw(TransformPen(CubicPen(placed), transform))
+    flipped.draw(TransformPen(CubicPen(placed), (scale, 0, 0, scale, x - left * scale, y - bottom * scale)))
     placed = grid_fitted(without_specks(placed))
     area = AreaPen()
     placed.draw(area)
