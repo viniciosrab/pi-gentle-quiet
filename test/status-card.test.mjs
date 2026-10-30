@@ -176,8 +176,8 @@ const mcpFile = path.join(path.dirname(configFile), "mcp.json");
 const writeMcp = (servers) => writeFileSync(mcpFile, JSON.stringify({ mcpServers: servers }));
 const mcpServers = { codegraph: { command: "codegraph" }, context7: { command: "npx" }, "my-db": { url: "https://example.com/mcp" }, off: { command: "x", enabled: false } };
 const mcpTools = ["mcp__codegraph__query", "mcp__codegraph__explore", "mcp__my_db__list", { name: "mcp__context7__resolve", exposure: "hidden", namespace: { name: "mcp__context7" } }];
-const DIVIDER = "─".repeat(55);
-const FOLDED = /^─{2,} MCP 2\/3$/u;
+const DIVIDER = `${"─".repeat(53)} ▾`; // open: the line ends in a down arrow
+const FOLDED = /^─{2,} MCP 2\/3 ▸$/u; // folded: the count, then a right arrow
 async function withMcp(options = {}) {
 	writeMcp(mcpServers);
 	const loaded = await wide({ statuses: { "gentle:mode": "Perm: Yolo" }, ...options, session: { tools: mcpTools, ...options.session } });
@@ -206,7 +206,7 @@ test("the MCP section: a divider across the card, then one row per server with i
 	assert.match(status[11], /^my-db {2,}active · 1 tool$/);
 	for (const row of status.slice(8)) assert.equal([...row].length, 55, row);
 	const rows = raw();
-	assert.ok(rows.some((row) => painted(row, "border", DIVIDER)), "the divider in the outline's color");
+	assert.ok(rows.some((row) => painted(row, "border", "─".repeat(53)) && painted(row, "accent", "▾")), "the divider in the outline's color");
 	assert.ok(rows.some((row) => painted(row, "text", "codegraph") && painted(row, "dim", "active · 2 tools")));
 	assert.ok(rows.some((row) => painted(row, "warning", "offline")));
 });
@@ -238,7 +238,7 @@ test("folded with every server online the count is in text", async (t) => {
 	writeMcp({ codegraph: { command: "codegraph" } });
 	const loaded = await wide({ config: { sidebar: { mcpCollapsed: true } }, session: { tools: ["mcp__codegraph__query"] } });
 	const row = loaded.raw().find((r) => plain(r).includes(" MCP "));
-	assert.match(plain(row), /^│ ─{2,} MCP 1\/1 │$/u);
+	assert.match(plain(row), /^│ ─{2,} MCP 1\/1 ▸ │$/u);
 	assert.ok(painted(row, "text", "1/1"));
 });
 
@@ -279,7 +279,7 @@ test("without the outline the MCP divider is still the row a click toggles; the 
 	assert.equal(event("wheel", { button: "none", wheelDelta: 1 }), undefined, "the wheel does what it did");
 	assert.equal(status().handleMouse({ type: "click", button: "left", x: 4, y: y + 1, width: 60, height: 20, screenX: 124, screenY: y }), undefined, "a server row is not the toggle");
 	assert.deepEqual(event("click"), { handled: true, render: true });
-	assert.match(plain(raw()[y]), /^ ─{2,} MCP 2\/3$/u);
+	assert.match(plain(raw()[y]), /^ ─{2,} MCP 2\/3 ▸$/u);
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
 });
 

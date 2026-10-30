@@ -2306,10 +2306,12 @@ function statusCardRows(t, footerData, width, options) {
 	// per server. Collapsed, the divider ends in "MCP n/m". Its "MCP n/m" leaves the statuses.
 	const mcp = p.servers?.servers?.length ? p.servers : undefined;
 	const collapsed = Boolean(config.sidebar.mcpCollapsed);
-	const folded = mcp && collapsed ? ` MCP ${mcp.online}/${mcp.total}` : "";
+	// The divider ends in an arrow that says what a click does: ▾ while open, ▸ once folded.
+	const folded = mcp && collapsed ? ` MCP ${mcp.online}/${mcp.total} ▸` : " ▾";
 	const divider = mcp && [
 		fg(t, "border", "─".repeat(Math.max(0, inner - visibleWidth(folded)))),
-		folded && ` ${fg(t, "muted", "MCP")} ${fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total}`)}`,
+		collapsed ? ` ${fg(t, "muted", "MCP")} ${fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total}`)}` : "",
+		` ${fg(t, "accent", collapsed ? "▸" : "▾")}`,
 	].join("");
 	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));
 	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => spread(fg(t, "text", server.name), serverState(server))) : [];
