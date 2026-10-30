@@ -32,9 +32,9 @@ same; only how it is drawn changes.
   and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
-  source); **PR** the branch's pull request from `gh` (state, mergeability, each CI check, the review
-  decision and unresolved review comments, or commits ahead/behind with no PR), a click opening the PR or a
-  check in the browser. Files and diffs open in your editor in a herdr tab
+  source); **PR** the repository's open pull requests from `gh`, one per row with a checks summary (✓ ✗ ⧗),
+  the current branch's PR first with its detail (state, mergeability, each CI check, the review decision and
+  unresolved review comments), a click opening the PR or a check in the browser. Files and diffs open in your editor in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press

@@ -1,15 +1,18 @@
-// The PR tab of gentle-quiet's side column (the contract is in ./tabs.ts): the current branch's pull request
+// The PR tab of gentle-quiet's side column (the contract is in ./tabs.ts): the repository's open pull requests
 // and CI in one card, read with gh (./pr-data.ts), read-only towards GitHub.
 //
-// - The PR: "#17 <title>", its state (open, draft, merged, closed) and mergeability, and "branch → base".
-// - Checks: one row per check with its state flush right (✓ passed, ✗ failed, ⧗ running, – skipped), counted
-//   in the section title ("Checks 2/3").
-// - Reviews: the review decision, the unresolved review comments and the latest one's author and first line.
-// - Without a PR: the commits ahead and behind the upstream ("not pushed" without one) and a note. Without gh,
-//   signed out or outside GitHub: one dim row saying so.
+// - The current branch's PR, when it is open, first with its detail:
+//   - "#17 <title>", its state (open, draft) and mergeability.
+//   - Checks: one row per check with its state flush right (✓ passed, ✗ failed, ⧗ running, – skipped),
+//     counted in the section title ("Checks 2/3").
+//   - Reviews: the review decision, the unresolved review comments and the latest one's author and first line.
+// - The other open PRs, one row each: "#21 <title>" and flush right its checks summary (✓ all passed, ✗ one
+//   failed, ⧗ one running, nothing without checks), "draft" before it for drafts. Under an "Open pull requests"
+//   title after the detail. No branch names and no ahead/behind counts.
+// - No open PR: "No open pull requests". Without gh, signed out or outside GitHub: one dim row saying so.
 //
-// A click on the PR's rows opens it in the browser, on a check its details link, on the latest comment the
-// comment (xdg-open, detached). The column scrolls what does not fit. The PR is read when the tab is shown,
+// A click on a PR's rows opens it in the browser, on a check its details link, on the latest comment the
+// comment (xdg-open, detached). The column scrolls what does not fit. The PRs are read when the tab is shown,
 // every 30 s while it stays shown and when the branch changes (probed every 5 s); nothing runs while it is
 // hidden, and render() only draws what was read.
 // @ts-nocheck
@@ -18,7 +21,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { loadPr, prDeps, prTiming } from "./pr-data.ts";
 
-const TITLE = "⇄ Pull request";
+const TITLE = "⇄ Pull requests";
 const STATES = { open: ["success", "● open"], draft: ["dim", "◌ draft"], merged: ["accent", "● merged"], closed: ["error", "● closed"] };
 const MERGES = {
 	clean: ["success", "✓ clean"],
@@ -29,6 +32,7 @@ const MERGES = {
 	checking: ["dim", "… checking"],
 };
 const CHECKS = { passed: ["success", "✓ passed"], failed: ["error", "✗ failed"], running: ["warning", "⧗ running"], skipped: ["dim", "– skipped"] };
+const SUMMARY = { passed: ["success", "✓"], failed: ["error", "✗"], running: ["warning", "⧗"] };
 const REVIEWS = { approved: ["success", "✓ approved"], "changes requested": ["error", "✗ changes requested"], "review required": ["warning", "⧗ review required"] };
 
 export function createTab(host: SidebarHost): SidebarTab {
@@ -120,7 +124,6 @@ export function createTab(host: SidebarHost): SidebarTab {
 		rows.push({ left: `${c("accent", `#${pr.number}`)} ${c("text", pr.title)}`, url: pr.url });
 		const merge = pr.merge && MERGES[pr.merge];
 		rows.push({ left: [badge(STATES[pr.state] ?? STATES.open), merge && badge(merge)].filter(Boolean).join(c("dim", " · ")), url: pr.url });
-		rows.push({ left: `${c("muted", pr.head)} ${c("dim", "→")} ${c("muted", pr.base)}`, url: pr.url });
 
 		const checks = pr.checks;
 		const counted = checks.filter((check) => check.state !== "skipped");
@@ -139,15 +142,15 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return rows;
 	};
 
-	const noPrRows = ({ branch, ahead, behind }) => {
-		const name = branch || "HEAD";
-		const right =
-			ahead === undefined
-				? c("warning", "not pushed")
-				: ahead || behind
-					? [c("warning", `↑${ahead}`), c("error", `↓${behind}`)].join(" ")
-					: c("success", "✓ up to date");
-		return [{ left: `${c("accent", host.icons?.branch || "⎇")} ${c("text", name)}`, right }, { left: "" }, { left: c("muted", `No pull request for ${name}`) }];
+	const listRows = ({ current, open }) => {
+		const rows = current ? prRows(current) : [];
+		if (current && open.length) rows.push({ left: "" }, { left: `${title("Open pull requests")} ${c("muted", String(open.length))}` });
+		for (const item of open) {
+			const right = [item.draft && c("dim", "draft"), item.checks && badge(SUMMARY[item.checks])].filter(Boolean).join(" ");
+			rows.push({ left: `${c("accent", `#${item.number}`)} ${c("text", item.title)}`, right, url: item.url });
+		}
+		if (!rows.length) rows.push({ left: c("muted", "No open pull requests") });
+		return rows;
 	};
 
 	return {
@@ -166,8 +169,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			if (!state.cwd) rows = [{ left: c("dim", "No working directory") }];
 			else if (!result) rows = [{ left: c("dim", "refreshing…") }];
 			else if (result.kind === "problem") rows = [{ left: c("dim", result.message) }];
-			else if (result.kind === "none") rows = noPrRows(result);
-			else rows = prRows(result);
+			else rows = listRows(result);
 			const offset = (host.box([], width).length ? 1 : 0) + 2; // the outline's top, the title and its blank row
 			state.hits = new Map();
 			rows.forEach((row, index) => {

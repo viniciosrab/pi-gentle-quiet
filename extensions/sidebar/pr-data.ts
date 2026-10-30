@@ -1,7 +1,7 @@
-// The PR tab's data: the current branch's pull request from `gh pr view --json ...`, its unresolved review
-// threads from `gh api graphql`, and without a PR the commits ahead and behind the upstream (host.git). Every
-// process call is asynchronous with a timeout; a failure comes back as a short problem for the card, never a
-// throw. The tab only reads from GitHub. Parsers are pure functions.
+// The PR tab's data: the repository's open pull requests from `gh pr list`, and when the current branch has one
+// of them its detail from `gh pr view --json ...` with its unresolved review threads from `gh api graphql`.
+// Every process call is asynchronous with a timeout; a failure comes back as a short problem for the card,
+// never a throw. The tab only reads from GitHub. Parsers are pure functions.
 // @ts-nocheck
 
 import { execFile, spawn } from "node:child_process";
@@ -19,6 +19,9 @@ export const prDeps = {
 	now: () => Date.now(),
 	open: (url) => openUrl(url),
 };
+
+const LIST_FIELDS = "number,title,url,isDraft,headRefName,author,statusCheckRollup";
+const LIST_LIMIT = "30";
 
 const FIELDS = "number,title,state,isDraft,mergeable,mergeStateStatus,url,headRefName,baseRefName,reviewDecision,statusCheckRollup,comments,reviews,latestReviews";
 
@@ -51,7 +54,7 @@ function gh(args, cwd) {
 	});
 }
 
-/** Why `gh pr view` failed, for the card: "none" when the branch has no PR. */
+/** Why a `gh pr` call failed, for the card: "none" when the branch has no PR. */
 export function ghProblem(error, stderr = "") {
 	const text = `${stderr}\n${error?.message ?? ""}`;
 	if (error?.code === "ENOENT") return "gh is not installed";
@@ -83,6 +86,28 @@ export function parseChecks(rollup = []) {
 		}
 		return { name, state, url };
 	});
+}
+
+/** One summary of a PR's checks: failed when any failed, else running when any runs, else passed; none without checks. */
+export function checksSummary(checks = []) {
+	const counted = checks.filter((check) => check.state !== "skipped");
+	if (!counted.length) return undefined;
+	if (counted.some((check) => check.state === "failed")) return "failed";
+	if (counted.some((check) => check.state === "running")) return "running";
+	return "passed";
+}
+
+/** `gh pr list --json` as rows: { number, title, url, draft, head, author, checks }. */
+export function parseList(json) {
+	return (Array.isArray(json) ? json : []).map((item) => ({
+		number: item?.number,
+		title: String(item?.title ?? ""),
+		url: item?.url,
+		draft: Boolean(item?.isDraft),
+		head: item?.headRefName ?? "",
+		author: item?.author?.login ?? "",
+		checks: checksSummary(parseChecks(item?.statusCheckRollup)),
+	}));
 }
 
 const MERGE = { CLEAN: "clean", HAS_HOOKS: "clean", DIRTY: "conflicts", BLOCKED: "blocked", UNSTABLE: "unstable", BEHIND: "behind" };
@@ -149,34 +174,43 @@ const repoOf = (url) => {
 
 /**
  * Everything the tab shows for `cwd`, read once:
- *   { kind: "pr", branch, pr, threads }       the branch has a PR (threads undefined when graphql failed)
- *   { kind: "none", branch, ahead, behind }   no PR; ahead undefined when the branch has no upstream
+ *   { kind: "list", branch, current, open }   current: { pr, threads } for the branch's open PR, else undefined
+ *                                             (threads undefined when graphql failed); open: the other open PRs
  *   { kind: "problem", branch, message }      no gh, signed out, not GitHub, ...
  */
 export async function loadPr(host: SidebarHost, cwd) {
-	const git = async (args) => {
-		try {
-			return await host.git(args, cwd);
-		} catch {
-			return undefined;
-		}
-	};
-	const branch = (await git(["branch", "--show-current"]))?.trim() ?? "";
-	const view = await gh(["pr", "view", "--json", FIELDS], cwd);
-	if (!view.ok) {
-		const problem = ghProblem(view.error, view.stderr);
-		if (problem !== "none") return { kind: "problem", branch, message: problem };
-		const counts = (await git(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]))?.trim().split(/\s+/).map(Number);
-		const known = counts?.length === 2 && counts.every(Number.isFinite);
-		return { kind: "none", branch, ahead: known ? counts[1] : undefined, behind: known ? counts[0] : undefined };
-	}
-	let json;
+	let branch = "";
 	try {
-		json = JSON.parse(view.stdout);
+		branch = (await host.git(["branch", "--show-current"], cwd))?.trim() ?? "";
+	} catch {
+		branch = "";
+	}
+	const list = await gh(["pr", "list", "--state", "open", "--json", LIST_FIELDS, "--limit", LIST_LIMIT], cwd);
+	if (!list.ok) {
+		const problem = ghProblem(list.error, list.stderr);
+		return problem === "none" ? { kind: "list", branch, current: undefined, open: [] } : { kind: "problem", branch, message: problem };
+	}
+	let rows;
+	try {
+		rows = parseList(JSON.parse(list.stdout));
 	} catch {
 		return { kind: "problem", branch, message: "gh: unreadable answer" };
 	}
-	const pr = parsePr(json);
+	const mine = branch ? rows.find((row) => row.head === branch) : undefined;
+	const current = mine && (await loadDetail(mine.number, cwd));
+	return { kind: "list", branch, current, open: current ? rows.filter((row) => row !== mine) : rows };
+}
+
+/** The detail of open PR `number`: { pr, threads }, or undefined when `gh pr view` fails. */
+async function loadDetail(number, cwd) {
+	const view = await gh(["pr", "view", String(number), "--json", FIELDS], cwd);
+	if (!view.ok) return undefined;
+	let pr;
+	try {
+		pr = parsePr(JSON.parse(view.stdout));
+	} catch {
+		return undefined;
+	}
 	let threads;
 	const repo = repoOf(pr.url);
 	if (repo) {
@@ -190,5 +224,5 @@ export async function loadPr(host: SidebarHost, cwd) {
 			}
 		}
 	}
-	return { kind: "pr", branch, pr, threads };
+	return { pr, threads };
 }
