@@ -23,6 +23,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - **S10 — Symbols icon theme in TREE:** the TREE tab can draw its file and folder icons with Miguel Solorio's "Symbols" VS Code icon theme (MIT): its SVG icons are turned into a private-use icon font (one color per glyph, painted in the color Symbols gives that icon), installed like fonts/GentleIcons.ttf, and picked per file name, extension and folder name as Symbols maps them. A setting chooses emoji (today) or Symbols.
 - **S11 — tab order setting:** the /gentle-quiet settings offer the side column's tab order: the user moves any tab up or down (for example PR to the second place); the tab bar shows the tabs in that order, numbered by position (1, 2, …), and the order is saved in gentle-quiet.json and survives /reload. A reset puts the default order back.
 - **S12 — drag to reorder tabs:** in the tab bar the user presses on a tab, drags it sideways and releases it at a new place; while dragging the tab follows and the others make room; on release the order is saved like the Tab order setting (numbers follow position). A plain click without moving still switches tabs.
+- **S13 — Engram card without Cloud:** the MEM tab's Engram card drops the Cloud section (host, state, dashboard, enroll/sync actions); it shows only local essentials: the local server's status and version, this project's memories, sessions and prompts, the memories across all projects, the database size on disk, and the pending row when there is one.
 
 ## Decisions
 
@@ -50,6 +51,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T15 | S10 (L15) | worker: Symbols icon font build, mapping module, TREE icon setting | 73028b8 |
 | T16 | S11 (L16) | worker after T15 (both edit gentle-quiet.ts): tab order in /gentle-quiet | f0c6b1f |
 | T17 | S12 (L17) | worker: drag a tab in the bar to reorder | pending |
+| T18 | S13 (L18) | worker: Engram card local essentials, no Cloud | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -71,3 +73,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L15 (user, verbatim): "Eu queria colocar esse tema nesse negócio aí, entendeu? Que isso é uma extensão do VS Code, sabe? Esse tema symbol, não tem como fazer?" Options given: (1) convert Symbols SVGs into an icon font, (2) Nerd Font look-alike, (3) real images. User: "1". vscode-symbols license checked: MIT.
 - L16 (user, verbatim): "Ali no Gente Quiete, nas opções do Gente Quiete, coloca a opção também para poder alterar a ordem, tipo eu mudar o Peri para a segunda opção, etc." (Peri = PR). S11, T16, queued after T15.
 - L17 (user, verbatim): "uma dúvida, teria um jeito de eu só arrastando com mouse eu mudar o lugar dela? tipo vou para 1, para 3 ou tem que ser mesmo usando o nosso gently quiet as configurações dele??" Pi delivers press/drag/release/move mouse events. User: "sim". S12, T17.
+- L18 (user, verbatim): "Aqui também podia ter só remover essa parte do Cloud Host, eu não uso o Cloud, saca? Então não precisa ter, eu quero só saber os dados do local, sabe? O status ali, o tamanho, quantas, enfim, os status essenciais aí do Engram, né?" Also (L17 follow-up): the user proposed dropping the Tab order menu once drag works; agreed to drop it only after the drag is tested live.
