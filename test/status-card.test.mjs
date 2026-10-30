@@ -194,16 +194,17 @@ test("the MCP section: a divider across the card, then one row per server with i
 	assert.deepEqual(status.slice(5), [
 		"",
 		"Perm: Yolo",
+		"",
 		DIVIDER,
-		status[8],
 		status[9],
 		status[10],
+		status[11],
 	]);
-	assert.equal(status.length, 11, "no MCP n/m left among the statuses, and no header row");
-	assert.match(status[8], /^codegraph {2,}active · 2 tools$/);
-	assert.match(status[9], /^context7 {2,}offline$/, "a server whose tools Pi hid is offline");
-	assert.match(status[10], /^my-db {2,}active · 1 tool$/);
-	for (const row of status.slice(7)) assert.equal([...row].length, 55, row);
+	assert.equal(status.length, 12, "no MCP n/m left among the statuses, and no header row");
+	assert.match(status[9], /^codegraph {2,}active · 2 tools$/);
+	assert.match(status[10], /^context7 {2,}offline$/, "a server whose tools Pi hid is offline");
+	assert.match(status[11], /^my-db {2,}active · 1 tool$/);
+	for (const row of status.slice(8)) assert.equal([...row].length, 55, row);
 	const rows = raw();
 	assert.ok(rows.some((row) => painted(row, "border", DIVIDER)), "the divider in the outline's color");
 	assert.ok(rows.some((row) => painted(row, "text", "codegraph") && painted(row, "dim", "active · 2 tools")));
@@ -222,14 +223,14 @@ test("clicking the MCP divider folds the servers into it and saves that; clickin
 	const collapsed = cards()[0];
 	assert.match(collapsed.at(-1), FOLDED, "only the divider, with the online count at its end");
 	assert.equal([...collapsed.at(-1)].length, 55, "flush with the card's end");
-	assert.equal(collapsed.length, 8);
+	assert.equal(collapsed.length, 9);
 	const folded = raw()[y];
 	assert.ok(painted(folded, "border", "─") && painted(folded, "muted", "MCP"), "the line, then a muted label");
 	assert.ok(painted(folded, "warning", "2/3"), "warns while a server is offline");
 	click();
 	assert.equal(readConfig().sidebar.mcpCollapsed, false);
-	assert.equal(cards()[0].length, 11);
-	assert.equal(cards()[0][7], DIVIDER, "open, the plain line again");
+	assert.equal(cards()[0].length, 12);
+	assert.equal(cards()[0][8], DIVIDER, "open, the plain line again");
 });
 
 test("folded with every server online the count is in text", async (t) => {
@@ -280,4 +281,14 @@ test("without the outline the MCP divider is still the row a click toggles; the 
 	assert.deepEqual(event("click"), { handled: true, render: true });
 	assert.match(plain(raw()[y]), /^ ─{2,} MCP 2\/3$/u);
 	assert.equal(readConfig().sidebar.mcpCollapsed, true);
+});
+
+test("a blank row sets the MCP divider apart from the rows above it", async (t) => {
+	t.after(() => writeMcp({}));
+	const { cards } = await withMcp();
+	const [status] = cards();
+	const y = status.findIndex((row) => row.startsWith("─"));
+	assert.ok(y > 0);
+	assert.equal(status[y - 1], "", "blank row above the divider");
+	assert.notEqual(status[y - 2], "", "only one");
 });

@@ -2322,7 +2322,7 @@ function statusCardRows(t, footerData, width, options) {
 	// A labelled row: the label at the start, its value flush with the card's end, as in pi-cinlodev-cute.
 	const row = ([label, value]) => (label ? spread(fg(t, "muted", label), value) : cut(value));
 	// Sections are split by blank rows; only MCP's comes after its divider.
-	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)]), ...(mcp ? [divider, ...mcpRows] : [])];
+	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)]), ...(mcp ? ["", divider, ...mcpRows] : [])];
 	// Where the MCP divider is drawn, counting the outline's top row, for the click that collapses it.
 	const mcpRow = mcp ? status.length - 1 - mcpRows.length + (outlined ? 1 : 0) : -1;
 
