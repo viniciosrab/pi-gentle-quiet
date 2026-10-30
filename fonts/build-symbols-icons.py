@@ -10,7 +10,10 @@
 # the one under it, cuts a hole (the white letters on a colored badge); any other shape adds to the glyph.
 # The glyph is the icon's 24-unit view box drawn SIZE units tall, centred on the cap height like the Nerd Font
 # icons. Its advance is one cell (600 of a 1000 em), so it overflows into the space TREE draws after it, about
-# as wide as the two-cell emoji it stands in for. The color is the one painting the largest area, a grey only when nothing else is painted
+# as wide as the two-cell emoji it stands in for. FreeType does not hint these glyphs across (foot's slight
+# hinting), so the outline is fitted to the pixel grid of the terminal's size here: straight edges and curve
+# extremes go to whole pixels, strokes keep a whole-pixel width and the gaps between parts a pixel at least, the
+# rest of the outline follows them; slivers left by the merges are dropped. The color is the one painting the largest area, a grey only when nothing else is painted
 # (a folder's colored badge gives the folder its color).
 #
 # Run: uv run --no-project --with fonttools --with picosvg python fonts/build-symbols-icons.py [vscode-symbols checkout]
@@ -27,6 +30,7 @@ import pathops
 from fontTools.fontBuilder import FontBuilder
 from fontTools.misc.timeTools import timestampFromString
 from fontTools.pens.areaPen import AreaPen
+from fontTools.pens.basePen import BasePen
 from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.reverseContourPen import ReverseContourPen
 from fontTools.pens.transformPen import TransformPen
@@ -40,9 +44,14 @@ REPO = "https://github.com/miguelsolorio/vscode-symbols"
 PIN = "2c95b15b0a8ef95ac62855e3784a6024ee6e5d2e"
 FIRST = 0x100100
 ADVANCE = 600
-CENTRE_Y = 360  # half the cap height, where the Nerd Font icons are centred
-SIZE = 1000  # the view box's side: the icon spans its own cell and most of the space after it
+# The pixel grid the outlines are fitted to: one pixel in font units at foot's size=10.3 on a 96 dpi screen
+# (13.73 px per em, 8 px cells), which renders the Symbols icons' 1.5-unit strokes one pixel wide.
+PX = 1000 / (round(10.3 * 64 * 96 / 72) / 64)
+CENTRE_Y = 5 * PX  # about half the cap height (730), where the Nerd Font icons are centred, on a pixel line
+SIZE = 16 * PX  # the view box's side: the icon spans its own cell and the space after it
 CENTRE_X = SIZE / 2  # from the cell's left edge
+STEM_MAX = 3 * PX  # the widest stroke kept a whole number of pixels wide
+EDGE_MIN = PX  # the shortest straight run or curve put on the grid
 ROOT = Path(__file__).resolve().parent.parent
 FONT = ROOT / "fonts" / "GentleSymbols.ttf"
 MODULE = ROOT / "extensions" / "sidebar" / "symbols-icons.ts"
@@ -219,6 +228,163 @@ def prepared(file):
     return SVG.fromstring(etree.tostring(root).decode())
 
 
+class CubicPen(BasePen):
+    """Draws into a Skia path with quadratic curves turned into the same cubic ones, so only lines and cubic
+    curves have to be grid-fitted."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+
+    def _moveTo(self, point):
+        self.path.moveTo(*point)
+
+    def _lineTo(self, point):
+        self.path.lineTo(*point)
+
+    def _curveToOne(self, one, two, three):
+        self.path.cubicTo(*one, *two, *three)
+
+    def _closePath(self):
+        self.path.close()
+
+
+def without_specks(path):
+    """The path without contours too small to show (slivers left by the merges)."""
+    kept = pathops.Path()
+    for contour in path.contours:
+        (x0, y0, x1, y1), area = contour.bounds, abs(contour.area)
+        if area >= (PX / 4) ** 2 and min(x1 - x0, y1 - y0) >= PX / 8:
+            kept.addPath(contour)
+    try:
+        kept = pathops.simplify(kept)
+    except pathops.PathOpsError:
+        pass
+    cubic = pathops.Path()
+    kept.draw(CubicPen(cubic))  # simplify() can bring quadratic curves back
+    return cubic
+
+
+def edges(path, axis):
+    """The outline's edges across `axis` (0: x, 1: y): straight runs along the other axis and curve extremes, as
+    (coordinate, low, high, side) with `side` +1 where the ink lies on the coordinate's higher side, -1 lower."""
+    found = []
+
+    def edge(point, low, high):
+        probe = list(point)
+        probe[axis] += PX / 4
+        side = 1 if path.contains(tuple(probe)) else -1
+        probe[axis] -= PX / 2
+        if path.contains(tuple(probe)) == (side == 1):
+            return  # ink on both sides or neither: not an edge of a stem
+        found.append((point[axis], low, high, side))
+
+    for contour in path.contours:
+        start = None
+        current = None
+        for verb, points in contour.segments:
+            if verb == "moveTo":
+                start = current = points[0]
+                continue
+            if verb == "closePath":
+                points = (start,)
+                verb = "lineTo"
+            end = points[-1]
+            other = 1 - axis
+            if verb == "lineTo":
+                if abs(end[axis] - current[axis]) < PX / 16 and abs(end[other] - current[other]) >= EDGE_MIN:
+                    middle = tuple((a + b) / 2 for a, b in zip(current, end))
+                    edge(middle, min(current[other], end[other]), max(current[other], end[other]))
+            else:
+                # A curve's ends where it runs along the other axis are its extremes on this one (small curves
+                # follow the edges around them instead).
+                if max(abs(p[other] - current[other]) for p in points) < EDGE_MIN:
+                    current = end
+                    continue
+                for at, near in ((current, points[0]), (end, points[-2])):
+                    if abs(near[axis] - at[axis]) < PX / 16 and abs(near[other] - at[other]) > 0:
+                        edge(at, at[other] - PX / 2, at[other] + PX / 2)
+            current = end
+    return found
+
+
+def fitted_axis(path, axis):
+    """Where each edge across `axis` goes on the pixel grid: (original, fitted) pairs sorted by original. Stems (an
+    edge where ink starts and the nearest one after it where ink ends, facing each other) keep a whole-pixel
+    width of at least one pixel; other edges go to the nearest pixel line. None when that would move an edge
+    more than a pixel."""
+    found = edges(path, axis)
+    starts = [e for e in found if e[3] == 1]
+    ends = [e for e in found if e[3] == -1]
+    stems = []
+    for a, lo, hi, _ in starts:
+        facing = [(b, min(hi, h) - max(lo, l)) for b, l, h, _ in ends if 0 < b - a <= STEM_MAX and min(hi, h) > max(lo, l)]
+        if facing:
+            b, shared = min(facing)
+            stems.append((-shared, a, b))
+    fixed = {}
+    key = lambda value: round(value, 1)
+    for _, a, b in sorted(stems):
+        width = max(1, round((b - a) / PX)) * PX
+        if key(a) in fixed and key(b) in fixed:
+            continue
+        if key(a) in fixed:
+            fixed[key(b)] = fixed[key(a)] + width
+        elif key(b) in fixed:
+            fixed[key(a)] = fixed[key(b)] - width
+        else:
+            low = round(((a + b) / 2 - width / 2) / PX) * PX
+            fixed[key(a)], fixed[key(b)] = low, low + width
+    sides = {}
+    for value, _, _, side in found:
+        fixed.setdefault(key(value), round(value / PX) * PX)
+        sides.setdefault(key(value), set()).add(side)
+    pairs = sorted(fixed.items())
+    for i in range(1, len(pairs)):
+        (before, placed), (value, target) = pairs[i - 1], pairs[i]
+        # Never fold the outline over itself, and keep a pixel of ink or of space between facing edges a third
+        # of a pixel apart or more (the gaps between the parts of an icon), moving an edge a pixel at most.
+        least = placed
+        if value - before >= PX / 3 and sides[before] != sides[value] and placed + PX - round(value / PX) * PX <= PX:
+            least = placed + PX
+        if target < least:
+            pairs[i] = (value, least)
+    if any(abs(fitted - value) > PX for value, fitted in pairs):
+        return []  # details too fine for the grid (stripes under a pixel apart): left as drawn
+    return pairs
+
+
+def moved(value, pairs):
+    """`value` moved with its fitted edges: shifted like the nearest edge outside them, interpolated between two."""
+    if not pairs:
+        return value
+    if value <= pairs[0][0]:
+        return value + pairs[0][1] - pairs[0][0]
+    if value >= pairs[-1][0]:
+        return value + pairs[-1][1] - pairs[-1][0]
+    for (a, fa), (b, fb) in zip(pairs, pairs[1:]):
+        if a <= value <= b:
+            return fa + (value - a) * (fb - fa) / (b - a) if b > a else fa
+    return value
+
+
+def grid_fitted(path):
+    """The path with its stems on whole pixels at the terminal's size (see PX), so they render as solid lines."""
+    xs, ys = fitted_axis(path, 0), fitted_axis(path, 1)
+    left, _, right, _ = path.bounds
+    if moved(right, xs) > CENTRE_X + SIZE / 2 + PX / 16 and moved(left, xs) >= PX:
+        # Edges pushed apart made it wider than the view box: a pixel to the left, off the file name after it.
+        xs = [(value, fitted - PX) for value, fitted in xs]
+    fitted = pathops.Path()
+    draw = {"moveTo": fitted.moveTo, "lineTo": fitted.lineTo, "curveTo": fitted.cubicTo}
+    for verb, points in path.segments:
+        if verb == "closePath":
+            fitted.close()
+        else:
+            draw[verb](*(round(c) for x, y in points for c in (moved(x, xs), moved(y, ys))))
+    return fitted
+
+
 def icon_glyph(file):
     svg = prepared(file).topicosvg()
     box = svg.view_box()
@@ -251,12 +417,15 @@ def icon_glyph(file):
     cx, cy = box.x + box.w / 2, box.y + box.h / 2
     # SVG y grows downwards: flip it, then centre the view box on (CENTRE_X, CENTRE_Y).
     transform = (scale, 0, 0, -scale, CENTRE_X - cx * scale, CENTRE_Y + cy * scale)
+    placed = pathops.Path()
+    shape.draw(TransformPen(CubicPen(placed), transform))
+    placed = grid_fitted(without_specks(placed))
     area = AreaPen()
-    shape.draw(TransformPen(area, transform))
+    placed.draw(area)
     pen = TTGlyphPen(None)
     target = Cu2QuPen(pen, 1.0, reverse_direction=False)
     # TrueType outer contours run clockwise (negative area here).
-    shape.draw(TransformPen(ReverseContourPen(target) if area.value > 0 else target, transform))
+    placed.draw(ReverseContourPen(target) if area.value > 0 else target)
     return pen.glyph(), main_color(areas)
 
 
