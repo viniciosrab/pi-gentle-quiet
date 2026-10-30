@@ -57,7 +57,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T21 | S10 (L21) | worker: the same Nerd Font icons about 20% larger, from a small generated font, with fallback | 9638c42 |
 | T22 | S8, S6 (L22) | worker: GIT drops [diff] and its hint; the preview closes on a click outside it | 922ff0b |
 | T23 | S10, S6 (L23) | worker: TREE icons as Neo-tree (mini.icons via LazyVim), plain font; hidden items toggle; title PROJECT | f39ae75 |
-| T24 | S5 (L24) | worker: PROF edits profiles in the column (switch, model, effort) without gentle-pi's screen | pending |
+| T24 | S5 (L24) | worker: PROF edits profiles in the column (switch, model, effort) without gentle-pi's screen | 0aa794e |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
