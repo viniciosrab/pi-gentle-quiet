@@ -293,13 +293,26 @@ class FilePreview {
  * Opens the read-only preview of `file` (shown as `relPath`) over Pi. `onEdit` runs when e closes it. Returns
  * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
  */
+/** The pop-up's width on a terminal `columns` wide: 60% of it, between 60 and 100 columns, so lines stay readable. */
+export function previewWidthFor(columns) {
+	return Math.max(60, Math.min(100, Math.floor((Number(columns) || 0) * 0.6)));
+}
+
 export function openPreview(ctx, { file, relPath, onEdit }) {
 	try {
 		if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
 		const loading = readPreview(file);
+		let host;
 		const result = ctx.ui.custom(
-			(tui, theme, _keybindings, done) => new FilePreview({ file, relPath, tui, theme, done, onEdit, loading }),
-			{ overlay: true, overlayOptions: { anchor: "center", width: "80%", minWidth: 60, maxHeight: "85%" } },
+			(tui, theme, _keybindings, done) => {
+				host = tui;
+				return new FilePreview({ file, relPath, tui, theme, done, onEdit, loading });
+			},
+			{
+				overlay: true,
+				// Pi resolves this once the pop-up exists, so the width follows the terminal it opens on.
+				overlayOptions: () => ({ anchor: "center", width: previewWidthFor(host?.terminal?.columns), minWidth: 60, maxHeight: "85%" }),
+			},
 		);
 		Promise.resolve(result).catch(() => undefined);
 		return true;

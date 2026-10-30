@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { painted, plain, theme } from "./helpers.mjs";
-import { languageOf, openPreview, previewLimits } from "../extensions/sidebar/tree-preview.ts";
+import { languageOf, openPreview, previewLimits, previewWidthFor } from "../extensions/sidebar/tree-preview.ts";
 
 const KEYS = { up: "\x1b[A", down: "\x1b[B", pageUp: "\x1b[5~", pageDown: "\x1b[6~", home: "\x1b[H", end: "\x1b[F", escape: "\x1b" };
 
@@ -46,12 +46,19 @@ async function preview(content, { name = "app.js", rows = 30, relPath = `src/${n
 
 const lines = (count) => Array.from({ length: count }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n") + "\n";
 
-test("the overlay opens centered, about 80% wide, and asks Pi for an overlay", async () => {
+test("the overlay opens centered, 60% of the terminal wide but at most 100 columns, and asks Pi for an overlay", async () => {
 	const { calls } = await preview("a\n");
 	assert.equal(calls.custom.length, 1);
 	const { options } = calls.custom[0];
 	assert.equal(options.overlay, true);
-	assert.deepEqual(options.overlayOptions, { anchor: "center", width: "80%", minWidth: 60, maxHeight: "85%" });
+	assert.equal(typeof options.overlayOptions, "function", "sized after the terminal it opens on");
+	const sized = (columns) => previewWidthFor(columns);
+	assert.equal(sized(220), 100, "capped on wide terminals");
+	assert.equal(sized(150), 90);
+	assert.equal(sized(80), 60, "never under 60");
+	const { width, ...rest } = options.overlayOptions();
+	assert.deepEqual(rest, { anchor: "center", minWidth: 60, maxHeight: "85%" });
+	assert.ok(width >= 60 && width <= 100);
 });
 
 test("title, language, path, numbered lines and the footer range in a square outline", async () => {
