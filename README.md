@@ -22,6 +22,14 @@ same; only how it is drawn changes.
   the tokens spent with the cost, and the plan windows on one row. Jobs, Agents and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Agents and Todos keep gentle-pi's own state
   and shortcuts).
+- **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
+  `1:MAIN 2:GIT 3:AGENTS 4:PROF 5:MEM 6:TREE` on top of the column. Click a tab, or turn the wheel over
+  the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
+  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **AGENTS**
+  the Agents card alone; **PROF** gentle-pi's profiles with the active profile's roster, and the plan
+  usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
+  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]`. Files and
+  diffs open in a herdr tab inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in

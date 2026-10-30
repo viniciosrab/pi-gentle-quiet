@@ -29,10 +29,10 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | ID | Specs | Route | Commit |
 |---|---|---|---|
 | T1 | S1, S2, S3 (MAIN, AGENTS), S4, S5 | worker: tab framework, registry, tab bar, MAIN and AGENTS tabs, stub modules for the others | 82d31b5 |
-| T2 | S3 GIT | worker (parallel): `extensions/sidebar/git.ts` | |
-| T3 | S3 PROF | worker (parallel): `extensions/sidebar/prof.ts` | |
-| T4 | S3 MEM | worker (parallel): `extensions/sidebar/mem.ts` | |
-| T5 | S3 TREE | worker (parallel): `extensions/sidebar/tree.ts` | |
+| T2 | S3 GIT | worker (parallel): `extensions/sidebar/git.ts` | d38a1a6 |
+| T3 | S3 PROF | worker (parallel): `extensions/sidebar/prof.ts` | 80006e0 |
+| T4 | S3 MEM | worker (parallel): `extensions/sidebar/mem.ts` | 030093c |
+| T5 | S3 TREE | worker (parallel): `extensions/sidebar/tree.ts` | 3fb3edd |
 | T6 | all | parent: README, full suite, deploy, live check | |
 
 ## Log
@@ -40,3 +40,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L1 (user, verbatim): "https://github.com/CinloDev/pi-cinlodev-cute [Image#1] [Image#2] Agora vamos meio que tipo o que já existe de nossas coisas a gente não vai alterar certo? A gente só vai tipo aqui o status, o contexto, o jeito que aparece os cards de subagente, enfim os tudo, nada. A gente só vai implementar esses negócios aí do single dev, sabe? Aí que aparece tipo o main vai ser o que a gente já tem né? Aí tem a parte do git, prof que é de parte dos arquivos, main que é do engram etc. Tu vai implementar todos, mas com as coisas que a gente tem aqui já do nosso jeito, entendeu? E as coisas que não tem você bota do jeito que tá ali originalmente do single dev, né? E o do youtube, que é o 6 do youtube, você não precisa colocar, entendeu???? Mas essa implementação só vai valer para a barra lateral, né? Quando não tiver a pétala toda, ele fica como tá, né? Não modifica, é só para a barra lateral, sabe? Entendeu??" Screenshots: cute's rail with header "✿ CINLODEV · GENTLE-SHELL ✿", tab bar "1:MAIN 2:GIT 3:AGENTS 4:PROF 5:MEM [ 6:TREE ]" and the TREE tab (project tree with git badges, "[ ↗ nvim ]").
 - L2 (evidence): cute at a1add72 has tabs `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:YT` (src/sidebar-tabs.ts:24-31); AGENTS was folded into PROF after the user's screenshot. The user's screenshot order is used. Exploration map: subagent task mvuiqm49-1-0f45.
 - L3 (evidence): T1 done (worker mvuiv74b-2-f71c), 252/252 tests; tab contract `createTab(host): SidebarTab` documented in extensions/sidebar/tabs.ts. Slice boundary: T1 is its own commit; T2-T5 one commit each.
+- L4 (evidence): T2-T5 done by parallel workers; full suite 342/342. PROF's quota bar switched from ▰▱ to ■□ to match the Context card the user chose. Deployed: extensions/gentle-quiet.ts and extensions/sidebar/ to ~/.pi/agent/extensions/.
