@@ -2832,7 +2832,7 @@ function installSidebar(tui) {
 			if (event.button !== "left" || event.y >= TAB_BAR_ROWS) return undefined;
 			// Pi sends the click to the component that took the press.
 			if (event.type === "press") return { handled: true, render: false };
-			return event.type === "click" ? select(tabAt(bar.hitboxes, event.x - 1)) : undefined;
+			return event.type === "click" ? select(tabAt(bar.hitboxes, event.x)) : undefined;
 		},
 	};
 
@@ -2956,8 +2956,9 @@ function installSidebar(tui) {
 					lines = drawn.rows.map(fit);
 					// MAIN's cards decide whether the column opens, whatever tab is showing.
 					if (statusLines.length || lines.length) {
-						const drawnBar = renderTabBar(width - 2, tab, theme);
-						bar = { rows: [` ${drawnBar.line} `, fg(theme, "border", "─".repeat(width))], hitboxes: drawnBar.hitboxes };
+						// The tabs span the column; the divider ends mid-cell, like the cards' ┌ ┐ corners under it.
+						const drawnBar = renderTabBar(width, tab, theme);
+						bar = { rows: [drawnBar.line, fg(theme, "border", `╶${"─".repeat(Math.max(0, width - 2))}╴`)], hitboxes: drawnBar.hitboxes };
 						if (tab !== "main") drawTab(view(tab), width, fit);
 						else shown = "main";
 					}

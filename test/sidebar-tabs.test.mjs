@@ -106,8 +106,9 @@ test("the column opens with the tab bar fixed on top, MAIN active, with no banne
 	assert.equal(entries[0].grow, 0, "the bar stays on top, outside the scrolling");
 	const [bar, divider] = barRows();
 	assert.equal(barRows().length, 2);
-	assert.match(bar, /^ \[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE $/);
-	assert.match(divider, /^─+$/);
+	assert.match(bar, /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE$/, "the tabs from the column's start to its end");
+	assert.equal([...bar].length, 59);
+	assert.equal(divider, `╶${"─".repeat(57)}╴`, "the divider ends mid-cell, like the cards' corners");
 	assert.ok(!barRows().join("").includes("CINLODEV"));
 });
 
@@ -144,7 +145,7 @@ test("clicking a tab in the bar switches to it, and the bar marks it", async () 
 	const { clickTab, barRows, side, rows } = await wide();
 	assert.equal(clickTab("3:PROF")?.handled, true);
 	assert.match(barRows()[0], /\[ 3:PROF \]/);
-	assert.match(barRows()[0], /^ 1:MAIN /);
+	assert.match(barRows()[0], /^1:MAIN /);
 	assert.equal(side().entries.length, 2, "the bar and the tab's content");
 	assert.ok(!rows().some((row) => /Todos|Status|Agents/.test(row)), "the tab's own cards only");
 	assert.equal(clickTab("1:MAIN")?.handled, true);
