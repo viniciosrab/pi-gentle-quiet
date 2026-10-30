@@ -386,3 +386,17 @@ test("the wheel over the Todos card reaches it", async () => {
 	assert.equal(seen[0].type, "wheel");
 	assert.equal(seen[0].wheelDelta, 3);
 });
+
+test("in the column the Todos title drops gentle-pi's shortcut hint and keeps ▾ Collapse / ▸ Expand", async () => {
+	const loaded = await wide();
+	let header = "";
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => panel(header, "○ Test it")(width) }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	const drawn = (label, hint) => {
+		header = `Todos \x1b[36m${label}\x1b[39m  0 of 1${" ".repeat(10)}\x1b[2m${hint}\x1b[22m`;
+		loaded.root[NODE]();
+		return loaded.rows().find((r) => r.includes("Todos")).replace(/ +│$/, "");
+	};
+	assert.equal(drawn("▾ Collapse", "ctrl+shift+t"), "│ ≡ Todos ▾ Collapse  0 of 1");
+	assert.equal(drawn("▸ Expand", "ctrl+shift+t expand"), "│ ≡ Todos ▸ Expand  0 of 1");
+});

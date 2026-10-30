@@ -511,10 +511,18 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
 	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
+	// In the column the Todos title leaves out gentle-pi's shortcut hint; "▾ Collapse" stays.
+	if (rail.hang && rail.spaced && rows.length) rows = [quietTitle(rows[0]), ...rows.slice(1)];
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
 const STACK_WIDTH = 120;
+
+// gentle-pi's card titles end in the shortcut that folds them ("ctrl+shift+t", "ctrl+shift+t expand").
+const TITLE_HINT = /\s{2,}(?:\x1b\[[0-9;:]*m)*(?:ctrl|alt|shift|super|meta)\+\S*(?: (?:collapse|expand))?(?:\x1b\[[0-9;:]*m)*\s*$/;
+function quietTitle(row) {
+	return row.replace(TITLE_HINT, "");
+}
 
 // gentle-pi's Todos card keeps its list to a few rows with its own ScrollView, sized by the viewport
 // it hands to updateLayout(). Drawn in the side column it gets a viewport as tall as its list, so the
