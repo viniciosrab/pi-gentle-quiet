@@ -34,7 +34,7 @@ async function wide(options = {}, config = {}) {
 	const side = layout.entries?.[1]?.component?.[NODE]?.();
 	const status = side?.entries?.[1]?.component;
 	const rail = side?.entries?.[2]?.component;
-	return { ...loaded, ...h, footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
+	return { ...loaded, ...h, footerFactory: loaded.footer(), footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
 }
 
 test("wide fullscreen terminals put a side column beside the conversation, with no bar on top", async () => {
@@ -455,4 +455,19 @@ test("the TREE tab's host reads Tree hidden items live and saves it when the tab
 	} finally {
 		TAB_FACTORIES.tree = original;
 	}
+});
+
+test("a resumed session gets the column back: shutdown takes it down and the next start builds it again on the same terminal", async () => {
+	const w = await wide();
+	assert.equal(w.root[NODE]().type, "hstack", "the column is up");
+	// /resume keeps the same extension instance and terminal (no /reload): Pi ends the old session, then starts the new one.
+	await w.emit("session_shutdown", { reason: "resume" });
+	assert.equal(w.root[NODE](), w.native, "shutdown hands Pi its own layout back, nothing left from the old session");
+	await w.emit("session_start", { reason: "resume" });
+	w.footerFactory?.(w.tui, theme, footerData);
+	w.ui.setWidget("gentle-todo", () => ({ render: panel("Todos  1 of 2", "◐ Write it", "○ Test it") }));
+	w.widgets["gentle-todo"](w.tui, theme);
+	const layout = w.root[NODE]();
+	assert.equal(layout.type, "hstack", "the column is back without a /reload");
+	assert.equal(layout.entries[0].component[NODE](), w.native, "beside Pi's own layout, not a column inside an old one");
 });

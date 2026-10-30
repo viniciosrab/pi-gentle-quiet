@@ -3323,6 +3323,11 @@ export default async function (pi) {
 		mcpTimers = [];
 		installedOn = undefined;
 		imagePaste?.attachments.clear();
+		// /resume and /new keep this instance and the terminal (only /reload loads the extension again):
+		// take the column down so the next start builds it fresh instead of keeping a stale or failed one.
+		sidebar.dispose?.();
+		sidebar.dispose = undefined;
+		sidebar.tui = undefined;
 	});
 
 	// Pi uses the first extension that registered a message type; local extensions load
