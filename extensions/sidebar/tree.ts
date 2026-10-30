@@ -65,7 +65,8 @@ export function createTab(host: SidebarHost): SidebarTab {
 		if (host.treeIcons !== "symbols") return `${node.isDirectory ? (open ? "📂" : "📁") : "📄"} `;
 		const { char, color } = symbolIcon(node.name, { isDirectory: node.isDirectory, open });
 		const [r, g, b] = [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
-		return `\x1b[38;2;${r};${g};${b}m${char}\x1b[39m `;
+		// The glyph is one cell drawn wider than it; two spaces start the name where an emoji row starts it.
+		return `\x1b[38;2;${r};${g};${b}m${char}\x1b[39m  `;
 	};
 	const changed = () => {
 		state.version++;

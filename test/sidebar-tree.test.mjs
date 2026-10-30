@@ -156,24 +156,24 @@ test("the tree: folders first with item counts, guides, ignored folders left out
 // A Symbols icon as the TREE paints it: the glyph in its own 24-bit color.
 const truecolor = ({ char, color }) => `\x1b[38;2;${parseInt(color.slice(1, 3), 16)};${parseInt(color.slice(3, 5), 16)};${parseInt(color.slice(5, 7), 16)}m${char}\x1b[39m`;
 
-test("with Symbols icons each row draws its mapped glyph in its color, one cell, and the rows keep their width", async (t) => {
+test("with Symbols icons each row draws its mapped glyph in its color and two spaces, so names start where the emoji rows put them", async (t) => {
 	const git = STATUS(" M src/index.ts\n?? docs/guide.md\n");
 	const { tab, rows, raw } = await opened({ cwd: project([...FILES, "src/tree.test.ts"]), git, treeIcons: "symbols" });
 	t.after(() => tab.dispose());
 	const icon = (name, options) => symbolIcon(name, options);
 	const body = rows().slice(3, -1).map((row) => row.replace(/^│ /, "").replace(/ *[●M]? │$/, "")).filter(Boolean);
 	assert.deepEqual(body, [
-		`├── ${icon("docs", { isDirectory: true }).char} docs (1 items)`,
-		`├── ${icon("src", { isDirectory: true, open: true }).char} src (3 items)`,
-		`│   ├── ${icon("lib", { isDirectory: true }).char} lib (2 items)`,
-		`│   ├── ${icon("index.ts").char} index.ts`,
-		`│   └── ${icon("tree.test.ts").char} tree.test.ts`,
-		`├── ${icon("package.json").char} package.json`,
-		`└── ${icon("README.md").char} README.md`,
+		`├── ${icon("docs", { isDirectory: true }).char}  docs (1 items)`,
+		`├── ${icon("src", { isDirectory: true, open: true }).char}  src (3 items)`,
+		`│   ├── ${icon("lib", { isDirectory: true }).char}  lib (2 items)`,
+		`│   ├── ${icon("index.ts").char}  index.ts`,
+		`│   └── ${icon("tree.test.ts").char}  tree.test.ts`,
+		`├── ${icon("package.json").char}  package.json`,
+		`└── ${icon("README.md").char}  README.md`,
 	]);
 	for (const [name, options] of [["docs", { isDirectory: true }], ["src", { isDirectory: true, open: true }], ["index.ts"], ["tree.test.ts"], ["package.json"], ["README.md"]]) {
 		const line = raw().find((row) => plain(row).includes(` ${name}`));
-		assert.ok(line.includes(`${truecolor(icon(name, options))} `), `${name} painted in ${icon(name, options).color}`);
+		assert.ok(line.includes(`${truecolor(icon(name, options))}  `), `${name} painted in ${icon(name, options).color}`);
 	}
 	assert.match(rows().find((row) => row.includes(" index.ts")), /index\.ts +M │$/, "the badge stays on the right edge");
 	assert.match(rows().find((row) => row.includes(" docs")), /docs \(1 items\) +● │$/);
