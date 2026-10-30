@@ -33,7 +33,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T4 | S3 MEM | worker (parallel): `extensions/sidebar/mem.ts` | 030093c |
 | T5 | S3 TREE | worker (parallel): `extensions/sidebar/tree.ts` | 3fb3edd |
 | T6 | all | parent: README, full suite, deploy, live check | |
-| T8 | S4 (L6) | worker: YT tab after cute's src/youtube/*, reading pi-youtube-player's published state | |
+| T8 | S4 (L6) | worker: YT tab after cute's src/youtube/*, reading pi-youtube-player's published state | 45ded34 |
 | T9 | S2 (L7) | parent inline: model label in the Status card under Branch with the side column; not above the editor nor on the Working row | 84f2cb7 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
