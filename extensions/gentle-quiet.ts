@@ -16,8 +16,11 @@
 //           padding rows, line up with that same margin and get a square
 //           outline in the theme's border color
 //   sidebar fullscreen terminals with 140+ columns: a column on the right holds the status line as Status
-//           and Context cards that stay on top, then Agents and Todos (Gentle Shell's layout, drawn in this style); narrower
-//           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it)
+//           and Context cards that stay on top, then Todos (Gentle Shell's layout, drawn in this style); narrower
+//           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it).
+//           The Agents card stays inline above the editor, as in pi-cinlodev-cute.
+//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE" (pi-cinlodev-cute's), switches the
+//           column: MAIN is the column above, the others live in ./sidebar/
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
 //             " └ ✓ 120 lines"
@@ -43,6 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { cycleTab, renderTabBar, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
 const AGENT_DIR = (() => {
@@ -86,9 +90,10 @@ const DEFAULTS = {
 	statusLine: { enabled: true, changes: true, contextTokens: true, tokens: "cache", cost: true, estimateCost: true, mcp: true, usage: true, usageWeek: true, subscriptionProviders: [] },
 	subagents: { minimal: true }, // subagent result messages as a row plus a summary line; applies after restart
 	blocks: { minimal: true, border: true }, // flatten the Todos and Agents panels; square theme-colored outline
-	// Status, Agents and Todos in a column beside the conversation once the fullscreen terminal
+	// Status, Jobs and Todos in a column beside the conversation once the fullscreen terminal
 	// has at least minColumns columns; narrower terminals keep them above and below the input.
-	sidebar: { enabled: true, minColumns: 140 },
+	// mcpCollapsed: the Status card's MCP section shows only its divider, ending in "MCP n/m".
+	sidebar: { enabled: true, minColumns: 140, mcpCollapsed: false },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
 const CARD_ICONS = ["◇", "◆", "◈", "○", "●", "≡", "∴", "›", "·"];
@@ -486,8 +491,7 @@ const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–⠋⠙⠹⠸⠼�
 const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
 
 // A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
-// (`rail`) a blank row separates the title from the list and, for `stack`, a long row's details
-// move to their own row instead of being cut off.
+// (`rail`) a blank row separates the title from the list.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
@@ -496,15 +500,14 @@ function drawBlock(target, width, options, t, rail = {}) {
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
-	// A stacked panel renders wide so it still lists everything before its rows are split.
-	const render = () => target.render(rail.stack || rail.hang ? STACK_WIDTH : inner + 5);
+	// Todos renders wide so it still lists everything before its rows are wrapped.
+	const render = () => target.render(rail.hang ? STACK_WIDTH : inner + 5);
 	// A long Todos list ends in gentle-pi's scroll row, drawn at column 0 outside the panel: it goes before
 	// flatten(), or it shrinks the shared indent to nothing and every task keeps a space no task row matches.
 	const raw = rail.grow ? fullHeight(render) : render();
 	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
 	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
 	if (rail.agents) rows = rows.map(agentGap);
-	if (rail.stack) rows = rows.flatMap((row, index) => stackRow(row, inner, t ?? theme, index === 0));
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
 	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
@@ -530,14 +533,16 @@ function fullHeight(render) {
 	}
 }
 
-// A panel component drawn flattened. While the side column is open the panel is
-// drawn there instead (see railBlocks) and leaves its own place empty.
+// A panel component drawn flattened. While the side column is open the Todos panel is
+// drawn there instead (see railBlocks) and leaves its own place empty; the Agents panel stays in place.
+const INLINE_BLOCKS = new Set(["gentle-agents"]);
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
-	if (key) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, agents: key === "gentle-agents", stack: key === "gentle-agents", hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	const inline = INLINE_BLOCKS.has(key);
+	if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
+			if (prop === "render") return (width) => (sidebar.active && !inline ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -938,7 +943,7 @@ function menuSections(ctx) {
 		["Blocks and agents", "Blocks", () => [
 			[`Todos/Agents blocks: ${config.blocks.minimal ? "minimal" : "original"}`, () => { config.blocks.minimal = !config.blocks.minimal; }, `${config.blocks.minimal ? "Todos and Agents panels drawn as flat rows." : "Todos and Agents panels as gentle-pi draws them."}`],
 			[`Todos/Agents border: ${onOff(config.blocks.border)}`, () => { config.blocks.border = !config.blocks.border; }, "A square outline around the Todos and Agents blocks."],
-			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Todos and Agents under them."],
+			[`Side column: ${onOff(config.sidebar.enabled)}`, () => { config.sidebar.enabled = !config.sidebar.enabled; }, "On wide fullscreen terminals, the status line becomes Status and Context cards on top of a column on the right, with Jobs and Todos under them; the Agents card stays above the editor."],
 			[`Side column from: ${config.sidebar.minColumns} columns`, () => { config.sidebar.minColumns = SIDEBAR_COLUMNS[(SIDEBAR_COLUMNS.indexOf(config.sidebar.minColumns) + 1) % SIDEBAR_COLUMNS.length]; }, "How wide the terminal must be, in columns, for the side column to open."],
 			[`Subagent results: ${config.subagents.minimal ? "minimal" : "original"} (restart to apply)`, () => { config.subagents.minimal = !config.subagents.minimal; }, `${config.subagents.minimal ? "A subagent's answer shows as one row plus its first line." : "A subagent's answer shows as gentle-pi's card."} Applies after a restart.`],
 		]],
@@ -2229,14 +2234,17 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 			const flat = text.replace(/[\r\n\t]/g, " ");
 			return key === KEYS.jobs ? flat.replace(JOBS_LEAD, `${jobsFrame()} `) : flat;
 		});
-	const mcp = config.statusLine.mcp ? mcpCounts(ctx) : undefined;
+	// The status line's "MCP n/m" follows its setting; the side column's MCP section has its own collapse.
+	const servers = mcpCounts(ctx);
+	const mcp = config.statusLine.mcp ? servers : undefined;
 	const mcpPlain = mcp ? `MCP ${mcp.online}/${mcp.total}` : "";
 	const mcpPainted = mcp ? fg(t, mcp.online < mcp.total ? "warning" : "dim", mcpPlain) : "";
-	const statusItems = [...statuses.map((text) => fg(t, "dim", text)), mcpPainted].filter(Boolean);
+	const ownItems = statuses.map((text) => fg(t, "dim", text)); // the statuses without MCP's count
+	const statusItems = [...ownItems, mcpPainted].filter(Boolean);
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, secondRow };
+	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
 }
 
 // Statuses sit on the left after the location, Perm first (the model closes the Working row
@@ -2294,14 +2302,31 @@ function statusCardRows(t, footerData, width, options) {
 	const title = (text) => [fg(t, "toolTitle", bold(t, text)), ""];
 	const draw = (card) => (outlined ? boxed(card, width, t) : card.map((line) => ` ${line}`));
 
+	// MCP has a section of its own here: a divider across the card, which a click collapses, then one row
+	// per server. Collapsed, the divider ends in "MCP n/m". Its "MCP n/m" leaves the statuses.
+	const mcp = p.servers?.servers?.length ? p.servers : undefined;
+	const collapsed = Boolean(config.sidebar.mcpCollapsed);
+	// The divider ends in an arrow that says what a click does: ▾ while open, ▸ once folded.
+	const folded = mcp && collapsed ? ` MCP ${mcp.online}/${mcp.total} ▸` : " ▾";
+	const divider = mcp && [
+		fg(t, "border", "─".repeat(Math.max(0, inner - visibleWidth(folded)))),
+		collapsed ? ` ${fg(t, "muted", "MCP")} ${fg(t, mcp.online < mcp.total ? "warning" : "text", `${mcp.online}/${mcp.total}`)}` : "",
+		` ${fg(t, "accent", collapsed ? "▸" : "▾")}`,
+	].join("");
+	const serverState = (server) => (server.tools ? fg(t, "dim", `active · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`) : fg(t, "warning", "offline"));
+	const mcpRows = mcp && !collapsed ? mcp.servers.map((server) => spread(fg(t, "text", server.name), serverState(server))) : [];
+
 	// [label, value] rows; a row without a label is drawn as it is.
 	const sections = [
-		[["Project", p.project], ["Branch", p.branchText(true)]],
-		p.statusItems.map((item) => ["", item]),
+		[["Project", p.project && fg(t, "text", p.project.replace(SGR, ""))], ["Branch", p.branchText(true)], ["Model", modelLabel() && fg(t, "text", modelLabel())]],
+		(mcp ? p.ownItems : p.statusItems).map((item) => ["", item]),
 	].map((rows) => rows.filter(([, value]) => value)).filter((rows) => rows.length);
-	const pad = Math.max(0, ...sections.flat().map(([label]) => visibleWidth(label)));
-	const row = ([label, value]) => cut(label ? `${fg(t, "muted", label.padEnd(pad))}  ${value}` : value);
-	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
+	// A labelled row: the label at the start, its value flush with the card's end, as in pi-cinlodev-cute.
+	const row = ([label, value]) => (label ? spread(fg(t, "muted", label), value) : cut(value));
+	// Sections are split by blank rows; only MCP's comes after its divider.
+	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)]), ...(mcp ? ["", divider, ...mcpRows] : [])];
+	// Where the MCP divider is drawn, counting the outline's top row, for the click that collapses it.
+	const mcpRow = mcp ? status.length - 1 - mcpRows.length + (outlined ? 1 : 0) : -1;
 
 	const { percent, used, window, percentText } = p.context;
 	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
@@ -2309,17 +2334,14 @@ function statusCardRows(t, footerData, width, options) {
 	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");
 	const spent = p.tokens(true);
 	const cost = p.costText && `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}`;
-	const plan = p.plan.windows
-		.map((window, index) => `${fg(t, "muted", index === 0 ? join(p.plan.name, window.label) : window.label)} ${gauge(window.percent, t)} ${fg(t, "text", `${Math.round(window.percent)}%`)}`)
-		.join(fg(t, "dim", " · "));
+	// No plan windows here: in the side column they live in the PROF tab.
 	const context = [
 		...title("Context"),
 		spread(figures, percentText),
 		bar,
 		(spent || cost) && spread(spent, cost),
-		plan && cut(plan),
 	].filter((line, index) => index < 2 || line);
-	return [...draw(status), ...draw(context)];
+	return Object.assign([...draw(status), ...draw(context)], { mcpRow });
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
@@ -2331,17 +2353,25 @@ let piApi; // the extension API, for the MCP tool and server lists
 const WORKING_PATCHED = Symbol.for("gentle-quiet.workingPatched");
 const WORKING_MODEL = Symbol.for("gentle-quiet.workingModel");
 
-/** "claude-opus-5-5 · high" in dim; "" while the status line is off or no model is known. */
-function workingModel() {
+/** "claude-opus-5-5 · high"; "" while no model is known. */
+function modelLabel() {
 	const model = liveCtx?.model;
-	if (!config.statusLine.enabled || !footerTheme || !model?.id) return "";
+	if (!model?.id) return "";
 	let effort;
 	try {
 		effort = model.reasoning ? liveCtx?.thinkingLevel ?? piThinking?.() : undefined;
 	} catch {
 		effort = undefined;
 	}
-	return fg(footerTheme, "dim", effort ? `${model.id} · ${effort}` : model.id);
+	return effort ? `${model.id} · ${effort}` : model.id;
+}
+
+/** The model label in dim, for the Working row and above the editor; "" while the status line is off or
+ * the side column is open (its Status card shows the model under the branch). */
+function workingModel() {
+	const label = modelLabel();
+	if (!config.statusLine.enabled || !footerTheme || !label || sidebar.active) return "";
+	return fg(footerTheme, "dim", label);
 }
 
 function patchWorkingRow() {
@@ -2547,7 +2577,8 @@ function installedMcpServers(ctx) {
 	return [...found.keys()];
 }
 
-/** { online, total } or undefined when no MCP servers are installed; cached briefly because the footer renders often. */
+/** { online, total, servers: [{ name, tools }] } or undefined when no MCP servers are installed; cached briefly
+ * because the footer renders often. tools counts a server's visible tools: 0 is offline. */
 function mcpCounts(ctx) {
 	const cwd = ctx?.sessionManager?.getCwd?.();
 	if (Date.now() - mcpCache.at < MCP_TTL_MS && mcpCache.cwd === cwd) return mcpCache.value;
@@ -2555,15 +2586,17 @@ function mcpCounts(ctx) {
 	let value;
 	if (installed.length) {
 		// Pi hides a server's tools when it disconnects, so a server is online while it has a visible tool.
-		const live = new Set();
+		const live = new Map(); // namespace -> visible tools
 		try {
 			for (const tool of piApi?.getAllTools?.() ?? []) {
-				if (tool?.exposure !== "hidden" && typeof tool?.namespace?.name === "string") live.add(tool.namespace.name);
+				const namespace = tool?.namespace?.name;
+				if (tool?.exposure !== "hidden" && typeof namespace === "string") live.set(namespace, (live.get(namespace) ?? 0) + 1);
 			}
 		} catch {
 			// no tool list: treat every server as offline rather than guess
 		}
-		value = { online: installed.filter((name) => live.has(mcpNamespace(name))).length, total: installed.length };
+		const servers = installed.map((name) => ({ name, tools: live.get(mcpNamespace(name)) ?? 0 }));
+		value = { online: servers.filter((server) => server.tools).length, total: installed.length, servers };
 	}
 	mcpCache = { at: Date.now(), cwd, value };
 	return value;
@@ -2637,7 +2670,7 @@ function applyFooter(ctx, force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Side column: the status line, Jobs, Agents and Todos beside the conversation, on wide terminals
+// Side column: the status line, Jobs and Todos beside the conversation, on wide terminals
 // ---------------------------------------------------------------------------
 
 // Gentle Shell's sidebar layout, kept when Gentle Shell is disabled: in a fullscreen Pi the layout
@@ -2654,11 +2687,11 @@ const sidebar = { tui: undefined, active: false, dispose: undefined };
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Jobs, Agents and Todos as outlined cards, one right under the other, with where each one sits. */
-function railRows(width) {
+/** Jobs and Todos as outlined cards, one right under the other, with where each one sits. */
+function railRows(width, keys = [JOBS_CARD, "gentle-todo"]) {
 	const rows = [];
 	const hits = [];
-	for (const key of [JOBS_CARD, "gentle-agents", "gentle-todo"]) {
+	for (const key of keys) {
 		const block = railBlocks.get(key);
 		const section = block?.draw(width);
 		if (!section?.length) continue;
@@ -2687,6 +2720,48 @@ function railMouse(event, hits, scrollTop) {
 	return undefined;
 }
 
+// A card drawn like the Status card: the title bold in toolTitle, a blank row, the rows, in the square outline.
+function railCard(title, rows, width, t) {
+	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
+	const card = [fg(t, "toolTitle", bold(t, title)), ...(rows.length ? ["", ...rows] : [])];
+	return outlined ? boxed(card, width, t) : card.map((line) => ` ${truncateToWidth(line, Math.max(1, width - 1), "…")}`);
+}
+
+// What a tab module gets from gentle-quiet (the contract is in ./sidebar/tabs.ts).
+function tabHost(tui) {
+	const host = {
+		get theme() {
+			return theme;
+		},
+		fg: (role, text) => fg(theme, role, text),
+		bold: (text) => bold(theme, text),
+		card: (title, rows, width) => railCard(title, rows ?? [], width, theme),
+		box: (rows, width) => (config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER ? boxed(rows, width, theme) : rows.map((row) => ` ${truncateToWidth(row, Math.max(1, width - 1), "…")}`)),
+		inner: (width) => (config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER ? width - BOX_CHROME : width - 1),
+		cwd: () => {
+			try {
+				return liveCtx?.sessionManager?.getCwd?.();
+			} catch {
+				return undefined; // ctx went stale after a session replacement or reload
+			}
+		},
+		ctx: () => liveCtx,
+		get pi() {
+			return piApi;
+		},
+		agentDir: AGENT_DIR,
+		requestRender: () => tui.requestRender?.(),
+		git: (args, cwd = host.cwd()) => (cwd ? run(cwd, args) : Promise.resolve(undefined)),
+		changes: (cwd = host.cwd()) => changesByCwd.get(cwd),
+		usage: () => currentUsage(liveCtx),
+		gauge: (percent) => gauge(percent, theme),
+		get icons() {
+			return { ...config.icons };
+		},
+	};
+	return host;
+}
+
 function installSidebar(tui) {
 	const host = tui;
 	const roots = new Set();
@@ -2702,14 +2777,16 @@ function installSidebar(tui) {
 		tui.terminal.columns >= config.sidebar.minColumns &&
 		// Gentle Shell paints its own sidebar when it is enabled.
 		typeof tui.terminal[GENTLE_SIDEBAR]?.ownsHost !== "function";
-	const column = new PiTui.ScrollView({ render: () => lines, invalidate() {} }, {
-		follow: "none",
-		primary: false,
-		overscroll: "contain",
-		scrollbar: "auto",
-		scrollbarTrackStyle: (text) => fg(theme, "border", text),
-		scrollbarThumbStyle: (text) => fg(theme, "accent", text),
-	});
+	const scrolling = (content) =>
+		new PiTui.ScrollView(content, {
+			follow: "none",
+			primary: false,
+			overscroll: "contain",
+			scrollbar: "auto",
+			scrollbarTrackStyle: (text) => fg(theme, "border", text),
+			scrollbarThumbStyle: (text) => fg(theme, "accent", text),
+		});
+	const column = scrolling({ render: () => lines, invalidate() {} });
 	const nativeMouse = column.handleMouse?.bind(column);
 	column.handleMouse = (event) => {
 		let result;
@@ -2721,7 +2798,111 @@ function installSidebar(tui) {
 		return result?.handled ? result : nativeMouse?.(event);
 	};
 	// The Status and Context cards stay on top of the column, outside its scrolling: they never go away.
-	const statusCard = { render: () => statusLines, invalidate() {} };
+	// A left click on its MCP divider row collapses or opens the MCP section, and the choice is saved.
+	const statusCard = {
+		render: () => statusLines,
+		invalidate() {},
+		handleMouse(event) {
+			if (event.button !== "left" || statusLines.mcpRow < 0 || event.y !== statusLines.mcpRow) return undefined;
+			// Pi sends the click to the component that took the press.
+			if (event.type === "press") return { handled: true, render: false };
+			if (event.type !== "click") return undefined;
+			config.sidebar.mcpCollapsed = !config.sidebar.mcpCollapsed;
+			saveConfig();
+			tui.requestRender?.();
+			return { handled: true, render: true };
+		},
+	};
+
+	// The tab bar, fixed on top: a left click picks the tab under it (or the nearest), the wheel cycles them.
+	// The active tab is kept here, in memory: every new column opens on MAIN.
+	let tab = "main";
+	let shown = "main"; // the tab whose onShow ran last
+	let bar = { rows: [], hitboxes: [] };
+	const select = (id) => {
+		if (id) tab = id;
+		tui.requestRender?.();
+		return { handled: true, render: true };
+	};
+	const tabBar = {
+		render: () => bar.rows,
+		invalidate() {},
+		handleMouse(event) {
+			if (event.type === "wheel") return event.wheelDelta ? select(cycleTab(tab, event.wheelDelta)) : undefined;
+			if (event.button !== "left" || event.y >= TAB_BAR_ROWS) return undefined;
+			// Pi sends the click to the component that took the press.
+			if (event.type === "press") return { handled: true, render: false };
+			return event.type === "click" ? select(tabAt(bar.hitboxes, event.x)) : undefined;
+		},
+	};
+
+	// Every tab but MAIN scrolls in a column of its own, so each keeps its scroll position. They are tab
+	// modules, created the first time they are opened.
+	const tabHostApi = tabHost(tui);
+	const views = new Map(); // tab id -> { id, tab, error, rows, hits, column }
+	const view = (id) => {
+		if (views.has(id)) return views.get(id);
+		const entry = { id, tab: undefined, error: undefined, rows: [] };
+		entry.column = scrolling({
+			render: () => entry.rows,
+			invalidate() {
+				try {
+					entry.tab?.invalidate?.();
+				} catch {
+					// the tab's own trouble: its next render shows it
+				}
+			},
+		});
+		const native = entry.column.handleMouse?.bind(entry.column);
+		entry.column.handleMouse = (event) => {
+			let result;
+			try {
+				result = tabMouse(entry, event);
+			} catch {
+				result = undefined;
+			}
+			return result?.handled ? result : native?.(event);
+		};
+		try {
+			entry.tab = TAB_FACTORIES[id]?.(tabHostApi);
+		} catch (error) {
+			entry.error = error;
+		}
+		views.set(id, entry);
+		return entry;
+	};
+	// A tab module's mouse: the row of its rows under the pointer (scrolling included) and the column in it.
+	const tabMouse = (entry, event) => {
+		const line = (entry.column.scrollTop ?? 0) + event.y;
+		const acted =
+			event.type === "click" ? entry.tab?.handleClick?.(line, event.button, event.x)
+			: event.type === "wheel" ? entry.tab?.handleWheel?.(event.wheelDelta ?? 0, line, event.x)
+			: false;
+		return acted ? { handled: true, render: true } : undefined;
+	};
+	const drawTab = (entry, width, fit) => {
+		try {
+			if (!entry.tab) throw entry.error ?? new Error("not available");
+			if (shown !== entry.id) {
+				shown = entry.id;
+				entry.tab.onShow?.();
+			}
+			const height = Math.max(1, (tui.terminal?.rows ?? 24) - TAB_BAR_ROWS);
+			entry.rows = (entry.tab.render(width, height) ?? []).map((row) => fit(String(row ?? "")));
+		} catch (error) {
+			entry.rows = railCard(`${tabLabel(entry.id)} — ${error?.message ?? error}`, [], width, theme);
+		}
+	};
+	cleanups.push(() => {
+		for (const entry of views.values()) {
+			try {
+				entry.tab?.dispose?.();
+			} catch {
+				// leaving anyway
+			}
+		}
+	});
+
 	const side = {
 		render: () => [],
 		invalidate() {},
@@ -2730,8 +2911,13 @@ function installSidebar(tui) {
 			gap: 0,
 			align: "stretch",
 			entries: [
-				...(statusLines.length ? [{ component: statusCard, basis: "auto", grow: 0, shrink: 0, minSize: 1 }] : []),
-				...(lines.length ? [{ component: column, basis: 0, grow: 1, shrink: 1, minSize: 1 }] : []),
+				{ component: tabBar, basis: "auto", grow: 0, shrink: 0, minSize: TAB_BAR_ROWS },
+				...(tab === "main"
+					? [
+							...(statusLines.length ? [{ component: statusCard, basis: "auto", grow: 0, shrink: 0, minSize: 1 }] : []),
+							...(lines.length ? [{ component: column, basis: 0, grow: 1, shrink: 1, minSize: 1 }] : []),
+						]
+					: [{ component: view(tab).column, basis: 0, grow: 1, shrink: 1, minSize: 1 }]),
 			],
 		}),
 	};
@@ -2766,7 +2952,16 @@ function installSidebar(tui) {
 					const drawn = railRows(width);
 					statusLines = (config.statusLine.enabled ? railStatus?.(width) : undefined) ?? []; // lined up with the cards under it
 					hits = drawn.hits;
-					lines = drawn.rows.map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
+					const fit = (row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…"));
+					lines = drawn.rows.map(fit);
+					// MAIN's cards decide whether the column opens, whatever tab is showing.
+					if (statusLines.length || lines.length) {
+						// The tabs span the column; the divider ends mid-cell, like the cards' ┌ ┐ corners under it.
+						const drawnBar = renderTabBar(width, tab, theme);
+						bar = { rows: [drawnBar.line, fg(theme, "border", `╶${"─".repeat(Math.max(0, width - 2))}╴`)], hitboxes: drawnBar.hitboxes };
+						if (tab !== "main") drawTab(view(tab), width, fit);
+						else shown = "main";
+					}
 				} catch {
 					failed = true;
 					return nativeNode.call(root);

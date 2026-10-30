@@ -17,11 +17,23 @@ same; only how it is drawn changes.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, a column on the right
   holds the status line as two cards that always stay on top. **Status** has the project and branch
-  under a label column, then a blank row and the statuses, one per row. **Context** has the tokens in
+  under a label column, then a blank row and the statuses, one per row. After them a divider across the
+  card opens the **MCP** section, one row per MCP server with its state (`active · 9 tools` or
+  `offline`); click the divider to fold the servers into it (`──── MCP 3/3`), and the choice is saved. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
-  the tokens spent with the cost, and the plan windows on one row. Jobs, Agents and Todos scroll under them. The Todos card shows every
-  task. Click a card's title to collapse or expand it (Agents and Todos keep gentle-pi's own state
-  and shortcuts).
+  and the tokens spent with the cost (the plan usage is in the PROF tab). Jobs and Todos scroll under them. The Todos card shows every
+  task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
+  The Agents card stays inline above the editor, as without the column.
+- **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
+  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE` on top of the column. Click a tab, or turn the wheel over
+  the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
+  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
+  usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
+  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
+  on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
+  wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
+  source). Files and diffs open in your editor in a herdr tab
+  inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
