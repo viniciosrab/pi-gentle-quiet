@@ -18,7 +18,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - **S5 — tab switching as in cute:** left click on a tab in the tab bar, mouse wheel over the tab bar cycles tabs. The tab bar stays fixed at the top of the column.
 - **S6 — TREE file preview:** a left click on a file in TREE opens a read-only preview pop-up inside Pi (Esc closes, scroll keys, `e` opens it in the editor tab as before), instead of a new editor tab per click.
 - **S7 — preview polish:** a Markdown file shows rendered Markdown in the preview (raw source on a key); the pop-up's outline sits flush with its edge, with no black half-cell sticking out past the border over the conversation.
-- **S8 — PR tab:** a `6:PR` tab after TREE shows the current branch's pull request and CI: number, title, state (open, draft, merged, closed) and mergeability; each check with its state (✓ passed, ✗ failed, ⧗ running), such as CI and Greptile; unresolved review comments, count and the latest; without a PR, commits ahead/behind the remote and a note that no PR is open. A click opens the PR or the check in the browser. Data from `gh`.
+- **S8 — PR tab:** a `6:PR` tab after TREE lists the repository's open pull requests, one per row: number, title and a checks summary (✓ passed, ✗ failed, ⧗ running). The current branch's PR, when open, comes first with its detail: state and mergeability, each check with its state, unresolved review comments and the latest. No branch rows and no ahead/behind counts. With no open PR: "No open pull requests". A click opens the PR or the check in the browser. Data from `gh`.
 
 ## Decisions
 
@@ -41,6 +41,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T10 | S6 (L9) | worker: TREE file preview overlay (tree-preview.ts), `e` opens the editor | f33e3b5 |
 | T11 | S7 (L10) | worker: rendered Markdown in the preview; flush pop-up outline | 6ec8f47 |
 | T12 | S8 (L11) | worker: 6:PR tab (pr.ts, pr-data.ts); tab contract gains optional onHide() | f48d1a4 |
+| T13 | S8 (L12) | worker: PR tab lists the open PRs, current branch's PR first; no branch/ahead-behind | pending |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
@@ -56,3 +57,4 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 - L9 (user, verbatim): "Você acha, para a experiência de programação e usuário, você acha melhor ali na questão dos Tui, quando abre um documento, ele abre uma nova aba separada ou abre em pop-up?" Recommendation: click opens a read-only pop-up, a key opens the editor tab. User: "sim". Added S6, T10.
 - L10 (user, verbatim): "no modo pop up tipo arquivos markdow tem como invez de o preview vim e markdow ter o visulizado e markdow?? e alem disso o bloco do poup up da com uma rebarba do bloco pra fora vejaa [...] e tbm tem uma falha em baixo feja a linha borda nao veja ta com falhas e eu vi isso tbm [...] no bloco do tree essas falhjas na linha nao sei oque é tem haver com o pop up" then "para contexto agr que fichei os editor essas falhas sumiram". Evidence: the rebarba is the overlay's black half-cell outside the ┌│└ strokes, visible over the grey user-message rows; the TREE border gaps went away once the herdr editor tabs closed (a redraw after herdr resized the pane), not the pop-up. Added S7, T11.
 - L11 (user, verbatim): "ótimo agora para a experiência de desenvolvimento de coisa você acha que essas cinco abas que tem ali é o suficiente no caso você colocaria mais alguma outra coisa para melhor produtividade enfim melhor saber o que tá acontecendo etc" Recommendation: one more tab, 6:PR (PR + CI checks + review comments via gh). User: "ok faca". Branch feat/sidebar-pr-tab from main 46efd83 (PRs #16, #17 merged).
+- L12 (user, verbatim): "Não, mas aí é aba de PR, quando tem um PR aberto, não é pra ficar mostrando branch, entendeu?" Asked: list of open PRs vs only the branch PR. User chose: "Lista dos PRs abertos do repositório". S8 rewritten; T13.
