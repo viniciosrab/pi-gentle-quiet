@@ -265,3 +265,36 @@ test("other languages keep their numbered source and no m key", async () => {
 	component.handleInput("m");
 	assert.match(text(70)[4], /^▏ 1 # not a heading +▕$/);
 });
+
+test("given text instead of a file: its title on the path row, the body rendered as Markdown, and no e", async () => {
+	const fake = fakeCtx(30);
+	let body;
+	const text = new Promise((resolve) => (body = resolve));
+	assert.equal(openPreview(fake.ctx, { text, title: "#41 · bugfix · Gauge", label: "Memory" }), true);
+	const component = fake.component();
+	assert.match(plain(component.render(70)[4]), /Reading…/, "while the text is on its way");
+	body("**What**: the gauge\n\n- rounded down\n");
+	await component.ready;
+	const out = component.render(70).map(plain);
+	assert.match(out[1], /^▏ Read-only — Memory +▕$/);
+	assert.match(out[2], /^▏ #41 · bugfix · Gauge +▕$/);
+	assert.match(out[4], /^▏ What: the gauge +▕$/);
+	assert.ok(!out.join("\n").includes("**"));
+	assert.match(out.at(-2), /^▏ Esc close · m source · ↑↓/, "no e edit in the footer");
+	component.handleInput("e");
+	assert.equal(fake.calls.done.length, 0, "e does nothing");
+	component.handleInput("m");
+	assert.match(component.render(70).map(plain)[4], /^▏ 1 \*\*What\*\*: the gauge +▕$/);
+	component.handleInput("\x1b");
+	assert.equal(fake.calls.done.length, 1);
+});
+
+test("given empty or failed text: one row, never a file read", async () => {
+	for (const [text, row] of [["", /\(empty\)/], [Promise.reject(new Error("gone")), /Cannot read: gone/]]) {
+		const fake = fakeCtx(30);
+		assert.equal(openPreview(fake.ctx, { text, title: "#1", label: "Memory" }), true);
+		const component = fake.component();
+		await component.ready;
+		assert.match(plain(component.render(70)[4]), row);
+	}
+});

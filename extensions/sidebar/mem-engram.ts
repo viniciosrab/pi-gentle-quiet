@@ -1,5 +1,6 @@
 // The Engram side of the MEM tab, after pi-cinlodev-cute's src/engram/engram-client.ts: the local server's
-// health, stats and sync state over HTTP, the project's cloud enrollment, the latest session summary from
+// health, stats, sync state and pending items (observations due for review, relations waiting for judgment)
+// over HTTP, one observation by id (GET only), the project's cloud enrollment, the latest session summary from
 // the engram CLI, and the cloud commands behind the card's buttons. Every call has a short timeout and
 // resolves to undefined (or { ok: false }) on any failure; nothing here throws.
 //
@@ -160,7 +161,16 @@ export async function fetchSnapshot(cwd, deps) {
 	if (!project) return { project: undefined, endpoint, at: deps.now() };
 	const get = (route) => (endpoint ? deps.fetchJson(`${endpoint.url}${route}`, httpTimeout(deps)) : Promise.resolve(undefined));
 	const query = `?project=${encodeURIComponent(project)}`;
-	const [health, stats, sync, enrolled, cloud] = await Promise.all([get("/health"), get(`/stats${query}`), get(`/sync/status${query}`), checkEnrolled(project, deps), loadCloudConfig(deps)]);
+	const [health, stats, sync, enrolled, cloud, review, conflicts] = await Promise.all([
+		get("/health"),
+		get(`/stats${query}`),
+		get(`/sync/status${query}`),
+		checkEnrolled(project, deps),
+		loadCloudConfig(deps),
+		get(`/review${query}&limit=100`),
+		get(`/conflicts/stats${query}`),
+	]);
+	const count = (value) => (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0);
 	return {
 		project,
 		endpoint,
@@ -170,8 +180,17 @@ export async function fetchSnapshot(cwd, deps) {
 		sync: sync ? { enabled: Boolean(sync.enabled), phase: String(sync.phase || "idle"), lastSyncAt: sync.last_sync_at ? String(sync.last_sync_at) : null } : undefined,
 		enrolled,
 		cloud,
+		pending: { review: count(review?.count ?? review?.observations?.length), conflicts: count(conflicts?.by_judgment_status?.pending) },
 		at: deps.now(),
 	};
+}
+
+/** One observation from the local server ({ id, type, title, content, … }); undefined when it cannot say. */
+export async function fetchObservation(id, deps) {
+	const endpoint = engramEndpoint(deps.env);
+	if (!endpoint || !id) return undefined;
+	const observation = await deps.fetchJson(`${endpoint.url}/observations/${encodeURIComponent(String(id))}`, httpTimeout(deps));
+	return observation && typeof observation === "object" ? observation : undefined;
 }
 
 const RESULT = /^\[\d+\]\s+#(\d+)\s*\(([^)]+)\)\s*—\s*(.+)$/;

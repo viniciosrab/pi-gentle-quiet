@@ -28,8 +28,9 @@ same; only how it is drawn changes.
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
   tree (a click opens a file in the read-only preview, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
-  usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
-  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
+  usage (a click opens `/gentle:profiles`); **MEM** Engram (with "⚑ N to review · N conflicts" when
+  some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
+  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source); **PR** the repository's open pull requests from `gh`, one per row with a checks summary (✓ ✗ ⧗),

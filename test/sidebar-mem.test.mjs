@@ -7,14 +7,14 @@ import { test } from "node:test";
 import { painted, plain, theme } from "./helpers.mjs";
 import { createMemTab, createTab } from "../extensions/sidebar/mem.ts";
 import { defaultDeps, engramEndpoint, parseHandoffs, relativeTime } from "../extensions/sidebar/mem-engram.ts";
-import { countTools } from "../extensions/sidebar/mem-stack.ts";
+import { scanSession } from "../extensions/sidebar/mem-session.ts";
 
 const WIDTH = 59;
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
 // gentle-quiet's card and box, as the host hands them to a tab: the square outline, or the rows indented by one.
 function fakeHost(options = {}) {
-	const { outline = true, tools = ["mem_save", "read"], branch = [], agentDir = "/agent" } = options;
+	const { outline = true, tools = ["mem_save", "read"], branch = [], agentDir = "/agent", ui } = options;
 	const cwd = "cwd" in options ? options.cwd : "/srv/app";
 	const inner = (width) => (outline ? width - 4 : width - 1);
 	const fit = (row, width) => {
@@ -34,7 +34,7 @@ function fakeHost(options = {}) {
 		box,
 		inner,
 		cwd: () => cwd,
-		ctx: () => ({ sessionManager: { getBranch: () => branch, getEntries: () => branch } }),
+		ctx: () => ({ sessionManager: { getBranch: () => branch, getEntries: () => branch }, ...(ui ? { hasUI: true, ui } : {}) }),
 		pi: { getAllTools: () => tools.map((name) => ({ name })) },
 		agentDir,
 		requestRender: () => renders++,
@@ -49,7 +49,7 @@ function fakeHost(options = {}) {
 
 // Engram and the CLI as stand-ins: every call is recorded; answers come from the tables (null: no answer,
 // enrolled null: sqlite3 cannot run).
-function fakeDeps({ health = { status: "ok", version: "3.6.0" }, stats = { total_observations: 26, total_sessions: 59, total_prompts: 238 }, sync = { enabled: true, phase: "idle", last_sync_at: "2026-10-30T11:55:00Z" }, project, enrolled = true, search = "", files = {}, versions = { pi: "1.4.0", engram: "engram 3.6.0" }, open = true, run = {} } = {}) {
+function fakeDeps({ observations = {}, review, conflicts, health = { status: "ok", version: "3.6.0" }, stats = { total_observations: 26, total_sessions: 59, total_prompts: 238 }, sync = { enabled: true, phase: "idle", last_sync_at: "2026-10-30T11:55:00Z" }, project, enrolled = true, search = "", files = {}, versions = { pi: "1.4.0", engram: "engram 3.6.0" }, open = true, run = {} } = {}) {
 	const calls = { fetch: [], run: [], read: [], open: [] };
 	const deps = {
 		env: {},
@@ -62,6 +62,9 @@ function fakeDeps({ health = { status: "ok", version: "3.6.0" }, stats = { total
 			if (pathname === "/stats") return stats;
 			if (pathname === "/sync/status") return sync;
 			if (pathname === "/project/current") return project ? { project } : undefined;
+			if (pathname.startsWith("/observations/")) return observations[pathname.split("/")[2]];
+			if (pathname === "/review") return review;
+			if (pathname === "/conflicts/stats") return conflicts;
 			return undefined;
 		},
 		run: async (bin, args) => {
@@ -149,7 +152,7 @@ test("createTab does no I/O and draws before any data arrives", () => {
 	assert.deepEqual([calls.fetch.length, calls.run.length, calls.read.length], [0, 0, 0]);
 	assert.equal(typeof createTab, "function");
 	const out = tab.render(WIDTH, 40).map(plain);
-	assert.ok(out.some((row) => row.includes("Stack · Ecosystem")));
+	assert.ok(out.some((row) => row.includes("Saved this session")));
 	assert.ok(out.every((row) => [...row].length <= WIDTH), "nothing wider than the column");
 });
 
@@ -270,12 +273,39 @@ test("a failing cloud command shows a short error notice", async () => {
 	assert.ok([...notice].length <= WIDTH);
 });
 
-test("the Active Handoff card shows the latest session summary from `engram search`", async () => {
+test("the Active Handoff starts folded to one row: id, age and the goal's first line", async () => {
 	const { text, rows, calls } = await shown();
 	assert.ok(calls.run.some((call) => call.join(" ") === "engram search session summary --type session_summary --limit 5 --project my-app"));
 	const out = text();
 	const start = out.findIndex((row) => /M Active Handoff/.test(row));
 	assert.ok(start > 0);
+	assert.match(out[start], /M Active Handoff +▼ │$/);
+	const card = out.slice(start, out.findIndex((row, i) => i > start && /^└/.test(row)) + 1);
+	assert.equal(card.length, 4, "title, blank, one row, bottom");
+	assert.match(card[2], /^│ #803 · 1h ago · Ship the sidebar tabs\. +│$/);
+	assert.ok(painted(rows().join(""), "accent", "#803"));
+});
+
+test("the folded handoff cuts a long goal with … and a click on its row or title toggles the full text", async () => {
+	const long = HANDOFF.replace("Ship the sidebar tabs.", `Ship the sidebar tabs ${"and more ".repeat(12)}.`);
+	const { text, click } = await shown({ search: long });
+	const row = text().find((r) => /#803 · 1h ago/.test(r));
+	assert.match(row, /… │$/);
+	assert.equal([...row].length, WIDTH);
+	assert.equal(await click(/#803 · 1h ago/), true);
+	assert.ok(text().some((r) => /│ ✦ Goal +│/.test(r)), "expanded");
+	assert.ok(text().some((r) => /M Active Handoff +▲ │$/.test(r)));
+	await click(/M Active Handoff/);
+	assert.ok(!text().some((r) => /✦ Goal/.test(r)), "folded again");
+	await click(/M Active Handoff/);
+	assert.ok(text().some((r) => /✦ Goal/.test(r)), "the title toggles too");
+});
+
+test("the expanded Active Handoff shows the latest session summary from `engram search`", async () => {
+	const { text, rows, click } = await shown();
+	await click(/M Active Handoff/);
+	const out = text();
+	const start = out.findIndex((row) => /M Active Handoff/.test(row));
 	const card = out.slice(start);
 	assert.match(card[2], /│ #803 session_summary +1h ago │/);
 	assert.ok(card.some((row) => /│ ✦ Goal +│/.test(row)));
@@ -303,33 +333,137 @@ test("without a session summary the handoff card says so; a click on it fetches 
 	assert.equal(calls.run.filter((call) => call[1] === "search").length, before + 1);
 });
 
-test("the Ecosystem card lists Pi, gentle-pi, gentle-engram and the engram binary; a click toggles the details", async () => {
-	const { text, rows, click } = await shown({ versions: { pi: "1.4.0" } });
-	const out = text();
-	assert.ok(out.some((row) => /│ ● pi v1\.4\.0 +│/.test(row)));
-	assert.ok(out.some((row) => /│ ● gentle-pi v4\.5\.1 +│/.test(row)));
-	assert.ok(out.some((row) => /│ ● gentle-engram v0\.5\.1 +│/.test(row)));
-	assert.ok(out.some((row) => /│ ○ engram - +│/.test(row)), "a missing binary: dim, no version");
-	assert.ok(painted(rows().join(""), "dim", "○"));
-	await click(/gentle-pi v/);
-	assert.ok(text().some((row) => /gentle-pi v4\.5\.1 +installed │/.test(row)));
-	assert.ok(text().some((row) => /engram - +not available │/.test(row)));
-	await click(/Stack · Ecosystem/);
-	assert.ok(!text().some((row) => /installed/.test(row)));
+test("no Stack · Ecosystem card (no offline source of the latest versions) and no Tools card", async () => {
+	const call = (...names) => ({ type: "message", message: { role: "assistant", content: names.map((name, i) => ({ type: "toolCall", id: `t${i}`, name, arguments: {} })) } });
+	const { text, calls } = await shown({}, { branch: [call("read", "bash", "grep")] });
+	assert.ok(!text().some((row) => /Stack|Ecosystem|Tools|calls/.test(row)));
+	assert.ok(!calls.run.some((call) => call[0] === "pi" || call[1] === "version"), "no version probes");
 });
 
-test("the Tools card counts the session's tool calls by group, and is left out before any call", async () => {
-	const call = (...names) => ({ type: "message", message: { role: "assistant", content: names.map((name) => ({ type: "toolCall", name })) } });
-	const branch = [call("read", "read", "edit"), call("bash"), call("mem_save", "grep", "web_search", "fetch_content", "subagent_run"), { type: "message", message: { role: "user", content: "hi" } }];
+// A session branch: the assistant's tool calls and their results, oldest first.
+let seq = 0;
+const toolCall = (name, args = {}, data, { text, error = false } = {}) => {
+	const id = `call-${++seq}`;
+	return [
+		{ type: "message", id: `a${seq}`, message: { role: "assistant", content: [{ type: "text", text: "…" }, { type: "toolCall", id, name, arguments: args }] } },
+		{ type: "message", id: `r${seq}`, message: { role: "toolResult", toolCallId: id, toolName: name, isError: error, content: [{ type: "text", text: text ?? JSON.stringify(data ?? {}) }], ...(data === undefined ? {} : { details: { data } }) } },
+	];
+};
+const cardOf = (out, title) => {
+	const start = out.findIndex((row) => row.includes(title));
+	assert.ok(start >= 0, `no ${title} card`);
+	const end = out.findIndex((row, i) => i > start && /^└/.test(row));
+	return out.slice(start + 2, end);
+};
+
+test("Saved this session lists mem_save and mem_update calls newest first, prefixed names too, with type and an updated marker", async () => {
+	const branch = [
+		...toolCall("mem_save", { title: "Fixed the gauge rounding", type: "bugfix", content: "**What**: …" }, { id: 41 }),
+		...toolCall("read", { path: "x" }, undefined, { text: "file" }),
+		...toolCall("mcp__engram__mem_save", { title: "Chose rulesets over branch protection " + "with a very long title ".repeat(3), type: "decision" }, undefined, { text: "Memory saved: observation #42" }),
+		...toolCall("mem_update", { id: 7, title: "Tab contract gains onHide", type: "pattern" }, { id: 7 }),
+		...toolCall("mem_save", { title: "Failed save", type: "bugfix" }, undefined, { text: "boom", error: true }),
+		...toolCall("mem_save_prompt", { content: "not a memory" }, { id: 99 }),
+	];
 	const { text, rows } = await shown({}, { branch });
-	const out = text();
-	assert.ok(out.some((row) => /Tools +9 calls/.test(row)));
-	assert.ok(out.some((row) => row.includes("✎ 2 read") && row.includes("✎ 1 write") && row.includes(">_ 1 bash")));
-	assert.ok(out.some((row) => row.includes("M 1 engram")));
-	assert.ok(out.some((row) => row.includes("⚙ 1 other")));
-	assert.ok(painted(rows().join(""), "success", ">_ 1 bash"));
-	assert.ok(!(await shown()).text().some((row) => /Tools/.test(row)));
-	assert.deepEqual(countTools(undefined).total, 0);
+	const card = cardOf(text(), "Saved this session");
+	assert.equal(card.length, 3, "three saved memories; the failed save and the prompt are left out");
+	assert.match(card[0], /^│ pattern Tab contract gains onHide +updated │$/);
+	assert.match(card[1], /^│ decision Chose rulesets over branch protection with a \S*… │$/u, "a long title is cut with …");
+	assert.equal([...card[1]].length, WIDTH);
+	assert.match(card[2], /^│ bugfix Fixed the gauge rounding +│$/);
+	const joined = rows().join("");
+	assert.ok(painted(joined, "dim", "bugfix"), "the type badge dim");
+});
+
+test("Recalled this session lists get_observation, search and context newest first, one row per memory", async () => {
+	const branch = [
+		...toolCall("mem_context", { project: "my-app" }, { context: "## Recent\n…" }),
+		...toolCall("mem_get_observation", { id: 12 }, { id: 12, type: "decision", title: "Use rulesets", content: "Body 12" }),
+		...toolCall("mem_search", { query: "sidebar tabs" }, [{ id: 1 }, { id: 2 }, { id: 3 }]),
+		...toolCall("mcp__engram__mem_search", { query: "nothing here" }, undefined, { text: "No memories found" }),
+		...toolCall("mem_get_observation", { id: 30 }, { id: 30, type: "bugfix", title: "Gauge rounding", content: "Body 30" }),
+		...toolCall("mem_get_observation", { id: 12 }, { id: 12, type: "decision", title: "Use rulesets", content: "Body 12" }),
+		...toolCall("mem_context", {}, { context: "again" }),
+	];
+	const { text } = await shown({}, { branch });
+	const card = cardOf(text(), "Recalled this session");
+	assert.deepEqual(
+		card.map((row) => row.replace(/ +/g, " ")),
+		["│ ◆ context loaded │", "│ #12 Use rulesets │", "│ #30 Gauge rounding │", '│ ⌕ "nothing here" 0 hits │', '│ ⌕ "sidebar tabs" 3 hits │'],
+	);
+	assert.match(card[3], /"nothing here" +0 hits │$/, "the hits flush right");
+});
+
+test("empty session: Nothing saved yet, Nothing recalled yet", async () => {
+	const { text, rows } = await shown();
+	assert.equal(cardOf(text(), "Saved this session").length, 1);
+	assert.match(cardOf(text(), "Saved this session")[0], /^│ Nothing saved yet +│$/);
+	assert.match(cardOf(text(), "Recalled this session")[0], /^│ Nothing recalled yet +│$/);
+	assert.ok(painted(rows().join(""), "dim", "Nothing saved yet"));
+	assert.equal(scanSession(undefined).saved.length, 0);
+});
+
+// A ctx.ui.custom that records the pop-up and builds its component as Pi does.
+function fakeUi() {
+	const opened = [];
+	const tui = { terminal: { rows: 40, columns: 120 }, requestRender: () => {} };
+	const ui = { custom: (factory, options) => { opened.push({ factory, options }); return new Promise(() => {}); } };
+	const component = async (index = -1) => {
+		const c = opened.at(index).factory(tui, theme, {}, () => {});
+		await c.ready;
+		return c;
+	};
+	return { ui, opened, component };
+}
+
+test("a click on a saved or recalled memory opens it read-only in the pop-up, with its text from Engram", async () => {
+	const branch = [
+		...toolCall("mem_save", { title: "Fixed the gauge rounding", type: "bugfix", content: "From the call" }, { id: 41 }),
+		...toolCall("mem_get_observation", { id: 12 }, { id: 12, type: "decision", title: "Use rulesets", content: "From the result" }),
+		...toolCall("mem_search", { query: "tabs" }, [{ id: 1 }]),
+	];
+	const observations = { 41: { id: 41, type: "bugfix", title: "Fixed the gauge rounding", content: "**What**: the gauge\n\n- rounded down" } };
+	const fake = fakeUi();
+	const { click, calls } = await shown({ observations }, { branch, ui: fake.ui });
+	assert.equal(await click(/bugfix Fixed the gauge rounding/), true);
+	assert.equal(fake.opened.length, 1);
+	assert.ok(calls.fetch.includes("http://127.0.0.1:7437/observations/41"), "read from the local API");
+	let out = (await fake.component()).render(80).map(plain);
+	assert.match(out[1], /^▏ Read-only — Memory +▕$/);
+	assert.match(out[2], /^▏ #41 · bugfix · Fixed the gauge rounding +▕$/);
+	const body = out.slice(4, -2).join("\n");
+	assert.match(body, /What: the gauge/, "rendered Markdown, no ** markers");
+	assert.match(body, /rounded down/);
+	assert.doesNotMatch(out.at(-2), /e edit/, "no editor for a memory");
+	const preview = await fake.component();
+	preview.handleInput("e");
+
+	// The API knows nothing of #12: the tool result's text is shown.
+	await click(/#12 Use rulesets/);
+	out = (await fake.component()).render(80).map(plain);
+	assert.match(out[2], /#12 · decision · Use rulesets/);
+	assert.ok(out.some((row) => /From the result/.test(row)));
+
+	const before = fake.opened.length;
+	assert.equal(await click(/"tabs"/), false, "a search row opens nothing");
+	assert.equal(fake.opened.length, before);
+	assert.ok(!calls.fetch.some((url) => /\/observations\/1$/.test(url)));
+	assert.ok(calls.fetch.every((url) => !/mark_reviewed|judge|passive/.test(url)), "only reads (fetchJson is a GET)");
+	assert.ok(calls.run.every((call) => call[0] === "sqlite3" || call[1] === "search"), "no engram command but the handoff search");
+});
+
+test("the Engram card shows pending reviews and conflicts in one warning row, only when there are some", async () => {
+	const some = await shown({ review: { count: 3, observations: [{}, {}, {}] }, conflicts: { by_judgment_status: { judged: 4, pending: 1 } } });
+	assert.ok(some.calls.fetch.includes("http://127.0.0.1:7437/review?project=my-app&limit=100"));
+	assert.ok(some.calls.fetch.includes("http://127.0.0.1:7437/conflicts/stats?project=my-app"));
+	assert.ok(some.text().some((row) => /│ ⚑ 3 to review · 1 conflict +│/.test(row)));
+	assert.ok(painted(some.rows().join(""), "warning", "⚑ 3 to review · 1 conflict"));
+	const conflictsOnly = await shown({ review: { count: 0, observations: [] }, conflicts: { by_judgment_status: { pending: 2 } } });
+	assert.ok(conflictsOnly.text().some((row) => /│ ⚑ 2 conflicts +│/.test(row)));
+	const none = await shown({ review: { count: 0, observations: [] }, conflicts: { by_judgment_status: { judged: 4 } } });
+	assert.ok(!none.text().some((row) => /⚑/.test(row)));
+	assert.ok(!(await shown()).text().some((row) => /⚑/.test(row)), "no answer: no row");
 });
 
 test("without gentle-engram the Engram and handoff cards are left out", async () => {
@@ -337,7 +471,8 @@ test("without gentle-engram the Engram and handoff cards are left out", async ()
 	delete files["/agent/npm/node_modules/gentle-engram/package.json"];
 	const { text, calls } = await shown({ files }, { tools: ["read"] });
 	assert.ok(!text().some((row) => /Engram:|Active Handoff/.test(row)));
-	assert.ok(text().some((row) => /Stack · Ecosystem/.test(row)));
+	assert.ok(text().some((row) => /Saved this session/.test(row)));
+	assert.ok(text().some((row) => /Recalled this session/.test(row)));
 	assert.ok(!calls.fetch.length, "no Engram calls");
 	assert.ok(!text().some((row) => /Persistent Memory/.test(row)), "no persistent memory card without ~/.memory/memories.db");
 });
