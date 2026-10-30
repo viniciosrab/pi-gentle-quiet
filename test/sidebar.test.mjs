@@ -308,7 +308,7 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	const { select, seen } = picker(/^Blocks and agents ›$/, /^Side column: on/, /^Side column from: 140 columns/, /^Back|^← Back/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160, mcpCollapsed: false });
+	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160 });
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
 });
 
@@ -337,7 +337,7 @@ test("/gentle-quiet's tab order moves MAIN down and resets to the default order,
 	const reset = picker(/^Blocks and agents ›$/, /^Tab order: PR GIT MAIN/, /^Reset to default order$/);
 	const again = await load({ select: reset.select });
 	await again.commands["gentle-quiet"].handler("", again.ctx);
-	assert.deepEqual(readConfig().sidebar, { enabled: true, minColumns: 140, mcpCollapsed: false });
+	assert.deepEqual(readConfig().sidebar, { enabled: true, minColumns: 140 });
 	assert.ok(reset.seen.some(({ items }) => items.includes("Tab order: MAIN GIT PROF MEM TREE PR")), "the menu shows the default order back");
 });
 

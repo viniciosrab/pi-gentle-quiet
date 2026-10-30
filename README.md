@@ -16,10 +16,9 @@ same; only how it is drawn changes.
   `2/2 queries, 6 sources`. `ctrl+o` shows pi-web-access's full output.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, a column on the right
-  holds the status line as two cards that always stay on top. **Status** has the project and branch
-  under a label column, then a blank row and the statuses, one per row. After them a divider across the
-  card opens the **MCP** section, one row per MCP server with its state (`active · 9 tools` or
-  `offline`); click the divider to fold the servers into it (`──── MCP 3/3`), and the choice is saved. **Context** has the tokens in
+  holds the status line as two cards that always stay on top. **Status** has the project, branch and
+  model under a label column, then an **MCP** row with the MCP servers online out of those installed
+  (`MCP   3/3`, in the warning color while one is offline), then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
   and the tokens spent with the cost (the plan usage is in the PROF tab). Jobs and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
