@@ -89,3 +89,29 @@ export class Image {
 	}
 	invalidate() {}
 }
+
+// Like Pi's: Markdown rendered to rows as wide as `width`; headings and emphasis lose their markers and go
+// through the theme. globalThis.testMarkdownBroken makes it throw, as a Pi without it would fail.
+export class Markdown {
+	constructor(text, paddingX, paddingY, theme) {
+		if (globalThis.testMarkdownBroken) throw new Error("no markdown here");
+		Object.assign(this, { text, paddingX, paddingY, theme });
+	}
+	render(width) {
+		const t = this.theme;
+		const inline = (line) =>
+			line
+				.replace(/\*\*(.+?)\*\*/g, (_, x) => t.bold(x))
+				.replace(/\*(.+?)\*/g, (_, x) => t.italic(x))
+				.replace(/`(.+?)`/g, (_, x) => t.code(x));
+		const rows = [];
+		for (const line of this.text.split("\n")) {
+			const heading = line.match(/^#{1,6} (.*)$/);
+			const styled = heading ? t.heading(t.bold(heading[1])) : inline(line);
+			rows.push(...wrapTextWithAnsi(styled, width));
+		}
+		while (rows.length && rows.at(-1) === "") rows.pop();
+		return rows.map((row) => row + " ".repeat(Math.max(0, width - visibleWidth(row))));
+	}
+	invalidate() {}
+}

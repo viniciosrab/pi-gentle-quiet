@@ -58,18 +58,20 @@ test("title, language, path, numbered lines and the footer range in a square out
 	const { text, draw } = await preview(lines(168), { rows: 30 });
 	const out = text(80);
 	assert.ok(out.every((row) => [...row].length === 80), "every row as wide as the overlay");
-	assert.match(out[0], /^┌─+┐$/);
-	assert.match(out.at(-1), /^└─+┘$/);
-	assert.match(out[1], /^│ Read-only — JavaScript +│$/);
-	assert.match(out[2], /^│ src\/app\.js +│$/);
-	assert.match(out[3], /^│ +│$/);
-	assert.match(out[4], /^│   1 const line1 = 1; +│$/, "numbers right-aligned to the widest");
-	assert.match(out[5], /^│   2 const line2 = 2;/);
+	assert.match(out[0], /^🭽▔+🭾$/u, "outline strokes at the outer edge of the cells");
+	assert.match(out.at(-1), /^🭼▁+🭿$/u);
+	assert.match(out[1], /^▏ Read-only — JavaScript +▕$/);
+	assert.match(out[2], /^▏ src\/app\.js +▕$/);
+	assert.match(out[3], /^▏ +▕$/);
+	assert.match(out[4], /^▏   1 const line1 = 1; +▕$/, "numbers right-aligned to the widest");
+	assert.match(out[5], /^▏   2 const line2 = 2;/);
 	// 30 rows * 85% = 25 rows for the overlay, 6 of them chrome: 19 lines of code.
 	assert.equal(out.length, 25);
-	assert.match(out.at(-2), /^│ Esc close · e edit · ↑↓ PgUp\/PgDn Home\/End · 1-19 \/ 168 +│$/);
+	assert.match(out.at(-2), /^▏ Esc close · e edit · ↑↓ PgUp\/PgDn Home\/End · 1-19 \/ 168 +▕$/);
 	const raw = draw(80);
-	assert.ok(painted(raw[0], "border", "┌"), "outline in the border role");
+	assert.ok(painted(raw[0], "border", "🭽"), "outline in the border role");
+	assert.ok(painted(raw[4], "border", "▏") && painted(raw[4], "border", "▕"), "sides in the border role");
+	assert.ok(painted(raw.at(-1), "border", "🭼"));
 	assert.ok(painted(raw[1], "toolTitle", theme.bold("Read-only — JavaScript")));
 	assert.ok(painted(raw[2], "muted", "src/app.js"));
 	assert.ok(painted(raw[4], "dim", "  1"), "line numbers dim");
@@ -136,10 +138,10 @@ test("a short file is drawn whole and its footer counts all its lines", async ()
 	const { text } = await preview("one\n\ttwo\nthree", { name: "notes.txt", relPath: "notes.txt" });
 	const out = text(70);
 	assert.match(out[1], /Read-only — Text/);
-	assert.match(out[4], /^│ 1 one +│$/);
-	assert.match(out[5], /^│ 2     two +│$/, "a tab becomes spaces up to the next stop of 4");
-	assert.match(out[6], /^│ 3 three +│$/);
-	assert.match(out[7], /1-3 \/ 3 +│$/);
+	assert.match(out[4], /^▏ 1 one +▕$/);
+	assert.match(out[5], /^▏ 2     two +▕$/, "a tab becomes spaces up to the next stop of 4");
+	assert.match(out[6], /^▏ 3 three +▕$/);
+	assert.match(out[7], /1-3 \/ 3 +▕$/);
 	assert.equal(out.length, 9);
 });
 
@@ -147,18 +149,18 @@ test("long lines are cut with an ellipsis instead of wrapping", async () => {
 	const { text } = await preview(`${"x".repeat(200)}\nshort\n`, { name: "a.ts" });
 	const out = text(60);
 	assert.equal(out.length, 8);
-	assert.match(out[4], /^│ 1 x+… │$/);
+	assert.match(out[4], /^▏ 1 x+… ▕$/);
 	assert.ok(out.every((row) => [...row].length === 60));
 });
 
 test("a binary file, an empty file and a missing file get one row", async () => {
 	const binary = await preview(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]), { name: "logo.png" });
-	assert.match(binary.text(70)[4], /^│ Binary file — press e to open it in the editor +│$/);
-	assert.match(binary.text(70).at(-2), /^│ Esc close · e edit +│$/);
+	assert.match(binary.text(70)[4], /^▏ Binary file — press e to open it in the editor +▕$/);
+	assert.match(binary.text(70).at(-2), /^▏ Esc close · e edit +▕$/);
 
 	const empty = await preview("", { name: "empty.md" });
 	assert.match(empty.text(70)[1], /Read-only — Markdown/);
-	assert.match(empty.text(70)[4], /^│ \(empty file\) +│$/);
+	assert.match(empty.text(70)[4], /^▏ \(empty file\) +▕$/);
 
 	const missing = await preview(undefined, { name: "gone.ts" });
 	assert.match(missing.text(70)[4], /ENOENT/);
@@ -193,4 +195,66 @@ test("without an overlay UI openPreview declines and opens nothing", () => {
 	assert.equal(openPreview({ hasUI: false, ui: { custom: () => {} } }, { file: "/x", relPath: "x", onEdit }), false);
 	assert.equal(openPreview({ hasUI: true, ui: {} }, { file: "/x", relPath: "x", onEdit }), false);
 	assert.equal(openPreview({ hasUI: true, ui: { custom: () => { throw new Error("no tui"); } } }, { file: "/x", relPath: "x", onEdit }), false);
+});
+
+const README = "# pi-gentle-quiet\n\nA **bold** claim and *soft* words with `code`.\n\n- one\n- two\n";
+
+test("a Markdown file is shown rendered, without the raw markers or line numbers", async () => {
+	const { text, draw } = await preview(README, { name: "README.md", relPath: "README.md" });
+	const out = text(70);
+	assert.ok(out.every((row) => [...row].length === 70), "every row as wide as the overlay");
+	assert.match(out[1], /^▏ Read-only — Markdown +▕$/);
+	assert.match(out[4], /^▏ pi-gentle-quiet +▕$/, "the heading without its #");
+	const body = out.slice(4, -2).join("\n");
+	assert.match(body, /A bold claim and soft words with code\./);
+	assert.ok(!body.includes("**") && !body.includes("`") && !body.includes("# "), "no raw markers");
+	assert.ok(!/▏ +\d+ /.test(body), "no line numbers");
+	assert.match(out.at(-2), /^▏ Esc close · e edit · m source · ↑↓ PgUp\/PgDn Home\/End · 1-\d+ \/ \d+ +▕$/);
+	assert.ok(draw(70)[4].includes(theme.bold("pi-gentle-quiet")), "the heading styled by the Markdown theme");
+});
+
+test("m toggles a Markdown file between rendered and numbered source", async () => {
+	const { component, text } = await preview(README, { name: "notes.markdown", relPath: "notes.markdown" });
+	assert.match(text(70)[1], /Read-only — Markdown/, ".markdown is Markdown too");
+	assert.match(text(70)[4], /^▏ pi-gentle-quiet +▕$/);
+	component.handleInput("m");
+	let out = text(70);
+	assert.match(out[4], /^▏ 1 # pi-gentle-quiet +▕$/, "the raw source, numbered");
+	assert.match(out[6], /^▏ 3 A \*\*bold\*\* claim/);
+	assert.match(out.at(-2), /^▏ Esc close · e edit · m rendered · ↑↓ PgUp\/PgDn Home\/End · 1-6 \/ 6 +▕$/);
+	component.handleInput("m");
+	out = text(70);
+	assert.match(out[4], /^▏ pi-gentle-quiet +▕$/);
+	assert.match(out.at(-2), / m source /);
+});
+
+test("toggling with m starts the other view from its top", async () => {
+	const long = Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}.\n`).join("\n");
+	const { component, text } = await preview(long, { name: "long.md", rows: 30 });
+	assert.match(text(90).at(-2), / m source · .* 1-19 \/ 159 /);
+	component.handleInput("\x1b[6~");
+	assert.match(text(90).at(-2), / 20-38 \/ 159 /, "the rendered rows scroll by pages");
+	component.handleInput("m");
+	assert.match(text(90).at(-2), / m rendered · .* 1-19 \/ 159 /);
+	assert.match(text(90)[4], /^▏   1 Paragraph 1\. +▕$/);
+});
+
+test("without Markdown rendering a Markdown file falls back to its numbered source", async (t) => {
+	globalThis.testMarkdownBroken = true;
+	t.after(() => delete globalThis.testMarkdownBroken);
+	const { component, text } = await preview(README, { name: "README.md", relPath: "README.md" });
+	const out = text(70);
+	assert.match(out[1], /Read-only — Markdown/);
+	assert.match(out[4], /^▏ 1 # pi-gentle-quiet +▕$/);
+	assert.match(out.at(-2), /^▏ Esc close · e edit · ↑↓/, "no m key when there is nothing to toggle");
+	component.handleInput("m");
+	assert.match(text(70)[4], /^▏ 1 # pi-gentle-quiet +▕$/, "m does nothing");
+});
+
+test("other languages keep their numbered source and no m key", async () => {
+	const { component, text } = await preview("# not a heading\n", { name: "a.py" });
+	assert.match(text(70)[4], /^▏ 1 # not a heading +▕$/);
+	assert.doesNotMatch(text(70).at(-2), / m /);
+	component.handleInput("m");
+	assert.match(text(70)[4], /^▏ 1 # not a heading +▕$/);
 });

@@ -253,7 +253,7 @@ test("a click on a file opens the read-only preview, not the editor, and marks t
 	const out = preview.render(70).map(plain);
 	assert.match(out[1], /Read-only — Markdown/);
 	assert.match(out[2], /README\.md/);
-	assert.match(out[4], /1 # Demo/);
+	assert.match(out[4], /^▏ Demo +▕$/, "the Markdown rendered");
 	preview.handleInput("e");
 	assert.equal(closed.length, 1, "e closes the preview");
 	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root], "and opens the file as a click did before");

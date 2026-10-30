@@ -47,6 +47,11 @@ export class CustomEditor {
 	}
 }
 
+// Like Pi's: the Markdown theme of assistant messages; here headings and bold are bold, the rest plain.
+const same = (text) => text;
+const bold = (text) => `\x1b[1m${text}\x1b[22m`;
+export const getMarkdownTheme = () => ({ heading: same, link: same, linkUrl: same, code: same, codeBlock: same, codeBlockBorder: same, quote: same, quoteBorder: same, hr: same, listBullet: same, bold, italic: same, strikethrough: same, underline: same });
+
 export const keyHint = (_binding, description) => `ctrl+o ${description}`;
 
 // Each test process points the agent dir at its own temporary directory.

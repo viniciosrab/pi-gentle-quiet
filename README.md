@@ -31,7 +31,8 @@ same; only how it is drawn changes.
   usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
   and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
-  wheel scroll, `e` opens the file in your editor). Files and diffs open in your editor in a herdr tab
+  wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
+  source). Files and diffs open in your editor in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press

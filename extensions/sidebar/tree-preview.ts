@@ -1,14 +1,20 @@
-// The TREE tab's file preview: a read-only pop-up over Pi, opened by a click on a file (./tree.ts). A square
-// outline in the border color around "Read-only — <language>", the file's path, then its numbered lines (no
+// The TREE tab's file preview: a read-only pop-up over Pi, opened by a click on a file (./tree.ts). An outline
+// in the border color, drawn at the cells' outer edge (▔ ▁ ▏ ▕ and their corners) so no half-cell of the
+// overlay sticks out past it, around "Read-only — <language>", the file's path, then its numbered lines (no
 // wrap, long lines cut with "…", tabs as spaces) and the footer "Esc close · e edit · ↑↓ PgUp/PgDn Home/End
 // · 43-64 / 168". Esc or q closes it, ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel
 // three lines; e closes it and opens the file in the editor tab, as a click did before.
+//
+// A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
+// theme), without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
+// footer). Where this Pi cannot render Markdown, the source is shown and there is no m.
 //
 // At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
 // row. Pi's highlighter colors the code when this Pi exports it; otherwise the lines are plain.
 // @ts-nocheck
 
 import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
+import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { open } from "node:fs/promises";
 import path from "node:path";
@@ -20,7 +26,7 @@ const LANGUAGES = {
 	TypeScript: ["ts", "tsx", "mts", "cts"],
 	JavaScript: ["js", "jsx", "mjs", "cjs"],
 	JSON: ["json"],
-	Markdown: ["md"],
+	Markdown: ["md", "markdown"],
 	Python: ["py"],
 	Go: ["go"],
 	Rust: ["rs"],
@@ -106,12 +112,33 @@ function highlighted(file, lines) {
 	}
 }
 
+// The file rendered as Markdown at `width`, trailing blank rows dropped; undefined when this Pi cannot.
+function renderedMarkdown(lines, width) {
+	try {
+		const { Markdown } = PiTui;
+		const { getMarkdownTheme } = PiCodingAgent;
+		if (typeof Markdown !== "function" || typeof getMarkdownTheme !== "function") return undefined;
+		const rows = new Markdown(lines.join("\n"), 0, 0, getMarkdownTheme()).render(width);
+		if (!Array.isArray(rows)) return undefined;
+		const out = rows.map(String);
+		while (out.length && !out.at(-1).trim()) out.pop();
+		return out.length ? out : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+// Outline strokes at the outer edge of their cells.
+const EDGE = { top: "▔", bottom: "▁", left: "▏", right: "▕", topLeft: "\u{1FB7D}", topRight: "\u{1FB7E}", bottomRight: "\u{1FB7F}", bottomLeft: "\u{1FB7C}" };
+
 class FilePreview {
 	constructor({ file, relPath, tui, theme, done, onEdit, loading }) {
 		Object.assign(this, { file, relPath, tui, theme, done, onEdit });
 		this.top = 0;
 		this.content = undefined;
 		this.closed = false;
+		this.markdown = languageOf(file) === "Markdown"; // rendered, until m or a failed render
+		this.rendered = undefined; // { width, rows } of the last Markdown render
 		this.ready = loading.then((content) => {
 			this.content = content.lines ? { ...content, shown: highlighted(file, content.lines) } : content;
 			this.redraw();
@@ -148,8 +175,32 @@ class FilePreview {
 		return Math.max(1, Math.floor(rows * 0.85) - CHROME);
 	}
 
+	// The Markdown rows at `width`, rendered again only when the width changes; undefined in source view.
+	markdownRows(width) {
+		if (!this.markdown || !this.content?.lines) return undefined;
+		if (this.rendered?.width !== width) {
+			const rows = renderedMarkdown(this.content.lines, width);
+			if (!rows) {
+				this.markdown = this.canRender = false;
+				return undefined;
+			}
+			this.rendered = { width, rows };
+			this.canRender = true;
+		}
+		return this.rendered.rows;
+	}
+
 	total() {
+		if (this.markdown && this.rendered) return this.rendered.rows.length;
 		return this.content?.lines?.length ?? 0;
+	}
+
+	toggleMarkdown() {
+		if (!this.canRender) return false;
+		this.markdown = !this.markdown;
+		this.top = 0;
+		this.redraw();
+		return true;
 	}
 
 	scrollTo(top) {
@@ -171,6 +222,7 @@ class FilePreview {
 	handleInput(data) {
 		if (pressed(data, "escape") || letter(data, "q")) return this.close();
 		if (letter(data, "e")) return this.close(true);
+		if (letter(data, "m")) return this.toggleMarkdown();
 		if (pressed(data, "down") || letter(data, "j")) return this.scrollTo(this.top + 1);
 		if (pressed(data, "up") || letter(data, "k")) return this.scrollTo(this.top - 1);
 		if (pressed(data, "pageDown")) return this.scrollTo(this.top + this.page());
@@ -189,7 +241,7 @@ class FilePreview {
 		const inner = Math.max(1, width - 4);
 		const fit = (row) => {
 			const cut = visibleWidth(row) > inner ? truncateToWidth(row, inner, "…") : row;
-			return `${this.paint("border", "│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${this.paint("border", "│")}`;
+			return `${this.paint("border", EDGE.left)} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${this.paint("border", EDGE.right)}`;
 		};
 		// Plain text cut before it is painted, so the color reaches the "…".
 		const text = (role, plain, bold = false) => {
@@ -205,26 +257,32 @@ class FilePreview {
 		else if (content.binary) body.push(text("muted", "Binary file — press e to open it in the editor"));
 		else if (content.empty) body.push(text("muted", "(empty file)"));
 		else {
+			const rows = this.markdownRows(inner);
 			const total = this.total();
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
 			const digits = String(total).length;
 			const room = Math.max(1, inner - digits - 1);
 			for (let index = this.top; index < to; index++) {
+				if (rows) {
+					body.push(rows[index]);
+					continue;
+				}
 				const code = content.shown[index];
 				const line = visibleWidth(code) > room ? truncateToWidth(code, room, "…") : code;
 				body.push(`${this.paint("dim", String(index + 1).padStart(digits))} ${line}`);
 			}
-			range = ` · ↑↓ PgUp/PgDn Home/End · ${this.top + 1}-${to} / ${total}`;
+			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";
+			range = `${toggle} · ↑↓ PgUp/PgDn Home/End · ${this.top + 1}-${to} / ${total}`;
 		}
 		return [
-			this.paint("border", `┌${"─".repeat(inner + 2)}┐`),
+			this.paint("border", `${EDGE.topLeft}${EDGE.top.repeat(inner + 2)}${EDGE.topRight}`),
 			fit(text("toolTitle", `Read-only — ${languageOf(this.file)}`, true)),
 			fit(text("muted", `${this.relPath}${cut}`)),
 			fit(""),
 			...body.map(fit),
 			fit(text("dim", `Esc close · e edit${range}`)),
-			this.paint("border", `└${"─".repeat(inner + 2)}┘`),
+			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
 	}
 
