@@ -4,6 +4,7 @@
 // "A", "U" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
 // (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), Nerd Font glyphs picked and colored as
 // Miguel Solorio's Symbols theme picks its icons (./nerd-icons.ts), one cell wide, each in its own 24-bit color.
+// With fonts/GentleNerdIcons.ttf installed (largeIconFont) the rows draw the same glyphs 20% larger from it.
 //
 // Mouse: the header (or its badge) opens the editor on the project; a folder opens or closes; a file opens in
 // a read-only preview over Pi (./tree-preview.ts), whose e key opens it in the editor (straight in the editor
@@ -13,6 +14,8 @@
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { editorCommand, launchDeps } from "./tree-launch.ts";
@@ -22,6 +25,20 @@ import { collectDirs, flattenTree, parseGitStatus, projectName, scanTree } from 
 
 /** How often the tree is read again while shown, and how long a launch failure stays on the card. */
 export const treeTiming = { rescanMs: 3000, noticeMs: 8000 };
+
+/**
+ * Whether GentleNerdIcons.ttf, the Nerd icons 20% larger, is installed in ~/.local/share/fonts or ~/.fonts:
+ * looked up once per process (`installed` keeps the answer); home and exists are seams for tests.
+ */
+export const largeIconFont = {
+	home: () => os.homedir(),
+	exists: (file: string) => existsSync(file),
+	installed: undefined as boolean | undefined,
+	isInstalled(): boolean {
+		largeIconFont.installed ??= [".local/share/fonts", ".fonts"].some((dir) => largeIconFont.exists(path.join(largeIconFont.home(), dir, "GentleNerdIcons.ttf")));
+		return largeIconFont.installed;
+	},
+};
 
 const ICON = "⌂";
 const COMPACT_WIDTH = 38; // cute's: under it the badge is "[ ↗ ]"
@@ -63,10 +80,10 @@ export function createTab(host: SidebarHost): SidebarTab {
 	// The row's icon and the space after it.
 	const icon = (node, open) => {
 		if (host.treeIcons !== "nerd") return `${node.isDirectory ? (open ? "📂" : "📁") : "📄"} `;
-		const { char, color } = nerdIcon(node.name, { isDirectory: node.isDirectory, open });
+		const { char, large, color } = nerdIcon(node.name, { isDirectory: node.isDirectory, open });
 		const [r, g, b] = [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
 		// The glyph is one cell; two spaces start the name where an emoji row (a two-cell emoji and a space) starts it.
-		return `\x1b[38;2;${r};${g};${b}m${char}\x1b[39m  `;
+		return `\x1b[38;2;${r};${g};${b}m${largeIconFont.isInstalled() ? large : char}\x1b[39m  `;
 	};
 	const changed = () => {
 		state.version++;

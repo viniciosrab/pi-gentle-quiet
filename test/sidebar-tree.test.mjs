@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
-import { createTab, treeTiming } from "../extensions/sidebar/tree.ts";
+import { createTab, largeIconFont, treeTiming } from "../extensions/sidebar/tree.ts";
 import { launchDeps, launchEditor } from "../extensions/sidebar/tree-launch.ts";
 import { flattenTree, parseGitStatus, scanTree } from "../extensions/sidebar/tree-scan.ts";
 import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
@@ -156,7 +157,15 @@ test("the tree: folders first with item counts, guides, ignored folders left out
 // A Nerd Font icon in Symbols' color as the TREE paints it: the glyph in its own 24-bit color.
 const truecolor = ({ char, color }) => `\x1b[38;2;${parseInt(color.slice(1, 3), 16)};${parseInt(color.slice(3, 5), 16)};${parseInt(color.slice(5, 7), 16)}m${char}\x1b[39m`;
 
+// Pins whether GentleNerdIcons.ttf counts as installed for one test.
+function largeFont(t, installed) {
+	const original = { ...largeIconFont };
+	largeIconFont.installed = installed;
+	t.after(() => Object.assign(largeIconFont, original));
+}
+
 test("with nerd icons each row draws its mapped Nerd Font glyph in its color and two spaces, so names start where the emoji rows put them", async (t) => {
+	largeFont(t, false);
 	const git = STATUS(" M src/index.ts\n?? docs/guide.md\n");
 	const { tab, rows, raw } = await opened({ cwd: project([...FILES, "src/tree.test.ts"]), git, treeIcons: "nerd" });
 	t.after(() => tab.dispose());
@@ -179,6 +188,48 @@ test("with nerd icons each row draws its mapped Nerd Font glyph in its color and
 	assert.match(rows().find((row) => row.includes(" docs")), /docs \(1 items\) +● │$/);
 	assert.ok(rows().every((row) => [...row].length === 59), "every row as wide as the column");
 	assert.ok(!rows().join("").match(/[📁📂📄]/u), "no emoji left");
+});
+
+test("with GentleNerdIcons.ttf installed the rows draw the large twin of each glyph, in the same color and the same layout", async (t) => {
+	const root = project([...FILES, "src/tree.test.ts"]);
+	const git = STATUS(" M src/index.ts\n?? docs/guide.md\n");
+	largeFont(t, false);
+	const small = await opened({ cwd: root, git, treeIcons: "nerd" });
+	t.after(() => small.tab.dispose());
+	const smallRows = small.rows();
+	largeIconFont.installed = true;
+	const large = await opened({ cwd: root, git, treeIcons: "nerd" });
+	t.after(() => large.tab.dispose());
+	const named = [["docs", { isDirectory: true }], ["src", { isDirectory: true, open: true }], ["index.ts"], ["package.json"], ["README.md"]];
+	for (const [name, options] of named) {
+		const icon = nerdIcon(name, options);
+		const line = large.raw().find((row) => plain(row).includes(` ${name}`));
+		assert.ok(line.includes(`${truecolor({ char: icon.large, color: icon.color })}  `), `${name}: the large glyph in ${icon.color}, then two spaces`);
+		assert.ok(plain(line).includes(`${icon.large}  ${name}`));
+		assert.ok(!line.includes(icon.char), `${name}: not the Nerd Font glyph`);
+	}
+	const swap = (row) => [...row].map((ch) => (ch.codePointAt(0) >= 0x100400 && ch.codePointAt(0) <= 0x1004ff ? "#" : ch)).join("");
+	const unswap = (row) => [...row].map((ch) => (/[\u{e000}-\u{f8ff}\u{f0000}-\u{fffff}]/u.test(ch) ? "#" : ch)).join("");
+	assert.deepEqual(large.rows().map(swap), smallRows.map(unswap), "same rows, the icon cell aside");
+	assert.ok(large.rows().every((row) => visibleWidth(row) === 59), "every row as wide as the column");
+});
+
+test("the large font counts as installed when GentleNerdIcons.ttf is in ~/.local/share/fonts or ~/.fonts, checked once per process", (t) => {
+	largeFont(t, undefined);
+	const checked = [];
+	let present = "";
+	largeIconFont.home = () => "/home/someone";
+	largeIconFont.exists = (file) => (checked.push(file), file === present);
+	assert.equal(largeIconFont.isInstalled(), false);
+	assert.deepEqual(checked, ["/home/someone/.local/share/fonts/GentleNerdIcons.ttf", "/home/someone/.fonts/GentleNerdIcons.ttf"]);
+	present = "/home/someone/.fonts/GentleNerdIcons.ttf";
+	assert.equal(largeIconFont.isInstalled(), false, "the answer is kept for the process");
+	assert.equal(checked.length, 2);
+	largeIconFont.installed = undefined;
+	assert.equal(largeIconFont.isInstalled(), true);
+	largeIconFont.installed = undefined;
+	present = "/home/someone/.local/share/fonts/GentleNerdIcons.ttf";
+	assert.equal(largeIconFont.isInstalled(), true);
 });
 
 test("emoji icons stay the default and draw exactly as before", async (t) => {

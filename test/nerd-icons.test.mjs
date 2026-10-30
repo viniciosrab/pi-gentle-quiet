@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { load, picker, readConfig, writeConfig } from "./helpers.mjs";
-import { GLYPHS, byExtension, byFileName, byFolderName, byFolderNameOpen, file, folder, folderOpen, nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
+import { GLYPHS, LARGE, byExtension, byFileName, byFolderName, byFolderNameOpen, file, folder, folderOpen, nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
+
+const FONT = new URL("../fonts/GentleNerdIcons.ttf", import.meta.url);
+
+// The codepoints a TrueType font maps, from its Windows full-Unicode cmap subtable (format 12).
+function cmapCodepoints(bytes) {
+	const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const tables = data.getUint16(4);
+	let cmap;
+	for (let i = 0; i < tables; i++) {
+		const at = 12 + i * 16;
+		if (String.fromCharCode(...bytes.subarray(at, at + 4)) === "cmap") cmap = data.getUint32(at + 8);
+	}
+	assert.ok(cmap !== undefined, "the font has a cmap");
+	const codes = new Set();
+	for (let i = 0; i < data.getUint16(cmap + 2); i++) {
+		const record = cmap + 4 + i * 8;
+		const sub = cmap + data.getUint32(record + 4);
+		if (data.getUint16(record) !== 3 || data.getUint16(record + 2) !== 10 || data.getUint16(sub) !== 12) continue;
+		for (let g = 0; g < data.getUint32(sub + 12); g++) {
+			const group = sub + 16 + g * 12;
+			for (let code = data.getUint32(group); code <= data.getUint32(group + 4); code++) codes.add(code);
+		}
+	}
+	return codes;
+}
 
 const cp = (icon) => icon.char.codePointAt(0);
 // Nerd Font's private-use ranges: seti, devicons, codicons, custom (U+E5FA..U+F8FF) and Material Design (U+F0001..).
@@ -17,6 +43,28 @@ test("every icon is one Nerd Font glyph from the list the build checked against 
 		assert.ok(checked.has(cp(icon)), `U+${cp(icon).toString(16)} was checked in the font`);
 		assert.match(icon.color, /^#[0-9a-f]{6}$/);
 	}
+});
+
+test("every glyph has a large twin in GentleNerdIcons.ttf, at U+100400 upward, and every icon carries it", () => {
+	assert.deepEqual(Object.keys(LARGE).sort(), Object.keys(GLYPHS).sort(), "one large glyph per Nerd Font glyph");
+	const codes = Object.values(LARGE);
+	assert.equal(new Set(codes).size, codes.length, "distinct codepoints");
+	for (const code of codes) assert.ok(code >= 0x100400 && code <= 0x1004ff, `U+${code.toString(16)} is in U+100400..U+1004FF`);
+	assert.deepEqual([...cmapCodepoints(readFileSync(FONT))].sort(), [...codes].sort(), "the font maps exactly the listed codepoints");
+	const twin = new Map(Object.keys(GLYPHS).map((name) => [GLYPHS[name], LARGE[name]]));
+	const all = [file, folder, folderOpen, ...Object.values(byFileName), ...Object.values(byExtension), ...Object.values(byFolderName), ...Object.values(byFolderNameOpen)];
+	for (const icon of all) {
+		assert.equal([...icon.large].length, 1);
+		assert.equal(icon.large.codePointAt(0), twin.get(cp(icon)), "the large glyph is the same icon as char");
+	}
+	assert.equal(nerdIcon("package.json").large, String.fromCodePoint(LARGE[Object.keys(GLYPHS).find((name) => GLYPHS[name] === cp(nerdIcon("package.json")))]));
+});
+
+test("the package ships the large icon font and the Nerd Fonts licence notice", () => {
+	const { files } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	assert.ok(files.includes("fonts/GentleNerdIcons.ttf"));
+	assert.ok(files.includes("fonts/LICENSE-nerd-fonts"));
+	assert.match(readFileSync(new URL("../fonts/LICENSE-nerd-fonts", import.meta.url), "utf8"), /SIL OPEN FONT LICENSE Version 1\.1/);
 });
 
 test("a file's exact name beats its extension, case-insensitively", () => {

@@ -16,7 +16,16 @@
 # icon's SVG, a grey only when nothing else is painted (a folder's colored badge gives the folder its color).
 # Every glyph is checked present in JetBrainsMono Nerd Font's cmap; the module lists the codepoints it checked.
 #
-# Run: uv run --no-project --with fonttools --with picosvg python fonts/build-nerd-icons.py \
+# It also writes fonts/GentleNerdIcons.ttf ("Gentle Nerd Icons"): the same glyphs, outlines copied from
+# JetBrainsMono Nerd Font 3.5.1 (Version 2.304;...;Nerd Fonts 3.5.1, checked) and scaled 120% about each glyph's own
+# centre, so the vertical centre stays where the Nerd Font puts it, on the text; the left edge stays too, and the
+# extra width runs to the right, into the two spaces TREE puts after the icon. Same em, advance (600) and line
+# metrics as the source, every glyph inside its ascent and descent. They sit at private-use codepoints from
+# U+100400 (plane 16; U+100000, U+100030 and U+100100..U+10023B were used before), in the order of GLYPHS; the
+# module lists them as LARGE. The font is under the SIL Open Font License 1.1 like its source, with the glyph sets'
+# notices in fonts/LICENSE-nerd-fonts. Fixed head dates: the same inputs give the same bytes.
+#
+# Run: uv run --no-project --with fonttools==4.68.0 --with picosvg python fonts/build-nerd-icons.py \
 #        [vscode-symbols checkout] [glyphnames.json] [JetBrainsMonoNerdFont-Regular.ttf]
 # With no checkout or glyphnames.json, the pinned ones are fetched into a temporary directory.
 import json
@@ -29,6 +38,9 @@ from copy import deepcopy
 from pathlib import Path
 
 import pathops
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 from lxml import etree
 from picosvg.svg import SVG
@@ -42,6 +54,11 @@ GLYPHNAMES = f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_TAG}
 FONT = "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / "extensions" / "sidebar" / "nerd-icons.ts"
+LARGE_FONT = ROOT / "fonts" / "GentleNerdIcons.ttf"
+LARGE_BASE = 0x100400
+LARGE_SCALE = 1.2
+# 2025-01-01T00:00:00Z in the head table's seconds since 1904-01-01.
+FIXED_DATE = 3818707200
 
 FILE = "cod-file"
 FOLDER = "cod-folder"
@@ -283,6 +300,51 @@ def icon_color(file):
     return max(colored or areas, key=(colored or areas).get)
 
 
+def build_large_font(source, names, codepoints):
+    """GentleNerdIcons.ttf: each named glyph scaled LARGE_SCALE about its centre, left edge kept, at LARGE_BASE + i."""
+    upem, hhea, os2 = source["head"].unitsPerEm, source["hhea"], source["OS/2"]
+    ascent, descent = hhea.ascent, hhea.descent
+    cmap, glyph_set, glyf = source.getBestCmap(), source.getGlyphSet(), source["glyf"]
+    advance = source["hmtx"][cmap[ord("a")]][0]
+    order, glyphs, metrics, mapping = [".notdef"], {".notdef": TTGlyphPen(None).glyph()}, {".notdef": (advance, 0)}, {}
+    for i, name in enumerate(names):
+        box = glyf[cmap[codepoints[name]]]
+        cy = (box.yMin + box.yMax) / 2
+        top, bottom = cy + (box.yMax - cy) * LARGE_SCALE, cy + (box.yMin - cy) * LARGE_SCALE
+        if top > ascent or bottom < descent:
+            sys.exit(f"{name} scaled to {bottom:.0f}..{top:.0f} leaves the line's {descent}..{ascent}")
+        pen = TTGlyphPen(None)
+        glyph_set[cmap[codepoints[name]]].draw(TransformPen(pen, (LARGE_SCALE, 0, 0, LARGE_SCALE, box.xMin * (1 - LARGE_SCALE), cy * (1 - LARGE_SCALE))))
+        glyph = pen.glyph()
+        glyph.recalcBounds(None)
+        order.append(name)
+        glyphs[name], metrics[name], mapping[LARGE_BASE + i] = glyph, (advance, glyph.xMin), name
+    fb = FontBuilder(upem, isTTF=True)
+    fb.setupGlyphOrder(order)
+    fb.setupCharacterMap(mapping)
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics(metrics)
+    fb.setupHorizontalHeader(ascent=ascent, descent=descent, lineGap=hhea.lineGap)
+    fb.setupOS2(sTypoAscender=os2.sTypoAscender, sTypoDescender=os2.sTypoDescender, sTypoLineGap=os2.sTypoLineGap,
+                usWinAscent=os2.usWinAscent, usWinDescent=os2.usWinDescent, xAvgCharWidth=advance, achVendID="NONE")
+    fb.setupPost(isFixedPitch=1)
+    fb.setupNameTable({
+        "familyName": "Gentle Nerd Icons",
+        "styleName": "Regular",
+        "copyright": "Glyphs from JetBrainsMono Nerd Font 3.5.1 (Nerd Fonts, https://www.nerdfonts.com), scaled 120%; "
+                     "glyph set notices in LICENSE-nerd-fonts",
+        "version": "Version 1.000",
+        "licenseDescription": "This Font Software is licensed under the SIL Open Font License, Version 1.1.",
+        "licenseInfoURL": "https://openfontlicense.org",
+    })
+    fb.font["head"].created = fb.font["head"].modified = FIXED_DATE
+    fb.save(LARGE_FONT)
+    tops = [glyph.yMax for glyph in glyphs.values() if hasattr(glyph, "yMax")]
+    bottoms = [glyph.yMin for glyph in glyphs.values() if hasattr(glyph, "yMin")]
+    rights = [glyph.xMax for glyph in glyphs.values() if hasattr(glyph, "xMax")]
+    return {code: name for code, name in mapping.items()}, (min(bottoms), max(tops), max(rights), advance)
+
+
 def grouped(entries):
     """{key: icon} as {icon: "key key ..."}, keys sorted."""
     groups = {}
@@ -348,6 +410,10 @@ def main():
             sys.exit(f"{name} (U+{codepoints[name]:X}) is not in {font}")
     family = TTFont(font)["name"].getDebugName(4)
     version = TTFont(font)["name"].getDebugName(5)
+    if not version.endswith(f"Nerd Fonts {NERD_TAG[1:]}"):
+        sys.exit(f"{font} is {version}, not Nerd Fonts {NERD_TAG[1:]}")
+    large, (lowest, highest, rightmost, advance) = build_large_font(TTFont(font), used, codepoints)
+    large_code = {name: code for code, name in large.items()}
 
     keep = lambda entries: {key: value for key, value in entries.items() if value in colors}
     file_names, extensions, folders, folders_open = map(keep, (file_names, extensions, folders, folders_open))
@@ -366,9 +432,10 @@ def main():
         for icon in folder_icons
     )
     glyph_rows = "".join(f"\t{json.dumps(name)}: 0x{codepoints[name]:X},\n" for name in used)
+    large_rows = "".join(f"\t{json.dumps(name)}: 0x{large_code[name]:X},\n" for name in used)
     MODULE.write_text(
         "// Generated by fonts/build-nerd-icons.py: do not edit. Regenerate with\n"
-        "//   uv run --no-project --with fonttools --with picosvg python fonts/build-nerd-icons.py \\\n"
+        "//   uv run --no-project --with fonttools==4.68.0 --with picosvg python fonts/build-nerd-icons.py \\\n"
         "//     [vscode-symbols checkout] [glyphnames.json] [JetBrainsMonoNerdFont-Regular.ttf]\n"
         "//\n"
         f"// Miguel Solorio's Symbols icon theme for VS Code ({REPO} at {PIN[:7]}, MIT License, see\n"
@@ -376,15 +443,23 @@ def main():
         "// the icon and its color, the glyph is the Nerd Font icon standing for it (seti and devicons for languages and\n"
         "// tools, codicons for the rest), one cell wide. nerdIcon() picks a row's icon as VS Code does: the file name,\n"
         "// then its longest extension, then the default file icon; folders by name, closed or open.\n"
+        "// Each icon also names its `large` twin: the same glyph 20% larger in fonts/GentleNerdIcons.ttf, for terminals\n"
+        "// with that font installed (the caller picks char or large).\n"
         "// @ts-nocheck\n\n"
-        "export interface NerdIcon {\n\tchar: string;\n\tcolor: string;\n}\n\n"
+        "export interface NerdIcon {\n\tchar: string;\n\tlarge: string;\n\tcolor: string;\n}\n\n"
         f"// Glyph name -> codepoint, each one checked present in {family} {version.split(';')[0]}'s cmap.\n"
         f"export const GLYPHS: Record<string, number> = {{\n{glyph_rows}}};\n\n"
+        "// Glyph name -> its 120% twin's codepoint in fonts/GentleNerdIcons.ttf (Gentle Nerd Icons).\n"
+        f"export const LARGE: Record<string, number> = {{\n{large_rows}}};\n\n"
         "// Symbols file icon -> [glyph, color, lowercase file names, lowercase extensions].\n"
         f"const FILES: Record<string, [string, string, string, string]> = {{\n{files}}};\n\n"
         "// Symbols folder icon -> [color, lowercase folder names, lowercase names when open].\n"
         f"const FOLDERS: Record<string, [string, string, string]> = {{\n{folder_rows}}};\n\n"
-        "const icon = (glyph: string, color: string): NerdIcon => ({ char: String.fromCodePoint(GLYPHS[glyph]), color });\n"
+        "const icon = (glyph: string, color: string): NerdIcon => ({\n"
+        "\tchar: String.fromCodePoint(GLYPHS[glyph]),\n"
+        "\tlarge: String.fromCodePoint(LARGE[glyph]),\n"
+        "\tcolor,\n"
+        "});\n"
         "const index = (rows, column: number, make) => {\n"
         "\tconst found: Record<string, NerdIcon> = {};\n"
         "\tfor (const [id, row] of Object.entries(rows)) for (const key of row[column].split(\" \").filter(Boolean)) found[key] = make(id, row);\n"
@@ -423,6 +498,9 @@ def main():
     for line in skipped:
         print(f"skipped {line}")
     print(f"wrote {MODULE.relative_to(ROOT)}")
+    print(f"wrote {LARGE_FONT.relative_to(ROOT)}: {len(large)} glyphs at U+{min(large):X}..U+{max(large):X}, "
+          f"ink {lowest}..{highest} (line {TTFont(font)['hhea'].descent}..{TTFont(font)['hhea'].ascent}), "
+          f"rightmost {rightmost} (advance {advance}, icon and two spaces {advance * 3})")
 
 
 main()

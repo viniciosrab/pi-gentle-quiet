@@ -43,7 +43,11 @@ same; only how it is drawn changes.
   the TREE tab draws its file and folder icons with your terminal's Nerd Font glyphs, picked and colored as
   [Symbols](https://github.com/miguelsolorio/vscode-symbols), Miguel Solorio's VS Code icon theme
   ([MIT](fonts/LICENSE-vscode-symbols)), picks its icons: by file name, extension and folder name, each in
-  Symbols' color. No extra font to install. `fonts/build-nerd-icons.py` regenerates the mapping.
+  Symbols' color. No extra font to install. For icons about 20% larger, optionally install the same glyphs
+  scaled up: `cp fonts/GentleNerdIcons.ttf ~/.local/share/fonts/ && fc-cache -f`, then reopen the terminal
+  (TREE uses it when it is in `~/.local/share/fonts` or `~/.fonts`, and keeps the Nerd Font glyphs otherwise;
+  [OFL 1.1 and glyph set notices](fonts/LICENSE-nerd-fonts)). `fonts/build-nerd-icons.py` regenerates the
+  mapping and the font.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
