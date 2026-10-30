@@ -43,7 +43,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T11 | S7 (L10) | worker: rendered Markdown in the preview; flush pop-up outline | 6ec8f47 |
 | T12 | S8 (L11) | worker: 6:PR tab (pr.ts, pr-data.ts); tab contract gains optional onHide() | f48d1a4 |
 | T13 | S8 (L12) | worker: PR tab lists the open PRs, current branch's PR first; no branch/ahead-behind | f541c22 |
-| T14 | S9 (L14) | worker: MEM tab — saved/recalled this session, pending count, folded handoff; drop Tools, Stack only with updates | pending |
+| T14 | S9 (L14) | worker: MEM tab — saved/recalled this session, pending count, folded handoff; Tools dropped; Stack dropped (no offline latest-version source) | 942a52e |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
