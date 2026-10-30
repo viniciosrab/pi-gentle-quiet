@@ -19,7 +19,7 @@
 //           and Context cards that stay on top, then Todos (Gentle Shell's layout, drawn in this style); narrower
 //           ones keep them in place. With Gentle Shell off it also holds gentle-pi's Jobs card (ctrl+shift+j collapses it).
 //           The Agents card stays inline above the editor, as in pi-cinlodev-cute.
-//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE" (pi-cinlodev-cute's), switches the
+//           A tab bar on top, "[ 1:MAIN ] 2:GIT 3:PROF 4:MEM 5:TREE 6:PR" (pi-cinlodev-cute's), switches the
 //           column: MAIN is the column above, the others live in ./sidebar/
 //   quiet   read/bash/edit/write/grep/find/ls/codemode/codegraph collapse to
 //             " read ~/x.ts"
@@ -2818,6 +2818,18 @@ function installSidebar(tui) {
 	// The active tab is kept here, in memory: every new column opens on MAIN.
 	let tab = "main";
 	let shown = "main"; // the tab whose onShow ran last
+	// `id` takes the column: the tab it replaces is told it is hidden.
+	const show = (id) => {
+		if (shown === id) return false;
+		const previous = views.get(shown);
+		shown = id;
+		try {
+			previous?.tab?.onHide?.();
+		} catch {
+			// the hidden tab's own trouble
+		}
+		return true;
+	};
 	let bar = { rows: [], hitboxes: [] };
 	const select = (id) => {
 		if (id) tab = id;
@@ -2883,10 +2895,7 @@ function installSidebar(tui) {
 	const drawTab = (entry, width, fit) => {
 		try {
 			if (!entry.tab) throw entry.error ?? new Error("not available");
-			if (shown !== entry.id) {
-				shown = entry.id;
-				entry.tab.onShow?.();
-			}
+			if (show(entry.id)) entry.tab.onShow?.();
 			const height = Math.max(1, (tui.terminal?.rows ?? 24) - TAB_BAR_ROWS);
 			entry.rows = (entry.tab.render(width, height) ?? []).map((row) => fit(String(row ?? "")));
 		} catch (error) {
@@ -2960,7 +2969,7 @@ function installSidebar(tui) {
 						const drawnBar = renderTabBar(width, tab, theme);
 						bar = { rows: [drawnBar.line, fg(theme, "border", `╶${"─".repeat(Math.max(0, width - 2))}╴`)], hitboxes: drawnBar.hitboxes };
 						if (tab !== "main") drawTab(view(tab), width, fit);
-						else shown = "main";
+						else show("main");
 					}
 				} catch {
 					failed = true;
