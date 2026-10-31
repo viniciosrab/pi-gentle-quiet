@@ -14,6 +14,13 @@
 // Given text instead of a file (a memory from the MEM tab, ./mem.ts) shows the same way: "Read-only — <label>",
 // its title on the path row, the body rendered as Markdown (m for its source), and no e, as there is no file.
 //
+// Opened from the GIT tab with `changes` (./git.ts), a file shows its changes inline, as VS Code's diff does:
+// "Read-only — <language> · changes", every row of the file with a gutter before its number, "+" on added rows
+// and "-" on removed ones, which stand where they were removed from with no number, both painted in the theme's
+// toolDiffAdded / toolDiffRemoved. It opens at the first change; n/N (or ] and [) jump to the next or previous
+// change, and the footer shows "+12 −3". A Markdown file is its source there, never rendered (no m). When git
+// gives no diff (no change, a binary file, a failure) it is the plain preview.
+//
 // At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
 // row. Pi's highlighter colors the code when this Pi exports it; otherwise the lines are plain.
 // @ts-nocheck
@@ -23,6 +30,7 @@ import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { open } from "node:fs/promises";
 import path from "node:path";
+import { addedRows, changeBlocks, parseFileDiff } from "./diff-preview.ts";
 
 /** How much of a file is read, how much is checked for NUL bytes, and up to what size it is highlighted. */
 export const previewLimits = { maxBytes: 1024 * 1024, sniffBytes: 8192, highlightBytes: 256 * 1024 };
@@ -62,6 +70,32 @@ const letter = (data, char) => data === char || pressed(data, char === char.toLo
 
 const CHROME = 6; // top, title, path, blank row, footer, bottom
 const WHEEL_LINES = 3;
+const LEAD = 3; // rows shown above a change the view jumps to
+const TINT = 0.25; // how much of the theme's diff color a changed row's background takes
+
+// Whether an SGR's parameters reset the background: a full reset ("", 0) or 49. The arguments of a 38/48/58
+// color (5;n or 2;r;g;b) are skipped, so the 0 of "38;5;0" is a color, not a reset.
+function endsBackground(params) {
+	const parts = params === "" ? ["0"] : params.split(/[;:]/);
+	for (let i = 0; i < parts.length; i++) {
+		const code = Number(parts[i] || 0);
+		if (code === 0 || code === 49) return true;
+		if (code === 38 || code === 48 || code === 58) i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 1;
+	}
+	return false;
+}
+
+// A theme role's color as [r, g, b] when it is a truecolor one: Pi's resolved colors, or its escape.
+function themeRgb(theme, role) {
+	const color = theme?.colors?.[role];
+	if (color?.kind === "rgb") return [color.r, color.g, color.b].map(Math.round);
+	const ansi = typeof theme?.getFgAnsi === "function" ? theme.getFgAnsi(role) : theme?.fg?.(role, "");
+	const m = /\x1b\[38;2;(\d+);(\d+);(\d+)m/.exec(ansi ?? "");
+	return m ? m.slice(1).map(Number) : undefined;
+}
+// Two diff colors a monochrome theme gave: both gray (no channel spread), or too close to tell apart.
+const gray = (rgb) => Math.max(...rgb) - Math.min(...rgb) < 24;
+const monochrome = (a, b) => (gray(a) && gray(b)) || Math.hypot(...a.map((channel, i) => channel - b[i])) < 48;
 const TAB_STOP = 4;
 
 const expandTabs = (line) => {
@@ -102,6 +136,32 @@ export async function readPreview(file) {
 	}
 }
 
+/**
+ * The preview of a file with its changes: { lines, rows, added, removed, blocks } from the diff `changes.diff`
+ * resolves to, or from the whole file added with `changes.untracked`; readPreview's answer when there is none.
+ */
+export async function changesPreview(file, changes) {
+	try {
+		if (changes?.untracked) {
+			const content = await readPreview(file);
+			return content.lines ? withRows(content, addedRows(content.lines)) : content;
+		}
+		const parsed = parseFileDiff(await changes?.diff);
+		if (parsed) return withRows({ cut: 0 }, parsed.rows.map((row) => ({ ...row, text: sanitize(row.text) })));
+	} catch {
+		// git failed: the plain preview
+	}
+	return readPreview(file);
+}
+
+function withRows(content, rows) {
+	const count = (sign) => rows.filter((row) => row.sign === sign).length;
+	// The widest numbers of each column.
+	const last = rows.reduce((most, row) => Math.max(most, row.number ?? 0), 1);
+	const lastOld = rows.reduce((most, row) => Math.max(most, row.old ?? 0), 1);
+	return { ...content, lines: rows.map((row) => row.text), rows, last, lastOld, added: count("+"), removed: count("-"), blocks: changeBlocks(rows) };
+}
+
 /** Given text for the preview, as readPreview gives a file's: { lines } or { empty }, { error } when it fails. */
 export async function textPreview(text) {
 	try {
@@ -116,9 +176,13 @@ export async function textPreview(text) {
 }
 
 // Pi's highlighter, when this Pi exports it and the file is small enough; the plain lines otherwise.
+/** Pi's highlighter and language lookup, swappable in tests; Pi's own when unset. */
+export const previewDeps = { highlightCode: undefined, getLanguageFromPath: undefined };
+
 function highlighted(file, lines) {
 	try {
-		const { highlightCode, getLanguageFromPath } = PiCodingAgent;
+		const highlightCode = previewDeps.highlightCode ?? PiCodingAgent.highlightCode;
+		const getLanguageFromPath = previewDeps.getLanguageFromPath ?? PiCodingAgent.getLanguageFromPath;
 		if (typeof highlightCode !== "function") return lines;
 		if (lines.reduce((sum, line) => sum + line.length + 1, 0) > previewLimits.highlightBytes) return lines;
 		const language = typeof getLanguageFromPath === "function" ? getLanguageFromPath(file) : undefined;
@@ -291,8 +355,8 @@ function patchBackdrop(tui) {
 }
 
 class FilePreview {
-	constructor({ file, relPath, tui, theme, done, onEdit, loading, label }) {
-		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label });
+	constructor({ file, relPath, tui, theme, done, onEdit, loading, label, changes = false }) {
+		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label, changes });
 		if (file !== undefined && languageOf(file) === "Markdown") this[BACKDROP] = true;
 		try {
 			patchBackdrop(tui);
@@ -303,12 +367,62 @@ class FilePreview {
 		this.top = 0;
 		this.content = undefined;
 		this.closed = false;
-		this.markdown = file === undefined || languageOf(file) === "Markdown"; // rendered, until m or a failed render
+		// Rendered, until m or a failed render; from the GIT tab a Markdown file is its source.
+		this.markdown = !changes && (file === undefined || languageOf(file) === "Markdown");
 		this.rendered = undefined; // { width, rows } of the last Markdown render
 		this.ready = loading.then((content) => {
-			this.content = content.lines ? { ...content, shown: file === undefined ? content.lines : highlighted(file, content.lines) } : content;
+			this.content = content.lines ? { ...content, shown: this.colored(content) } : content;
+			if (content.blocks?.length) this.top = Math.max(0, content.blocks[0] - LEAD); // render keeps it in range
 			this.redraw();
 		});
+	}
+
+	// The lines as drawn: highlighted as the files they make up, the new one (unchanged and added rows) and the
+	// old one (unchanged and removed rows), so each row gets the colors of its own file.
+	colored({ lines, rows }) {
+		if (this.file === undefined) return lines;
+		if (!rows) return highlighted(this.file, lines);
+		const shown = [...lines];
+		const take = (skip) => {
+			const picked = rows.flatMap((row, index) => (row.sign === skip ? [] : [index]));
+			if (!picked.length) return;
+			const code = highlighted(this.file, picked.map((index) => lines[index]));
+			picked.forEach((index, at) => {
+				if (skip === "+" ? rows[index].sign === "-" : true) shown[index] = code[at];
+			});
+		};
+		take("-"); // the new file
+		if (rows.some((row) => row.sign === "-")) take("+"); // the old file, for its removed rows
+		return shown;
+	}
+
+	// The background of a changed row, from the theme: its toolDiffAdded / toolDiffRemoved color blended TINT of
+	// the way over the screen's background when the theme has a truecolor one, else its toolSuccessBg /
+	// toolErrorBg role. { open } of the escape that sets it, or undefined (no tint) when the theme has neither.
+	tints() {
+		const theme = this.theme;
+		const tint = (role, bgRole) => {
+			try {
+				const color = (theme.getColorMode?.() ?? "truecolor") === "truecolor" ? themeRgb(theme, role) : undefined;
+				if (color) {
+					const base = theme.appearance === "light" ? 255 : 0; // Pi's guess for an unreported background
+					return { open: `\x1b[48;2;${color.map((channel) => Math.round(base + (channel - base) * TINT)).join(";")}m`, rgb: color };
+				}
+				const open = typeof theme.getBgAnsi === "function" ? theme.getBgAnsi(bgRole) : typeof theme.bg === "function" ? theme.bg(bgRole, "\0").split("\0")[0] : "";
+				return open && open !== "\x1b[49m" ? { open } : undefined; // a role left to the terminal's default: no tint
+			} catch {
+				return undefined;
+			}
+		};
+		const added = tint("toolDiffAdded", "toolSuccessBg");
+		const removed = tint("toolDiffRemoved", "toolErrorBg");
+		// A monochrome theme gives both roles a gray: the hue cannot tell them apart, so removed rows go half as
+		// strong and fade their code to dim.
+		if (removed?.rgb && added?.rgb && monochrome(added.rgb, removed.rgb)) {
+			const base = this.theme.appearance === "light" ? 255 : 0;
+			return { "+": added, "-": { open: `\x1b[48;2;${removed.rgb.map((channel) => Math.round(base + (channel - base) * (TINT / 2))).join(";")}m`, faded: true } };
+		}
+		return { "+": added, "-": removed };
 	}
 
 	paint(role, text) {
@@ -369,6 +483,14 @@ class FilePreview {
 		return true;
 	}
 
+	// The next (dir 1) or previous (-1) change, by where the view would stand on it.
+	jump(dir) {
+		const blocks = this.content?.blocks ?? [];
+		const stops = blocks.map((start) => Math.max(0, Math.min(start - LEAD, this.total() - this.page())));
+		const stop = dir > 0 ? stops.find((at) => at > this.top) : stops.findLast((at) => at < this.top);
+		return stop === undefined ? false : this.scrollTo(stop);
+	}
+
 	scrollTo(top) {
 		const next = Math.max(0, Math.min(top, this.total() - this.page()));
 		if (next === this.top) return false;
@@ -390,6 +512,8 @@ class FilePreview {
 		if (pressed(data, "escape") || letter(data, "q")) return this.close();
 		if (letter(data, "e")) return this.onEdit ? this.close(true) : false;
 		if (letter(data, "m")) return this.toggleMarkdown();
+		if (this.content?.rows && (letter(data, "n") || data === "]")) return this.jump(1);
+		if (this.content?.rows && (letter(data, "N") || data === "[")) return this.jump(-1);
 		if (pressed(data, "down") || letter(data, "j")) return this.scrollTo(this.top + 1);
 		if (pressed(data, "up") || letter(data, "k")) return this.scrollTo(this.top - 1);
 		if (pressed(data, "pageDown")) return this.scrollTo(this.top + this.page());
@@ -406,9 +530,14 @@ class FilePreview {
 
 	render(width) {
 		const inner = Math.max(1, width - 4);
+		// A row between the side strokes; a { text, tint } row has the tint behind it from stroke to stroke, set again
+		// after every escape inside it so a reset in the highlighted code does not end it.
 		const fit = (row) => {
-			const cut = visibleWidth(row) > inner ? truncateToWidth(row, inner, "…") : row;
-			return `${this.paint("border", EDGE.left)} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${this.paint("border", EDGE.right)}`;
+			const line = typeof row === "string" ? row : row.text;
+			const cut = visibleWidth(line) > inner ? truncateToWidth(line, inner, "…") : line;
+			let middle = ` ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} `;
+			if (row?.tint) middle = `${row.tint.open}${middle.replace(/\x1b\[([0-9;:]*)m/g, (sgr, params) => (endsBackground(params) ? sgr + row.tint.open : sgr))}\x1b[49m`;
+			return `${this.paint("border", EDGE.left)}${middle}${this.paint("border", EDGE.right)}`;
 		};
 		// Plain text cut before it is painted, so the color reaches the "…".
 		const text = (role, plain, bold = false) => {
@@ -418,7 +547,7 @@ class FilePreview {
 		const content = this.content;
 		const cut = content?.cut ? ` · first ${sizeLabel(content.cut)}` : "";
 		const body = [];
-		let range = "";
+		let range = []; // the footer after "Esc close · e edit", as [role, text] parts
 		if (!content) body.push(text("dim", "Reading…"));
 		else if (content.error) body.push(text("warning", `${this.file === undefined ? "Cannot read" : "Cannot read the file"}: ${content.error}`));
 		else if (content.binary) body.push(text("muted", "Binary file — press e to open it in the editor"));
@@ -428,8 +557,15 @@ class FilePreview {
 			const total = this.total();
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
-			const digits = String(total).length;
-			const room = Math.max(1, inner - digits - 1);
+			const diff = content.rows;
+			const digits = String(diff ? content.last : total).length;
+			const oldDigits = diff ? String(content.lastOld).length : 0;
+			// VS Code's gutter: "<old> <new> <sign> " before the code.
+			const gutter = diff ? oldDigits + 1 + 3 : 0;
+			const room = Math.max(1, inner - digits - 1 - gutter);
+			const SIGN = { "+": ["toolDiffAdded", "+"], "-": ["toolDiffRemoved", "−"] };
+			const tints = diff ? this.tints() : {};
+			const number = (value, width) => this.paint("dim", value === undefined ? " ".repeat(width) : String(value).padStart(width));
 			for (let index = this.top; index < to; index++) {
 				if (rows) {
 					body.push(rows[index]);
@@ -437,18 +573,31 @@ class FilePreview {
 				}
 				const code = content.shown[index];
 				const line = visibleWidth(code) > room ? truncateToWidth(code, room, "…") : code;
-				body.push(`${this.paint("dim", String(index + 1).padStart(digits))} ${line}`);
+				if (!diff) {
+					body.push(`${number(index + 1, digits)} ${line}`);
+					continue;
+				}
+				const row = diff[index];
+				const [role, mark] = SIGN[row.sign] ?? [];
+				const shown = tints[row.sign]?.faded ? this.paint("dim", line.replace(SGR, "")) : line;
+				const text = `${number(row.old, oldDigits)} ${number(row.number, digits)} ${role ? this.paint(role, mark) : " "} ${shown}`;
+				body.push(role && tints[row.sign] ? { text, tint: tints[row.sign] } : text);
 			}
 			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";
-			range = `${toggle} · ↑↓ PgUp/PgDn Home/End · ${this.top + 1}-${to} / ${total}`;
+			const changes = diff ? [["dim", " · n/N change · "], ["toolDiffAdded", `+${content.added}`], ["dim", " "], ["toolDiffRemoved", `−${content.removed}`]] : [];
+			const keys = " · ↑↓ PgUp/PgDn Home/End";
+			range = [["dim", toggle], ...changes, ["dim", keys], ["dim", ` · ${this.top + 1}-${to} / ${total}`]];
+			// The scroll keys give way first, so the range stays.
+			const width = visibleWidth(`Esc close${this.onEdit ? " · e edit" : ""}`) + visibleWidth(range.map(([, part]) => part).join(""));
+			if (width > inner) range = range.filter(([, part]) => part !== keys);
 		}
 		return [
 			this.paint("border", `${EDGE.topLeft}${EDGE.top.repeat(inner + 2)}${EDGE.topRight}`),
-			fit(text("toolTitle", `Read-only — ${this.label ?? languageOf(this.file)}`, true)),
+			fit(text("toolTitle", `Read-only — ${this.label ?? languageOf(this.file)}${content?.rows ? " · changes" : ""}`, true)),
 			fit(text("muted", `${this.relPath}${cut}`)),
 			fit(""),
 			...body.map(fit),
-			fit(text("dim", `Esc close${this.onEdit ? " · e edit" : ""}${range}`)),
+			fit([["dim", `Esc close${this.onEdit ? " · e edit" : ""}`], ...range].map(([role, part]) => (part ? this.paint(role, part) : "")).join("")),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
 	}
@@ -472,19 +621,21 @@ export function previewWidthFor(columns) {
  * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
  * With `text` (a string, or a promise of one) instead of `file`, shows that text as Markdown under `title`,
  * named `label` on the title row ("Text" without one), with no e.
+ * With `changes` ({ diff }: a promise of the file's `git diff` with the whole file as context, or { untracked })
+ * shows the file with its changes inline, and a Markdown file as its source.
  */
-export function openPreview(ctx, { file, relPath, onEdit, text, title, label }) {
+export function openPreview(ctx, { file, relPath, onEdit, text, title, label, changes }) {
 	try {
 		if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
 		const given = text !== undefined;
-		const loading = given ? textPreview(text) : readPreview(file);
+		const loading = given ? textPreview(text) : changes ? changesPreview(file, changes) : readPreview(file);
 		let host;
 		const result = ctx.ui.custom(
 			(tui, theme, _keybindings, done) => {
 				host = tui;
 				return given
 					? new FilePreview({ relPath: title ?? "", tui, theme, done, loading, label: label ?? "Text" })
-					: new FilePreview({ file, relPath, tui, theme, done, onEdit, loading });
+					: new FilePreview({ file, relPath, tui, theme, done, onEdit, loading, changes: Boolean(changes) });
 			},
 			{
 				overlay: true,

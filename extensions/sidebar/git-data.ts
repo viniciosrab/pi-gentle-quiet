@@ -3,6 +3,7 @@
 // @ts-nocheck
 
 import type { SidebarHost } from "./tabs.ts";
+import { FULL_CONTEXT } from "./diff-preview.ts";
 
 export interface GitFile {
 	path: string;
@@ -235,6 +236,12 @@ export function createGitData(host: SidebarHost) {
 				const names = await git(direct ? ["diff", "HEAD", branch, "--name-status"] : ["diff", `HEAD...${branch}`, "--name-status"], cwd);
 				return { ...parseBranchDiff(numstat ?? "", names ?? ""), direct };
 			}),
+		/**
+		 * One file's `git diff` with the whole file as context, not cached: `range` ["HEAD"] (the default) is its
+		 * uncommitted changes, staged and unstaged; ["HEAD...b"] or ["HEAD", "b"] a branch's. Undefined when git fails.
+		 */
+		fileDiff: (cwd, file, range = ["HEAD"]) =>
+			git(["-c", "core.quotePath=false", "diff", ...range, "--no-color", "--no-ext-diff", `-U${FULL_CONTEXT}`, "--", file], cwd),
 		/** Read everything again on the next get, whatever its age. */
 		refresh() {
 			forced = new Set(slots.keys());

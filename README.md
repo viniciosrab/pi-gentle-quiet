@@ -64,7 +64,12 @@ same; only how it is drawn changes.
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the branches (or the commit graph, from its title) and the working
   tree, each file with TREE's icon for it (emoji or nerd, as Tree icons) and its path, then `+n −n` and its status letter
-  (`M`, `A`, `D`, `R`, `U`, `!`) last on the right, as VS Code's (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
+  (`M`, `A`, `D`, `R`, `U`, `!`) last on the right, as VS Code's (a click opens a file in the read-only preview with its changes inline, as VS Code's diff: old and new line
+  numbers, then `+` on added lines and `−` on removed ones, which stand where they were, each changed row tinted across the
+  pop-up with the theme's diff color (its added/removed color blended over the background, or its success/error
+  background on themes without truecolor) under the code's own highlighting; it opens at the first change, `n`/`N` or `]`/`[`
+  for the next or previous one, `+n −n` in the footer; Markdown shows as its source there, rendered only in TREE. A branch
+  lists its diff with HEAD, and its files open with that branch's changes); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
   usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile
   selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
   on its effort steps to the next level that model allows; edits stay unsaved (•, ● N unsaved, in warning) until
