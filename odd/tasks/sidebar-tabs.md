@@ -67,7 +67,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T25 | S5 (L25) | worker: PROF buttons [ Use in this session ] [ Make default ] [ Save ] as gentle-pi's screen; edits staged until Save | 4cf6eae |
 | T26 | S5 (L26) | worker: PROF keyboard mode as gentle-pi's screen keys; shortcut + click focus, esc returns | 5624169 |
 | T30 | S15 (L30) | worker mvvqn61h-3-24i4: subagent popup (presence file, thread renderer), ↗ on running Agents rows | d31bb61 |
-| T31 | S15 (L30) | worker: job popup (/proc log path, live tail), ↗ on running Jobs rows | |
+| T31 | S15 (L30) | worker mvvr0mjj-4-ym0t: job popup (/proc log path, live tail), ↗ on running Jobs rows | 3b30d09 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
