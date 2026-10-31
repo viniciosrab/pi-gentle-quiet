@@ -11,15 +11,18 @@
 // task header (agent · status · model · elapsed), the subtitle the task's label, the body its thread drawn with
 // gentle-pi's own renderThreadItem, as the alt+k window draws it, after "… N earlier items not kept" when gentle-pi
 // dropped some. When the task leaves the file (it finished) the last thread stays, under the status "finished".
-// Without gentle-pi's renderer or header the same rows are drawn here.
+// Without gentle-pi's renderer or header the same rows are drawn here. Once the subagent's own session file is found
+// and has entries, the body is that session instead (sessionLines): its tool calls drawn by the function gentle-quiet
+// hands in, in the conversation's quiet rows. A finished task's record opens the same body under its final status.
 //
 // A job's pop-up shows "label · id", its status ("running · 12s", "finished · exit 1 · 1m02s") and the tail of
 // its log, like tail -f: the last 256 KiB, without escape sequences, each line cut to the width.
 // @ts-nocheck
 
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { readActivity, readTail } from "./run-data.ts";
+import { readActivity, readTail, SessionLog } from "./run-data.ts";
 import { previewWidthFor } from "./tree-preview.ts";
 
 const CHROME = 6; // top, title, subtitle, blank row, footer, bottom
@@ -348,42 +351,161 @@ export function threadLines(thread, theme, width, lib) {
 	return rows;
 }
 
+// A subagent's own session (./run-data.ts SessionLog), drawn as the main conversation draws its messages: each
+// user message folded to its first line (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
+// call by `drawTool(item, theme, width)` (gentle-quiet's quiet rows), a blank row between them.
+
+const margin = (rows) => rows.map((row) => ` ${row}`);
+
+// Assistant text as Pi renders it (pi-tui's Markdown with Pi's Markdown theme), else wrapped as it is.
+function markdownRows(text, width) {
+	try {
+		const { Markdown } = PiTui;
+		const { getMarkdownTheme } = PiCodingAgent;
+		if (typeof Markdown === "function" && typeof getMarkdownTheme === "function") {
+			const rows = new Markdown(text, 0, 0, getMarkdownTheme()).render(width).map(String);
+			while (rows.length && !rows.at(-1).trim()) rows.pop();
+			while (rows.length && !rows[0].trim()) rows.shift();
+			return rows;
+		}
+	} catch {
+		// this Pi cannot render Markdown: plain below
+	}
+	return String(text).split("\n").flatMap((line) => (line ? wrap(line, width) : [""]));
+}
+
+function folded(text) {
+	const lines = String(text).split("\n");
+	const first = lines.find((line) => line.trim()) ?? "";
+	return lines.filter((line) => line.trim()).length > 1 ? `${first.trim()} …` : first.trim();
+}
+
+function sessionItem(item, theme, width, drawTool) {
+	const room = Math.max(1, width - 1);
+	switch (item.kind) {
+		case "user":
+			return [` ${paint(theme, "dim", truncateToWidth(`› ${folded(item.text)}`, room, "…"))}`];
+		case "thinking":
+			// Folded as the main conversation shows hidden thinking: one dim italic row, not the text.
+			return margin([paint(theme, "dim", "\x1b[3mThinking...\x1b[23m")]);
+		case "text":
+			return margin(markdownRows(String(item.text).trim(), room));
+		case "tool":
+			try {
+				if (typeof drawTool === "function") {
+					const rows = drawTool(item, theme, width);
+					if (Array.isArray(rows)) return rows.map(String);
+				}
+			} catch {
+				// the plain rows below
+			}
+			return [` ${paint(theme, "toolTitle", item.name)}`, ` ${paint(theme, item.isError ? "error" : "dim", `└ ${item.result ? (item.isError ? "error" : "done") : "running…"}`)}`];
+		default:
+			return [];
+	}
+}
+
+// Each item's rows, kept while its width, its result and the drawing stay the same: a long session is not drawn
+// again whole each time one call ends.
+const drawnItems = new WeakMap();
+
+/** A session's items as the pop-up's rows at `width`, a blank row between items. */
+export function sessionLines(items, theme, width, drawTool) {
+	const rows = [];
+	for (const item of items) {
+		let drawn = drawnItems.get(item);
+		if (!drawn || drawn.width !== width || drawn.version !== item.version || drawn.theme !== theme || drawn.drawTool !== drawTool) {
+			drawn = { width, version: item.version, theme, drawTool, rows: sessionItem(item, theme, width, drawTool) };
+			drawnItems.set(item, drawn);
+		}
+		if (!drawn.rows.length) continue;
+		if (rows.length) rows.push("");
+		rows.push(...drawn.rows);
+	}
+	return rows;
+}
+
+// A record's status as the header says it.
+const FINISHED_STATUS = { completed: "finished", failed: "failed", timed_out: "failed", cancelled: "cancelled" };
+
 /**
  * The source of a subagent's pop-up: task `taskId` in the activity `file`. `lib` holds gentle-pi's
  * renderThreadItem and taskHeader when they loaded. Once the task has left a file that could be read, the last
- * thread stays, finished at the moment it was last seen.
+ * thread stays, finished at the moment it was last seen (or as its record says, once written).
+ *
+ * With a `finder` (./run-data.ts SessionFinder) the task's own session file is looked for on each read until found,
+ * then read for what was appended: once it has entries the body is the session, its tool calls drawn by `drawTool`.
+ * Given a finished task's `record` instead of a file, the header comes from the record and the body from its session.
  */
-export function agentSource({ file, taskId, lib, read = readActivity, now = Date.now }) {
-	let task;
+export function agentSource({ file, taskId, lib, read = readActivity, now = Date.now, finder, drawTool, record, openLog = (path) => new SessionLog(path) }) {
+	let task = record ? { ...record, status: FINISHED_STATUS[record.status] ?? record.status } : undefined;
 	let stamp;
-	let finished;
-	const view = () => ({
-		title: header(finished ? { ...task, status: "finished", endedAt: task.endedAt ?? finished } : task, lib, now()),
-		subtitle: task.label,
-		key: `${finished ? "finished" : "live"}:${stamp}`,
-		lines: (width, theme) => threadLines(task.thread, theme, width, lib),
-	});
-	return () => {
-		if (finished) return view();
-		const result = read(file);
-		if (!result.error && result.stamp !== stamp) {
-			const next = result.tasks.find((candidate) => candidate.id === taskId);
-			if (next) {
-				task = next;
-				stamp = result.stamp;
-			} else if (task) finished = now();
+	let finished = record ? record.endedAt ?? now() : undefined;
+	let log;
+	const session = () => (log && log.items.length ? log : undefined);
+	const view = () => {
+		const shown = session();
+		const version = shown ? `session:${shown.version}` : `presence:${stamp}`;
+		return {
+			title: header(finished && !record ? { ...task, status: task.status === "running" || task.status === "queued" || task.status === "waiting" ? "finished" : task.status, endedAt: task.endedAt ?? finished } : task, lib, now()),
+			subtitle: task.label,
+			key: `${finished ? "finished" : "live"}:${version}`,
+			lines: (width, theme) => (shown ? sessionLines(shown.items, theme, width, drawTool) : threadLines(task.thread ?? { dropped: 0, items: [] }, theme, width, lib)),
+		};
+	};
+	const follow = () => {
+		if (!log && finder && task) {
+			try {
+				const path = finder.find(task);
+				if (path) log = openLog(path);
+			} catch {
+				// no session file for now: the presence thread
+			}
 		}
-		return task ? view() : undefined;
+		try {
+			log?.poll();
+		} catch {
+			// a read that failed: the items read so far stay
+		}
+	};
+	return () => {
+		if (record) {
+			follow();
+			return session() ? view() : undefined;
+		}
+		if (!finished) {
+			const result = read(file);
+			if (!result.error && result.stamp !== stamp) {
+				const next = result.tasks.find((candidate) => candidate.id === taskId);
+				if (next) {
+					task = next;
+					stamp = result.stamp;
+				} else if (task) finished = now();
+			}
+		}
+		if (!task) return undefined;
+		if (finished && !task.recorded) {
+			// The task's record, once gentle-pi writes it, says how it ended.
+			try {
+				const done = finder?.record?.(taskId);
+				if (done) task = { ...task, status: FINISHED_STATUS[done.status] ?? done.status, endedAt: done.endedAt ?? task.endedAt, recorded: true };
+			} catch {
+				// "finished", as last seen
+			}
+		}
+		follow();
+		return view();
 	};
 }
 
 /**
- * Opens the live pop-up of subagent `taskId` from the activity `file`. Returns false, having opened nothing, when
- * Pi has no overlay UI here or the task cannot be read from the file: the caller then opens gentle-pi's list.
+ * Opens the live pop-up of subagent `taskId` from the activity `file`, or of a finished task from its `record`.
+ * Returns false, having opened nothing, when Pi has no overlay UI here, the task cannot be read from the file, or
+ * the record's session cannot be: the caller then opens gentle-pi's list.
  */
-export function openAgentPopup(ctx, { file, taskId, lib, interval }) {
+export function openAgentPopup(ctx, { file, taskId, lib, interval, finder, drawTool, record }) {
 	if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
-	const load = agentSource({ file, taskId, lib });
+	const load = agentSource({ file, taskId, lib, finder, drawTool, record });
 	const first = load();
 	if (!first) return false;
 	let shown = false;
