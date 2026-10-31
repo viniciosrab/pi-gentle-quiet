@@ -1,6 +1,10 @@
 import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { musicDeps } from "../extensions/sidebar/music.ts";
+
+// No test reaches the cliamp playing on the machine: no player answers unless a test says otherwise.
+musicDeps.run = async () => undefined;
 
 // Every test file runs in its own process: give it a fresh agent dir before the
 // extension module computes its config path.

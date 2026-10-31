@@ -34,12 +34,33 @@ same; only how it is drawn changes.
   model under a label column, then an **MCP** row with the MCP servers online out of those installed
   (`MCP   3/3`, in the warning color while one is offline), then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
-  and the tokens spent with the cost (the plan usage is in the PROF tab). Jobs and Todos scroll under them. The Todos card shows every
+  and the tokens spent with the cost (the plan usage is in the PROF tab). **Music** follows them while
+  [cliamp](https://github.com/bjarneo/cliamp) is playing: the category playing (`󰲸 Lofi · 120 tracks ▾`), the
+  artist and the track on one row (`HoliznaCC0 · Shimmer ( LoFi , Chill )`, cut with `…` when it does not fit),
+  cliamp's seek bar (`━━●───`; a click jumps to that point of the track), the time and the controls: shuffle
+  (`󰒝` in accent while on, `󰒞` dim while the tracks play in order; a click runs `cliamp shuffle toggle`), repeat (`󰑗` dim while off, `󰑖` the playlist or `󰑘`
+  the track in accent; a click runs `cliamp repeat cycle`), a heart
+  (Nerd Font's `󰋑`, filled in red when the track is in cliamp's Favorites, `󰋕` outlined and dim otherwise; a
+  click toggles it, as `f` in cliamp, and fills it as soon as it is saved), previous, play/pause and next (a click
+  runs `cliamp prev`, `toggle` or `next`) and ⏻, which stops the player (SIGTERM to the cliamp in its pid file,
+  checked in `/proc` first). cliamp's remote calls cannot change its favorites, so the heart is written straight
+  to cliamp's `favorites.toml`, under cliamp's own lock (`favorites.toml.lock`, with util-linux `flock`), leaving
+  the other entries byte for byte; the first change copies the file to `favorites.toml.pi-backup`. A heart that
+  cannot be saved says why on the card for a few seconds. A click on the category opens a pop-up over Pi with
+  `󰋑 Favorites` (counted from `favorites.toml`, so a toggle changes it at once) and cliamp's categories, each
+  with its track count (`1 track`, `2 tracks`); `↑↓` (or `k`/`j`) and `Enter`, or a click, opens one's tracks,
+  each with its heart, where `Enter` or a click plays a track, `f` toggles its heart and `Esc`, `←` or `h` go
+  back. A click on the artist and track row opens the tracks of the category playing.
+  `q` or a click outside closes the pop-up. With cliamp installed and no player running the card is one row,
+  `▶ Start cliamp`: a click starts `cliamp --daemon`, cliamp with no window of its own, detached from Pi, then
+  draws the card and opens the categories; it keeps playing after Pi closes. Nothing starts it by itself, and
+  without cliamp installed the card is left out. cliamp is one player per user, so every Pi window shows and
+  controls the same one. Jobs and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
   The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
   `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
-  the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
+  the bar, to switch. **MAIN** is the column above; **GIT** the branches (or the commit graph, from its title) and the working
   tree, each file with TREE's icon for it (emoji or nerd, as Tree icons) and its path, then `+n −n` and its status letter
   (`M`, `A`, `D`, `R`, `U`, `!`) last on the right, as VS Code's (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
   usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile

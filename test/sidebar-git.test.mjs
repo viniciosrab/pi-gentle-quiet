@@ -138,6 +138,14 @@ async function open(options = {}, { width = 59, height = 40 } = {}) {
 	return { ...made, tab, draw, rows, lineOf, click, width, height };
 }
 
+// The tab opened on its commit graph: it opens on the branch list, so this clicks Graph first.
+async function openGraph(...args) {
+	const opened = await open(...args);
+	opened.tab.handleClick(opened.lineOf(/Graph \| Branches/), "left", opened.rows()[opened.lineOf(/Graph \| Branches/)].indexOf("Graph") + 1);
+	await settle();
+	return opened;
+}
+
 // Launchers record what they would run instead of opening anything.
 function recordLaunches(env = {}) {
 	const saved = { ...launchDeps };
@@ -183,7 +191,7 @@ test("outside a repository, or with git missing or failing, the tab degrades to 
 });
 
 test("a git that never answers for one part leaves only that part reading", async () => {
-	const { rows } = await open({ git: repo({ status: () => new Promise(() => {}), log: () => new Promise(() => {}) }) });
+	const { rows } = await openGraph({ git: repo({ status: () => new Promise(() => {}), log: () => new Promise(() => {}) }) });
 	const text = rows().join("\n");
 	assert.match(text, /Reading log…/);
 	assert.match(text, /Reading status…/);
@@ -206,7 +214,7 @@ test("two cards split the height 50/50: the commit graph on top and the working 
 });
 
 test("the graph card shows the branch with its status badges, the ASCII graph and the changes", async () => {
-	const { rows, draw } = await open({ changes: { files: 3, added: 14, deleted: 3 } });
+	const { rows, draw } = await openGraph({ changes: { files: 3, added: 14, deleted: 3 } });
 	const out = rows();
 	assert.match(out[3], /│ main +● 1 mod · \+1 staged · \?1 untracked │/);
 	const graph = out.findIndex((row) => row.includes("a1b2c3d"));
@@ -222,7 +230,7 @@ test("the graph card shows the branch with its status badges, the ASCII graph an
 });
 
 test("a clean repository with no commits says so in each card", async () => {
-	const { rows } = await open({ git: repo({ log: undefined, status: "", numstat: undefined }) });
+	const { rows } = await openGraph({ git: repo({ log: undefined, status: "", numstat: undefined }) });
 	const text = rows().join("\n");
 	assert.match(text, /No commits yet/);
 	assert.match(text, /✔ Clean · No pending changes/);
@@ -230,7 +238,7 @@ test("a clean repository with no commits says so in each card", async () => {
 });
 
 test("a detached HEAD shows the short commit as the branch", async () => {
-	const { rows } = await open({ git: repo({ branch: "\n" }) });
+	const { rows } = await openGraph({ git: repo({ branch: "\n" }) });
 	assert.match(rows()[3], /│ a1b2c3d /);
 });
 
@@ -286,6 +294,16 @@ test("a row that does not fit drops the icon before cutting the path; the counts
 	for (const width of [38, 37]) assert.match(row(width), /│ src\/components\/widget\.ts +\+1 −1 {2}M │$/, "icon dropped, path whole");
 	assert.match(row(34), /│ src\/components\/widge… \+1 −1 {2}M │$/, "path cut last");
 	assert.ok(!row(34).includes(icon));
+});
+
+test("the tab opens on the branch list, Branches lit in the toggle", async () => {
+	const { rows, draw } = await open();
+	await settle();
+	const out = rows();
+	assert.match(out.join("\n"), /● 5 branches/);
+	assert.ok(!out.some((row) => row.includes("a1b2c3d")), "no graph until Graph is clicked");
+	const title = draw().find((row) => plain(row).includes("Branches"));
+	assert.ok(painted(title, "accent", theme.bold("Branches")), "Branches is the lit view");
 });
 
 test("the toggle switches to the branch list, with tracking and dates, and back to the graph", async () => {
@@ -470,7 +488,7 @@ test("the wheel scrolls inside a card with more rows than room, with a position 
 
 test("the graph card scrolls on its own when its graph is taller than its half", async () => {
 	const log = Array.from({ length: 20 }, (_, i) => `* ${String(i).padStart(7, "0")} Commit ${i}`).join("\n");
-	const { tab, rows } = await open({ git: repo({ log }) }, { height: 24 });
+	const { tab, rows } = await openGraph({ git: repo({ log }) }, { height: 24 });
 	assert.ok(rows(59, 24).some((row) => /\[ ▲ 1\.\./.test(row)));
 	assert.equal(tab.handleWheel(1, 4, 5), true);
 	assert.ok(rows(59, 24).some((row) => /\[ ▲ 3\.\./.test(row)));
