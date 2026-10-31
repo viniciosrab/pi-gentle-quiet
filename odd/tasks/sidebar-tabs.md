@@ -88,7 +88,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T33 | S9 (L32) | parent inline: a click on the Active Handoff's content opens the whole summary in the preview pop-up; the title still folds | e03cd57 |
 | T30 | S15 (L30) | worker mvvqn61h-3-24i4: subagent popup (presence file, thread renderer), ↗ on running Agents rows | d31bb61 |
 | T31 | S15 (L30) | worker mvvr0mjj-4-ym0t: job popup (/proc log path, live tail), ↗ on running Jobs rows | 3b30d09 |
-| T34 | S16 (L33) | worker: subagent popup from its session file in the quiet tool look; ↗ on finished rows | |
+| T34 | S16 (L33) | worker mvvv9pey-1-9tq1: subagent popup from its session file in the quiet tool look; ↗ on finished rows | f8fb834 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
