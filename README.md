@@ -17,11 +17,16 @@ same; only how it is drawn changes.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
 - **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
-  status, model and elapsed time, then its thread (thinking, text, each tool with its output) drawn with
-  gentle-pi's own renderer, as the `alt+k` window draws it. It reads gentle-pi's presence file for the session
-  about twice a second and follows the end while the subagent works; `↑↓` `PgUp/PgDn` `Home/End` or the wheel
-  scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. When the subagent finishes, its last
-  thread stays, marked finished. Without that file the click opens gentle-pi's `/gentle:agents` list instead.
+  status, model and elapsed time, then what it does in this conversation's own look: its prompt folded to one dim
+  line, thinking dim, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
+  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends). It reads the
+  subagent's own Pi session (`~/.pi/agent/gentle-agents/sessions/*.jsonl`, found by one of its tool call ids)
+  about twice a second, only what was appended, and follows the end while the subagent works; `↑↓` `PgUp/PgDn`
+  `Home/End` or the wheel scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. Before its
+  first tool call, or when its session cannot be read, the pop-up shows gentle-pi's thread from its presence file,
+  drawn with gentle-pi's own renderer as the `alt+k` window draws it. A finished subagent's row (`✓`, `✗`, `–`)
+  ends with `↗` too when its task record names its session, and opens the same pop-up, marked finished or failed.
+  Without gentle-pi's files the click opens its `/gentle:agents` list instead.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, a column on the right
   holds the status line as two cards that always stay on top. **Status** has the project, branch and
   model under a label column, then an **MCP** row with the MCP servers online out of those installed

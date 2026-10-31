@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readSync, renameSync, rmSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import * as realFs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { configFile, load, painted, plain, theme } from "./helpers.mjs";
-import { findActivityFile, findJobLog, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, rowTask, sessionHash } from "../extensions/sidebar/run-data.ts";
-import { fallbackThreadItem, openAgentPopup, openJobPopup } from "../extensions/sidebar/run-popup.ts";
+import { FinishedRecords, findActivityFile, findJobLog, findSessionByCalls, finishedRowStatus, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, readTaskRecord, recordSessionPath, rowRecord, rowTask, SessionFinder, SessionLog, SessionTail, sessionHash, sessionsDir, tasksDir } from "../extensions/sidebar/run-data.ts";
+import { fallbackThreadItem, openAgentPopup, openJobPopup, sessionLines } from "../extensions/sidebar/run-popup.ts";
 
 const KEYS = { up: "\x1b[A", down: "\x1b[B", pageUp: "\x1b[5~", pageDown: "\x1b[6~", home: "\x1b[H", end: "\x1b[F", escape: "\x1b" };
 const hash = (id) => createHash("sha256").update(id).digest("hex");
@@ -715,4 +716,353 @@ test("without an overlay UI a running job row opens gentle-pi's jobs list", asyn
 	rows();
 	mouse("click", 3);
 	assert.deepEqual(sent, [["/gentle:jobs", { expandPromptTemplates: true }]]);
+});
+
+// ---------------------------------------------------------------------------
+// T34 (S16): the subagent's own session file, drawn in the quiet tool look
+// ---------------------------------------------------------------------------
+
+// A child Pi session as gentle-agents writes it (<agent dir>/gentle-agents/sessions/<time>_<uuid>.jsonl): a header,
+// model changes, the system prompt, the task prompt, then assistant messages with thinking, text and tool calls, and
+// one toolResult message per call. `p` prefixes the tool call ids, so each test has its own.
+const message = (msg, id) => JSON.stringify({ type: "message", id, parentId: null, timestamp: new Date(now).toISOString(), message: msg });
+const sessionEntries = (p) => [
+	JSON.stringify({ type: "session", version: "3", id: `child-${p}`, timestamp: new Date(now).toISOString(), cwd: "/srv/app" }),
+	JSON.stringify({ type: "model_change", id: "m1", parentId: null, provider: "claude-bridge", modelId: "claude-opus-5-5" }),
+	message({ role: "system", sections: { preamble: "You are…" } }, "e0"),
+	message({ role: "user", content: [{ type: "text", text: "Implement T34\nRead the spec first." }] }, "e1"),
+	message({ role: "assistant", content: [{ type: "thinking", thinking: "Reading the spec first." }, { type: "toolCall", id: `${p}1`, name: "bash", arguments: { command: "git status --short" } }] }, "e2"),
+	message({ role: "toolResult", toolCallId: `${p}1`, toolName: "bash", content: [{ type: "text", text: " M a.ts\n M b.ts" }], isError: false, durationMs: 1200 }, "e3"),
+	message({ role: "assistant", content: [{ type: "text", text: "Spec **read**. Writing the tests." }, { type: "toolCall", id: `${p}2`, name: "read", arguments: { path: "/srv/app/a.ts", offset: 1, limit: 2 } }, { type: "toolCall", id: `${p}3`, name: "bash", arguments: { command: "false" } }] }, "e4"),
+	message({ role: "toolResult", toolCallId: `${p}2`, toolName: "read", content: [{ type: "text", text: "x\ny" }], isError: false }, "e5"),
+	message({ role: "toolResult", toolCallId: `${p}3`, toolName: "bash", content: [{ type: "text", text: "boom\nCommand exited with code 1" }], isError: true }, "e6"),
+	message({ role: "assistant", content: [{ type: "toolCall", id: `${p}4`, name: "bash", arguments: { command: "sleep 5" } }] }, "e7"),
+];
+const sessionText = (p) => `${sessionEntries(p).join("\n")}\n`;
+function agentRoot() {
+	const root = mkdtempSync(path.join(os.tmpdir(), "gq-agents-"));
+	mkdirSync(sessionsDir(root), { recursive: true });
+	mkdirSync(tasksDir(root), { recursive: true });
+	return { root, sessions: sessionsDir(root), tasks: tasksDir(root) };
+}
+const writeSession = (dir, name, text) => {
+	const file = path.join(dir, name);
+	writeFileSync(file, text);
+	return file;
+};
+const taskRecord = (task, items = []) => JSON.stringify({ task: { mode: "background", prompt: "Implement T34", model: "claude-bridge/claude-opus-5-5", tokens: 0, cost: 0, error: null, ...task }, thread: { version: items.length, dropped: 0, items } });
+const writeRecord = (dir, task, items) => writeFileSync(path.join(dir, `${task.id}.json`), taskRecord(task, items));
+// fs with every read counted, for the tests that check what is read and how much.
+function countingFs() {
+	const counts = { readdir: 0, readFile: 0, read: [] };
+	const files = {
+		...realFs,
+		readdirSync: (...args) => (counts.readdir++, realFs.readdirSync(...args)),
+		readFileSync: (...args) => (counts.readFile++, realFs.readFileSync(...args)),
+		readSync: (fd, buffer, offset, length, position) => {
+			const bytes = realFs.readSync(fd, buffer, offset, length, position);
+			counts.read.push({ position, bytes });
+			return bytes;
+		},
+	};
+	return { files, counts };
+}
+
+test("a finished task's session file is its record's sessionPath, only inside the sessions folder and when it exists", () => {
+	const { sessions, tasks } = agentRoot();
+	assert.equal(sessionsDir("/a"), path.join("/a", "gentle-agents", "sessions"));
+	assert.equal(tasksDir("/a"), path.join("/a", "gentle-agents", "tasks"));
+	const file = writeSession(sessions, "2026-10-31T03-23-19-560Z_aaa.jsonl", sessionText("r"));
+	writeRecord(tasks, { id: "d1", agent: "gentle-ai-explore", label: "map files", status: "completed", parentSessionId: "p1", sessionPath: file, createdAt: now - 90_000, startedAt: now - 89_000, endedAt: now - 1000 });
+	const record = readTaskRecord(tasks, "d1");
+	assert.equal(record.agent, "gentle-ai-explore");
+	assert.equal(record.label, "map files");
+	assert.equal(record.status, "completed");
+	assert.equal(record.parentSessionId, "p1");
+	assert.equal(record.endedAt, now - 1000);
+	assert.equal(recordSessionPath(record, sessions), file);
+	for (const sessionPath of ["/etc/hosts", path.join(sessions, "..", "outside.jsonl"), path.join(sessions, "missing.jsonl"), null, 42]) {
+		assert.equal(recordSessionPath({ ...record, sessionPath }, sessions), undefined, String(sessionPath));
+	}
+	assert.equal(readTaskRecord(tasks, "nope"), undefined);
+	assert.equal(readTaskRecord(tasks, "../tasks/d1"), undefined, "an id is a file name, never a path");
+	writeFileSync(path.join(tasks, "bad.json"), "{ half");
+	assert.equal(readTaskRecord(tasks, "bad"), undefined);
+});
+
+test("a running task's session file is the one recent file holding one of its tool call ids; none or two give none", () => {
+	const { sessions } = agentRoot();
+	const since = now - 60_000;
+	writeSession(sessions, "2026-10-31T03-00-00-000Z_other.jsonl", sessionText("other"));
+	// Only as a result's toolCallId: not the call itself.
+	writeSession(sessions, "2026-10-31T03-00-00-000Z_result.jsonl", `${message({ role: "toolResult", toolCallId: "toolu_x", toolName: "bash", content: [] }, "e")}\n`);
+	const file = writeSession(sessions, "2026-10-31T03-00-00-000Z_mine.jsonl", sessionText("toolu_x"));
+	writeFileSync(path.join(sessions, "notes.txt"), sessionText("toolu_x"));
+	const old = writeSession(sessions, "2026-10-01T03-00-00-000Z_old.jsonl", sessionText("toolu_x"));
+	utimesSync(old, new Date(since - 3_600_000), new Date(since - 3_600_000));
+	assert.equal(findSessionByCalls(sessions, ["toolu_nope", "toolu_x2"], since), file, "one recent match");
+	assert.equal(findSessionByCalls(sessions, ["toolu_nope"], since), undefined, "no match");
+	assert.equal(findSessionByCalls(sessions, [], since), undefined, "no ids yet");
+	assert.equal(findSessionByCalls(path.join(sessions, "missing"), ["toolu_x1"], since), undefined, "no folder");
+	utimesSync(old, new Date(), new Date());
+	assert.equal(findSessionByCalls(sessions, ["toolu_x1"], since), undefined, "two recent files hold it: neither");
+});
+
+test("the finder tries the task record first, then the tool call ids; it remembers a path and searches again only for new ids", () => {
+	const { root, sessions, tasks } = agentRoot();
+	const { files, counts } = countingFs();
+	const finder = new SessionFinder({ agentDir: root, files });
+	const task = { id: "w1", createdAt: now - 80_000, thread: { items: [{ kind: "tool", callId: "f1" }] } };
+	assert.equal(finder.find(task), undefined, "nothing written yet");
+	const searched = counts.readdir;
+	assert.equal(finder.find(task), undefined);
+	assert.equal(counts.readdir, searched, "the same ids are not searched again");
+	const file = writeSession(sessions, "2026-10-31T03-00-00-000Z_mine.jsonl", sessionText("f"));
+	assert.equal(finder.find({ ...task, thread: { items: [...task.thread.items, { kind: "text", text: "x" }, { kind: "tool", callId: "f2" }] } }), file, "a new id: found");
+	assert.equal(finder.find({ ...task, thread: { items: [] } }), file, "remembered");
+	const recorded = writeSession(sessions, "2026-10-31T03-00-00-000Z_rec.jsonl", sessionText("g"));
+	writeRecord(tasks, { id: "d2", agent: "a", label: "b", status: "failed", parentSessionId: "p", sessionPath: recorded, createdAt: now });
+	assert.equal(finder.find({ id: "d2", createdAt: now, thread: { items: [{ kind: "tool", callId: "f1" }] } }), recorded, "the record wins");
+});
+
+test("the session file is read incrementally: appended bytes only, a partial last line kept, a shrunk file read again", () => {
+	const { sessions } = agentRoot();
+	const lines = sessionEntries("i");
+	const file = writeSession(sessions, "inc.jsonl", `${lines[0]}\n${lines[1]}\n${lines[3].slice(0, 20)}`);
+	const { files, counts } = countingFs();
+	const tail = new SessionTail(file, { files });
+	let read = tail.read();
+	assert.equal(read.reset, false);
+	assert.deepEqual(read.entries.map((entry) => entry.type), ["session", "model_change"], "the partial line waits");
+	const size = realFs.statSync(file).size;
+	counts.read.length = 0;
+	appendFileSync(file, `${lines[3].slice(20)}\nnot json\n${lines[4]}\n`);
+	read = tail.read();
+	assert.deepEqual(read.entries.map((entry) => entry.message?.role), ["user", "assistant"], "the completed line, the next one; garbage ignored");
+	assert.equal(Math.min(...counts.read.map((r) => r.position)), size, "reading starts where the last read ended");
+	counts.read.length = 0;
+	assert.deepEqual(tail.read().entries, [], "nothing new");
+	assert.equal(counts.read.length, 0, "and nothing read");
+	truncateSync(file, 0);
+	writeFileSync(file, `${lines[5]}\n`);
+	read = tail.read();
+	assert.equal(read.reset, true, "a shorter file starts over");
+	assert.deepEqual(read.entries.map((entry) => entry.message?.role), ["toolResult"]);
+	// A small chunk per read still gives every entry, in order, over several reads.
+	const small = new SessionTail(writeSession(sessions, "chunks.jsonl", sessionText("c")), { chunk: 64 });
+	const all = [];
+	for (let i = 0; i < 200 && all.length < 10; i++) all.push(...small.read().entries);
+	assert.equal(all.length, 10);
+	assert.ok(new SessionTail(path.join(sessions, "missing.jsonl")).read().error);
+});
+
+test("session entries become the popup's items: the prompt, thinking, text and each tool call with its result", () => {
+	const { sessions } = agentRoot();
+	const file = writeSession(sessions, "log.jsonl", sessionText("l"));
+	const log = new SessionLog(file);
+	assert.equal(log.poll(), true);
+	const shape = (item) => item.kind === "tool" ? [item.kind, item.id, item.name, JSON.stringify(item.args), item.result ? (item.isError ? "error" : "done") : "running"] : [item.kind, item.text];
+	assert.deepEqual(log.items.map(shape), [
+		["user", "Implement T34\nRead the spec first."],
+		["thinking", "Reading the spec first."],
+		["tool", "l1", "bash", JSON.stringify({ command: "git status --short" }), "done"],
+		["text", "Spec **read**. Writing the tests."],
+		["tool", "l2", "read", JSON.stringify({ path: "/srv/app/a.ts", offset: 1, limit: 2 }), "done"],
+		["tool", "l3", "bash", JSON.stringify({ command: "false" }), "error"],
+		["tool", "l4", "bash", JSON.stringify({ command: "sleep 5" }), "running"],
+	]);
+	assert.equal(log.items[2].durationMs, 1200);
+	assert.equal(log.items[2].result.content[0].text, " M a.ts\n M b.ts");
+	const version = log.version;
+	assert.equal(log.poll(), false, "nothing new");
+	appendFileSync(file, `${message({ role: "toolResult", toolCallId: "l4", toolName: "bash", content: [{ type: "text", text: "" }], isError: false }, "e8")}\n`);
+	assert.equal(log.poll(), true);
+	assert.ok(log.version > version);
+	assert.ok(log.items[6].result, "the running call got its result");
+	truncateSync(file, 0);
+	writeFileSync(file, `${sessionEntries("l")[3]}\n`);
+	assert.equal(log.poll(), true);
+	assert.deepEqual(log.items.map((item) => item.kind), ["user"], "a shrunk file starts over");
+});
+
+// A stand-in for gentle-quiet's tool rows: what the popup hands each tool call to.
+const stubTool = (item, t) => [t.fg("toolTitle", ` TOOL ${item.name} ${item.result ? (item.isError ? "error" : "done") : "running"}`)];
+
+test("the session is drawn in order: the prompt folded and dim, thinking dim, text as Markdown, each tool by the drawing it is given", () => {
+	const { sessions } = agentRoot();
+	const log = new SessionLog(writeSession(sessions, "draw.jsonl", sessionText("d")));
+	log.poll();
+	const raw = sessionLines(log.items, theme, 60, stubTool);
+	const rows = raw.map((row) => plain(row).trimEnd());
+	assert.deepEqual(rows, [
+		" › Implement T34 …",
+		"",
+		" Reading the spec first.",
+		"",
+		" TOOL bash done",
+		"",
+		" Spec read. Writing the tests.",
+		"",
+		" TOOL read done",
+		"",
+		" TOOL bash error",
+		"",
+		" TOOL bash running",
+	]);
+	assert.ok(painted(raw[0], "dim"), "the prompt dim");
+	assert.ok(painted(raw[2], "dim"), "thinking dim");
+	assert.ok(raw[6].includes("\x1b[1mread\x1b[22m"), "the text through Pi's Markdown");
+	const broken = sessionLines(log.items, theme, 60, () => { throw new Error("boom"); }).map(plain);
+	assert.ok(broken.some((row) => row.includes("bash")), "a failing drawing falls back to the tool's name");
+});
+
+function sessionPopup({ finder, record, tasks = TASKS, drawTool = stubTool, rows = 60 } = {}) {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "gq-presence-"));
+	const file = presence(dir, "s1", [{ incarnation: "a", heartbeat: now, tasks }]);
+	const fake = fakeCtx(rows);
+	const opened = openAgentPopup(fake.ctx, { file: record ? undefined : file, taskId: "w1", lib: realLib, interval: 60_000, finder, record, drawTool });
+	const component = opened ? fake.component() : undefined;
+	const body = () => component.render(80).map(plain).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	return { ...fake, opened, component, body, file };
+}
+
+test("with the session file found, the popup draws it under the task header instead of the presence thread", () => {
+	const { sessions } = agentRoot();
+	const sessionFile = writeSession(sessions, "popup.jsonl", sessionText("p"));
+	const { body, component } = sessionPopup({ finder: { find: () => sessionFile } });
+	assert.match(plain(component.render(80)[1]), /gentle-ai-worker · running/);
+	assert.deepEqual(body(), [" › Implement T34 …", " Reading the spec first.", " TOOL bash done", " Spec read. Writing the tests.", " TOOL read done", " TOOL bash error", " TOOL bash running"]);
+	appendFileSync(sessionFile, `${message({ role: "assistant", content: [{ type: "text", text: "All green." }] }, "e9")}\n`);
+	component.refresh();
+	assert.equal(body().at(-1), " All green.", "appended entries show on the next poll");
+});
+
+test("without a session file, or before it has entries, the popup draws the presence thread as before", () => {
+	const none = sessionPopup({ finder: { find: () => undefined } });
+	assert.ok(none.body().includes("Tool · bash · Complete"));
+	const { sessions } = agentRoot();
+	const empty = writeSession(sessions, "empty.jsonl", "");
+	const early = sessionPopup({ finder: { find: () => empty } });
+	assert.ok(early.body().includes("Tool · bash · Complete"), "no entries yet");
+	writeFileSync(empty, sessionText("e"));
+	early.component.refresh();
+	assert.ok(early.body().includes(" TOOL bash done"), "then the session");
+	const failing = sessionPopup({ finder: { find: () => { throw new Error("boom"); } } });
+	assert.ok(failing.body().includes("Tool · bash · Complete"), "a finder that fails");
+});
+
+test("a finished task's popup comes from its record: finished or failed in the header, its session below", () => {
+	const { sessions } = agentRoot();
+	const sessionFile = writeSession(sessions, "done.jsonl", sessionText("f"));
+	const base = { id: "d1", agent: "gentle-ai-explore", label: "map files", model: "claude-bridge/claude-opus-5-5", parentSessionId: "p1", sessionPath: sessionFile, createdAt: now - 200_000, startedAt: now - 190_000, endedAt: now - 10_000 };
+	const done = sessionPopup({ record: { ...base, status: "completed" }, finder: { find: () => sessionFile } });
+	assert.equal(done.opened, true);
+	const out = done.component.render(80).map(plain);
+	assert.match(out[1], /^▏ gentle-ai-explore · finished · claude-bridge\/claude-opus-5-5 · 180s +▕$/);
+	assert.match(out[2], /map files/);
+	assert.ok(done.body().includes(" TOOL bash error"));
+	const failed = sessionPopup({ record: { ...base, status: "failed" }, finder: { find: () => sessionFile } });
+	assert.match(failed.component.render(80).map(plain)[1], / · failed · /);
+	const unreadable = sessionPopup({ record: { ...base, status: "completed" }, finder: { find: () => undefined } });
+	assert.equal(unreadable.opened, false, "no session file: nothing to open");
+});
+
+test("finished Agents rows are matched to this session's task records by glyph, agent and label, the newest first", () => {
+	assert.deepEqual(finishedRowStatus("✓ gentle-ai-explore  map files"), ["completed"]);
+	assert.deepEqual(finishedRowStatus("✗ gentle-ai-explore  map files"), ["failed", "timed_out"]);
+	assert.deepEqual(finishedRowStatus("– gentle-ai-explore  map files"), ["cancelled"]);
+	assert.equal(finishedRowStatus("◔ gentle-ai-explore  map files"), undefined);
+	const records = [
+		{ id: "a", agent: "gentle-ai-explore", label: "map files", status: "completed", createdAt: 1, endedAt: 10 },
+		{ id: "b", agent: "gentle-ai-explore", label: "map files", status: "completed", createdAt: 2, endedAt: 20 },
+		{ id: "c", agent: "gentle-ai-explore", label: "map files", status: "failed", createdAt: 3, endedAt: 30 },
+		{ id: "d", agent: "gentle-ai-worker", label: "other", status: "completed", createdAt: 4, endedAt: 40 },
+	];
+	assert.equal(rowRecord("✓ gentle-ai-explore  map files   1m11s", records), "b", "the newest completed");
+	assert.equal(rowRecord("✗ gentle-ai-explore  map files   1m11s", records), "c");
+	assert.equal(rowRecord("✓ gentle-ai-explore  map fi…   1m11s", records), "b", "a label cut by gentle-pi");
+	assert.equal(rowRecord("– gentle-ai-explore  map files", records), undefined, "no cancelled record");
+	assert.equal(rowRecord("◔ gentle-ai-explore  map files", records), undefined, "a working row");
+	assert.equal(rowRecord("✓ gentle-ai-review  map files", records), undefined);
+});
+
+test("task records are listed per parent session, only with a readable session file, and read again only when they change", () => {
+	const { root, sessions, tasks } = agentRoot();
+	const sessionFile = writeSession(sessions, "rec.jsonl", sessionText("q"));
+	writeRecord(tasks, { id: "r1", agent: "a", label: "one", status: "completed", parentSessionId: "p1", sessionPath: sessionFile, createdAt: 1, endedAt: 2 });
+	writeRecord(tasks, { id: "r2", agent: "a", label: "two", status: "completed", parentSessionId: "p2", sessionPath: sessionFile, createdAt: 1, endedAt: 2 });
+	writeRecord(tasks, { id: "r3", agent: "a", label: "gone", status: "completed", parentSessionId: "p1", sessionPath: path.join(sessions, "gone.jsonl"), createdAt: 1, endedAt: 2 });
+	writeFileSync(path.join(tasks, "junk.json"), "nope");
+	const { files, counts } = countingFs();
+	const records = new FinishedRecords({ agentDir: root, files });
+	assert.deepEqual(records.list("p1").map((record) => record.id), ["r1"]);
+	const reads = counts.readFile;
+	assert.deepEqual(records.list("p1").map((record) => record.id), ["r1"]);
+	assert.equal(counts.readFile, reads, "unchanged files are not read again");
+	writeRecord(tasks, { id: "r4", agent: "a", label: "new", status: "failed", parentSessionId: "p1", sessionPath: sessionFile, createdAt: 3, endedAt: 4 });
+	assert.deepEqual(records.list("p1").map((record) => record.id).sort(), ["r1", "r4"]);
+	assert.equal(counts.readFile, reads + 1, "only the new record is read");
+	assert.deepEqual(records.list(undefined), []);
+	assert.equal(records.get("r4").status, "failed");
+});
+
+// --- In gentle-quiet: the main view's own tool rows, and the ↗ on finished rows ---
+
+const SESSIONS_ROOT = sessionsDir(agentDir);
+const TASKS_ROOT = tasksDir(agentDir);
+mkdirSync(SESSIONS_ROOT, { recursive: true });
+mkdirSync(TASKS_ROOT, { recursive: true });
+
+// The rows the main conversation draws for a call and its result (quietRenderers), without the expand hint,
+// which only the newest finished call of the conversation shows.
+function mainRows(tool, name, args, result, context = {}) {
+	const renderers = tool(name, {});
+	const call = renderers.renderCall(args, theme).render(76);
+	const done = renderers.renderResult(result ?? { content: [] }, { isPartial: !result }, theme, { args, toolCallId: context.id, isError: context.isError, durationMs: context.durationMs }).render(76);
+	return [...call, ...done].map((row) => plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, ""));
+}
+
+test("a running subagent's popup draws its session's tool calls with the main view's quiet rows", async () => {
+	const items = [{ kind: "tool", callId: "toolu_main1", name: "bash", output: "", running: false, isError: false }];
+	const tasks = [{ summary: summary("w1", "gentle-ai-worker", "subagent popup from Agents card", "running"), thread: thread(items) }, TASKS[1]];
+	writeSession(SESSIONS_ROOT, "2026-10-31T03-00-00-000Z_main.jsonl", sessionText("toolu_main"));
+	const { mouse, opened, tool } = await agentsCard("card-session", { tasks });
+	mouse("click", 2);
+	assert.equal(opened.length, 1);
+	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
+	const out = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
+	assert.match(out[1], /gentle-ai-worker · running/);
+	const body = out.slice(4, -2).map((row) => row.slice(2, -2).trimEnd());
+	const text = (value, extra = {}) => ({ content: [{ type: "text", text: value }], ...extra });
+	const expected = [
+		...mainRows(tool, "bash", { command: "git status --short" }, text(" M a.ts\n M b.ts"), { id: "toolu_main1", durationMs: 1200 }),
+		...mainRows(tool, "read", { path: "/srv/app/a.ts", offset: 1, limit: 2 }, text("x\ny"), { id: "toolu_main2" }),
+		...mainRows(tool, "bash", { command: "false" }, text("boom\nCommand exited with code 1", { isError: true }), { id: "toolu_main3", isError: true }),
+		...mainRows(tool, "bash", { command: "sleep 5" }, undefined, { id: "toolu_main4" }),
+	];
+	const shown = body.filter((row) => expected.includes(row));
+	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
+	assert.ok(expected.includes(" $ git status --short") && expected.includes(" └ ✗ exit 1") && expected.includes(" └ running…"), "the rows compared are the quiet ones");
+	assert.ok(body.includes(" Reading the spec first."), "thinking");
+	assert.ok(body.includes(" Spec read. Writing the tests."), "text");
+	assert.ok(!body.some((row) => row.startsWith("Tool · ")), "not the presence thread");
+});
+
+test("a finished Agents row with a task record of this session gets ↗ and opens its session popup", async () => {
+	const sessionFile = writeSession(SESSIONS_ROOT, "2026-10-31T03-00-00-000Z_done.jsonl", sessionText("toolu_done"));
+	const record = { agent: "gentle-ai-explore", label: "map files", status: "completed", sessionPath: sessionFile, createdAt: now - 200_000, startedAt: now - 190_000, endedAt: now - 119_000 };
+	writeRecord(TASKS_ROOT, { ...record, id: "done-1", parentSessionId: "card-done" });
+	writeRecord(TASKS_ROOT, { ...record, id: "done-other", parentSessionId: "another-session", endedAt: now, label: "map files" });
+	const { rows, mouse, opened, seen, sent } = await agentsCard("card-done");
+	const out = rows();
+	assert.match(out[4], /^│ ✓ gentle-ai-explore .* 1m11s ↗ +│$/, "the finished row");
+	assert.doesNotMatch(out[5], /↗/, "… 1 more");
+	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 4)?.handled, true);
+	assert.deepEqual(seen, []);
+	assert.deepEqual(sent, []);
+	assert.equal(opened.length, 1);
+	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
+	const popupRows = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
+	assert.match(popupRows[1], /gentle-ai-explore · finished · .* · 71s/, "this session's record, not the newer one of another session");
+	assert.ok(popupRows.some((row) => row.includes("└ ✗ exit 1")), "its session in the quiet look");
 });

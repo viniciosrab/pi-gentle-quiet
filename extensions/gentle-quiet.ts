@@ -46,7 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { activeRowStatus, findActivityFile, JobLogs, jobRows, presenceDir, readActivity, rowTask } from "./sidebar/run-data.ts";
+import { activeRowStatus, findActivityFile, FinishedRecords, finishedRowStatus, JobLogs, jobRows, presenceDir, readActivity, rowRecord, rowTask, SessionFinder } from "./sidebar/run-data.ts";
 import { openAgentPopup, openJobPopup } from "./sidebar/run-popup.ts";
 import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
@@ -1682,6 +1682,16 @@ function webRenderers(toolName, renderers) {
 	};
 }
 
+// A subagent's tool call in its pop-up (./sidebar/run-popup.ts), as the conversation draws it with quietRenderers:
+// quietCall's row, then quietResultText's summary and preview under the └ ("running…" until its result arrives).
+// No expand hint: the pop-up has no ctrl+o.
+function popupToolRows(item, t, width) {
+	const args = item.args && typeof item.args === "object" ? item.args : {};
+	const result = item.result ? { ...item.result, isError: item.isError } : { content: [] };
+	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
+	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1).render(width)];
+}
+
 function quietRenderers(toolName, renderers) {
 	return {
 		...renderers,
@@ -1878,14 +1888,22 @@ async function registerJobsCard(pi) {
 // gentle-agents publishes this session's working subagents (running, queued, waiting) with their live thread in its
 // presence file (./sidebar/run-data.ts). A row of the Agents card whose task is in it ends with a ↗, in its trailing
 // padding so gentle-pi's right-aligned details keep their column, and a left click anywhere on that row opens the
-// subagent's pop-up (./sidebar/run-popup.ts) instead of reaching gentle-pi; a finished task leaves the file and its
-// row keeps no ↗. With no file to read, every working row gets the ↗ and a click opens gentle-pi's list
-// (/gentle:agents), as it does when the task has left the file by the time of the click.
+// subagent's pop-up (./sidebar/run-popup.ts) instead of reaching gentle-pi. With no file to read, every working row
+// gets the ↗ and a click opens gentle-pi's list (/gentle:agents), as it does when the task has left the file by the
+// time of the click.
+//
+// The pop-up draws the subagent's own session file once it is found (SessionFinder), its tool calls in the quiet
+// rows of the conversation (popupToolRows). A finished task leaves the presence file; its row gets the ↗ again when
+// the task's record of this session (gentle-agents/tasks/<id>.json) names a session file to read.
 const PRESENCE_DIR = presenceDir(AGENT_DIR);
 const RUN_MARK = "↗";
 const RUNS_LOOK_MS = 5000; // how often the presence folder is listed again for the session's newest file
+const RECORDS_LOOK_MS = 1500; // how often the task records are listed again while the card shows a finished row
 // What the card last read, outside render: available is undefined until the first read, false without a file.
-const runs = { session: undefined, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0, pending: false, tui: undefined };
+// `finished` holds this session's task records, read while the card shows a finished row (`wantFinished`).
+const runs = { session: undefined, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0, pending: false, tui: undefined, finished: [], wantFinished: false, recordsLooked: 0 };
+const sessionFinder = new SessionFinder({ agentDir: AGENT_DIR });
+const finishedRecords = new FinishedRecords({ agentDir: AGENT_DIR });
 let runLib; // gentle-pi's renderThreadItem and taskHeader, those that loaded
 let runLibLoading;
 
@@ -1918,12 +1936,12 @@ function scheduleRuns() {
 	timer.unref?.();
 }
 
-const runsDigest = () => JSON.stringify([runs.available, runs.tasks.map((task) => [task.id, task.status, task.agent, task.label])]);
+const runsDigest = () => JSON.stringify([runs.available, runs.tasks.map((task) => [task.id, task.status, task.agent, task.label]), runs.finished.map((record) => record.id)]);
 
 function refreshRuns() {
 	try {
 		const session = liveCtx?.sessionManager?.getSessionId?.();
-		if (session !== runs.session) Object.assign(runs, { session, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0 });
+		if (session !== runs.session) Object.assign(runs, { session, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0, finished: [], recordsLooked: 0 });
 		const before = runsDigest();
 		if (!runs.file || !existsSync(runs.file) || Date.now() - runs.looked >= RUNS_LOOK_MS) {
 			if (runs.available === false && Date.now() - runs.looked < 1000) return; // no file a moment ago
@@ -1940,17 +1958,25 @@ function refreshRuns() {
 				Object.assign(runs, read.error ? { tasks: [], available: false, stamp: undefined } : { tasks: read.tasks, available: true, stamp });
 			}
 		}
+		if (runs.wantFinished && Date.now() - runs.recordsLooked >= RECORDS_LOOK_MS) {
+			runs.recordsLooked = Date.now();
+			runs.finished = finishedRecords.list(session);
+		}
 		if (runsDigest() !== before) runs.tui?.requestRender?.();
 	} catch {
 		Object.assign(runs, { file: undefined, stamp: undefined, tasks: [], available: false });
 	}
 }
 
-// The Agents card's task id on each row (null without a file): its working rows; undefined before the first read.
-// The "… N more" row has no status glyph.
+// The Agents card's task id on each row (null without a file): its working rows, and its finished rows whose record
+// names a session file; undefined before the first read. The "… N more" row has no status glyph.
 function agentRows(texts) {
+	runs.wantFinished = texts.some((text) => finishedRowStatus(text));
 	if (runs.available === undefined) return undefined;
-	return texts.map((text) => (!activeRowStatus(text) ? undefined : runs.available ? rowTask(text, runs.tasks) : null));
+	return texts.map((text) => {
+		if (activeRowStatus(text)) return runs.available ? rowTask(text, runs.tasks) : null;
+		return finishedRowStatus(text) ? rowRecord(text, runs.finished) : undefined;
+	});
 }
 
 // A card's rows with the ↗ on each row `match` names (from their plain texts), and `hits` filled with their row
@@ -1988,8 +2014,14 @@ function openRun(id) {
 	const ctx = liveCtx;
 	const open = () => {
 		try {
-			const file = id ? findActivityFile(PRESENCE_DIR, ctx?.sessionManager?.getSessionId?.()) : undefined;
-			if (file && openAgentPopup(ctx, { file, taskId: id, lib: runLib })) return;
+			const shared = { taskId: id, lib: runLib, finder: sessionFinder, drawTool: popupToolRows };
+			const record = id && !runs.tasks.some((task) => task.id === id) ? runs.finished.find((candidate) => candidate.id === id) : undefined;
+			if (record) {
+				if (openAgentPopup(ctx, { ...shared, record })) return;
+			} else {
+				const file = id ? findActivityFile(PRESENCE_DIR, ctx?.sessionManager?.getSessionId?.()) : undefined;
+				if (file && openAgentPopup(ctx, { ...shared, file })) return;
+			}
 		} catch {
 			// gentle-pi's list below
 		}
