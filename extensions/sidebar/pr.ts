@@ -8,19 +8,20 @@
 //   or ⧗ CI verdict, which is not drawn as well. The current branch's PR is marked ◉ before them.
 // - The rows follow the stack: a PR whose base is another open PR's head sits under it ("├ #19", "└ #20").
 //   No branch names anywhere.
-// - One PR at a time is expanded (▾, the others ▸), the current branch's PR to begin with. Its detail sits
+// - Any number of PRs are expanded (▾, the others ▸), the current branch's PR to begin with. The detail sits
 //   under its row: mergeability, review and "no checks" on one row, each check with its state, each unresolved
-//   thread (severity, title, file:line; eight at most, then "+N more"), then the buttons.
+//   thread (severity, title, file:line; eight at most, then "+N more"), then the buttons. When PRs sit under
+//   it, its detail rows carry the stack's "│" in its marker's column, down to its first "├" or "└".
 // - On the current branch's PR only, when Pi's editor is there, [ Fix N threads with agent ] and [ Fix CI ]
 //   (when a check failed) put the threads or the failed checks in the editor, after any draft already there;
 //   nothing is sent, the user reads it and presses Enter. [ Open ] opens the PR.
 // - No open PR: "No open pull requests". Without gh, signed out or outside GitHub: one dim row saying so.
 //
-// A click on a PR's row expands it and closes the other, or closes it when it was open; that choice stays
-// across refreshes and goes back to the current branch's PR when the branch or the folder changes. A click on
-// a check or a thread opens it in the browser (xdg-open, detached). The column scrolls what does not fit. The
-// PRs are read when the tab is shown, every 30 s while it stays shown and when the branch changes (probed
-// every 5 s); nothing runs while it is hidden, and render() only draws what was read.
+// A click on a PR's row expands it, or closes it when it was open, the others left as they are; those choices
+// stay across refreshes (all closed stays closed) and go back to the current branch's PR when the branch or the
+// folder changes. A click on a check or a thread opens it in the browser (xdg-open, detached). The column
+// scrolls what does not fit. The PRs are read when the tab is shown, every 30 s while it stays shown and when
+// the branch changes (probed every 5 s); nothing runs while it is hidden, and render() only draws what was read.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -57,7 +58,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		cwd: undefined,
 		result: undefined, // the last read (pr-data's loadPr), kept while the next one runs
 		branch: undefined, // the branch of the last read
-		expanded: undefined, // the expanded PR's number; null: none; undefined: the current branch's PR
+		expanded: undefined, // the expanded PRs' numbers (a Set, maybe empty); undefined: the current branch's PR
 		loading: undefined,
 		queued: false,
 		loadedAt: undefined,
@@ -93,6 +94,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 				if (state.disposed) return;
 				if (cwd === state.cwd) {
 					if (state.result && (result.branch ?? "") !== (state.branch ?? "")) state.expanded = undefined;
+					else if (state.expanded && result.kind === "list") state.expanded = expandedOf(result); // the PRs gone drop out
 					state.result = result;
 					state.branch = result.branch;
 				}
@@ -147,11 +149,10 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return `${head}${c(role, visibleWidth(text) > room ? truncateToWidth(text, room, "…") : text)}`;
 	};
 
-	// The PR whose detail is shown: the one clicked open, else (or when it is gone) the current branch's PR.
+	// The PRs whose detail is shown: the ones clicked open that are still listed, else the current branch's PR.
 	const expandedOf = ({ prs, current }) => {
-		if (state.expanded === null) return undefined;
-		if (state.expanded !== undefined && prs.some((pr) => pr.number === state.expanded)) return state.expanded;
-		return current;
+		if (state.expanded === undefined) return new Set(current === undefined ? [] : [current]);
+		return new Set(prs.filter((pr) => state.expanded.has(pr.number)).map((pr) => pr.number));
 	};
 
 	// The CI chip, "⧗ CI 5/10": passed of the checks that count; none without such checks.
@@ -253,14 +254,16 @@ export function createTab(host: SidebarHost): SidebarTab {
 	const listRows = (result, inner) => {
 		const open = expandedOf(result);
 		const rows = [];
-		for (const { pr, prefix, cont } of stackOf(result.prs, result.owner)) {
+		const stack = stackOf(result.prs, result.owner);
+		stack.forEach(({ pr, prefix, cont, depth }, index) => {
 			const isCurrent = pr.number === result.current;
-			const isOpen = pr.number === open;
+			const isOpen = open.has(pr.number);
+			const hasKids = (stack[index + 1]?.depth ?? 0) > depth; // the guide sits under the marker, where they start
 			const right = `${isCurrent ? `${c("accent", "◉")} ` : ""}${verdictBadge(pr)}`;
 			const left = tail(`${c("dim", `${prefix}${isOpen ? "▾" : "▸"}`)} ${c("accent", `#${pr.number}`)} `, "text", pr.title, right, inner);
 			rows.push({ left, right, hit: { toggle: pr.number } });
-			if (isOpen) rows.push(...detailRows(pr, isCurrent, `${cont}  `, inner));
-		}
+			if (isOpen) rows.push(...detailRows(pr, isCurrent, `${cont}${hasKids ? "│" : " "} `, inner));
+		});
 		if (!rows.length) rows.push({ left: c("muted", "No open pull requests") });
 		return rows;
 	};
@@ -300,7 +303,9 @@ export function createTab(host: SidebarHost): SidebarTab {
 			if (!hit) return false;
 			if (hit.toggle !== undefined) {
 				const result = state.result;
-				state.expanded = result?.kind === "list" && expandedOf(result) === hit.toggle ? null : hit.toggle;
+				const open = result?.kind === "list" ? expandedOf(result) : new Set();
+				if (!open.delete(hit.toggle)) open.add(hit.toggle);
+				state.expanded = open;
 				return true;
 			}
 			if (hit.url) {

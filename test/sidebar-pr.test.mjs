@@ -354,31 +354,84 @@ test("the current branch's PR starts expanded with its detail; the others are co
 test("no checks and no review decision are said once, dim", async () => {
 	const { row, rows } = await open({ git: stubGit({ branch: "feat/sidebar-pr-tab\n" }).git });
 	const facts = row("no review yet");
-	assert.match(plain(facts), /^│   ✓ clean · no review yet · no checks +│$/);
+	assert.match(plain(facts), /^│ │ ✓ clean · no review yet · no checks +│$/, "#18 has PRs under it: its detail carries the line");
 	assert.ok(painted(facts, "dim", "no review yet") && painted(facts, "dim", "no checks"));
-	assert.ok(rows().some((line) => /│   ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)), "an outdated thread without a line: the file alone");
+	assert.ok(rows().some((line) => /│ │ ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)), "an outdated thread without a line: the file alone");
 });
 
-test("a click on a row expands it and closes the other; on the open one it closes; the choice survives a refresh", async () => {
+test("a click on a row opens or closes only that PR; several stay open; the choice survives a refresh", async () => {
 	const { tab, rows, press, lineOf, clock, draw } = await open();
 	opened.length = 0;
+	const isOpen = (n) => /▾ #/.test(rows()[lineOf(`#${n} `)]);
 	assert.equal(press("#18"), true);
 	assert.ok(rows().some((line) => line.includes("Current PR can disappear")), "#18 open");
-	assert.ok(!rows().some((line) => line.includes("Dialogs lose their keys")), "#20 closed");
-	assert.match(rows()[lineOf("#18")], /▾ #18/);
-	assert.match(rows()[lineOf("#20 ")], /▸ #20/);
+	assert.ok(rows().some((line) => line.includes("Dialogs lose their keys")), "#20 stays open");
+	assert.deepEqual([isOpen(18), isOpen(20), isOpen(19)], [true, true, false]);
 	assert.deepEqual(opened, [], "expanding opens nothing");
+	assert.equal(press("#19"), true);
+	assert.deepEqual([isOpen(18), isOpen(20), isOpen(19), isOpen(15)], [true, true, true, false], "three open");
+	assert.equal(press("#20 "), true);
+	assert.deepEqual([isOpen(18), isOpen(20), isOpen(19)], [true, false, true], "only #20 closed");
+	assert.ok(!rows().some((line) => line.includes("Dialogs lose their keys")));
 	assert.ok(rows().some((line) => line.includes("[ Open ]")) && !rows().some((line) => line.includes("Fix")), "no agent button on another branch's PR");
 	clock.advance(prTiming.refreshMs);
 	draw();
 	clock.live()[0].fn();
 	await settle();
-	assert.ok(rows().some((line) => line.includes("Current PR can disappear")), "still #18 after a refresh");
+	assert.deepEqual([isOpen(18), isOpen(20), isOpen(19)], [true, false, true], "the same after a refresh");
 	assert.equal(press("#18"), true);
+	assert.equal(press("#19"), true);
 	assert.ok(!rows().some((line) => /Current PR can disappear|Dialogs lose/.test(line)), "all closed");
 	assert.ok(!rows().some((line) => line.includes("[ Open ]")));
+	clock.advance(prTiming.refreshMs);
+	draw();
+	clock.live()[0].fn();
+	await settle();
+	assert.ok(!rows().some((line) => line.includes("[ Open ]")), "still all closed after a refresh: the current PR does not reopen");
 	assert.equal(tab.handleClick(lineOf("#19"), "right", 5), false, "a right click does nothing");
 	assert.ok(!rows().some((line) => line.includes("[ Open ]")));
+});
+
+test("an open PR with PRs under it carries the stack's line through its detail", async () => {
+	const { press, rows, lineOf, row, draw } = await open();
+	press("#18");
+	const out = rows();
+	const detail18 = out.slice(lineOf("#18") + 1, lineOf("#20 "));
+	assert.ok(detail18.length >= 2, "#18's facts and buttons");
+	for (const line of detail18) assert.match(line, /^│ │ \S/, `a guide in #18's marker column, the text where it was: ${line}`);
+	assert.match(detail18[0], /^│ │ ✓ clean · no review yet · no checks +│$/);
+	assert.ok(detail18.some((line) => /^│ │ ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)));
+	assert.ok(detail18.some((line) => /^│ │ \[ Open \] +│$/.test(line)));
+	assert.ok(painted(row("no review yet"), "dim", "│"), "the guide is dim like the stack's prefix");
+	assert.match(out[lineOf("#20 ")], /^│ ├ ▾ #20 /, "the line goes on into #20's ├");
+	const detail20 = out.slice(lineOf("#20 ") + 1, lineOf("#19"));
+	for (const line of detail20) assert.match(line, /^│ │   \S/, `#20 has no PR under it: the parent's line only: ${line}`);
+	assert.match(out[lineOf("#19")], /^│ └ ▸ #19 /);
+	press("#19");
+	const after = rows();
+	const detail19 = after.slice(lineOf("#19") + 1, lineOf("#15"));
+	assert.ok(detail19.length >= 2);
+	for (const line of detail19) assert.match(line, /^│     \S/, `#19, the last child without children, has no guide: ${line}`);
+	assert.ok(draw().every((line) => visibleWidth(line) <= 59), "within the column");
+
+	const deep = answer([node({ number: 3, title: "c", base: "b", head: "c" }), node({ number: 2, title: "b", base: "a", head: "b" }), node({ number: 4, title: "d", base: "a", head: "d" }), node({ number: 1, title: "a", head: "a" })]);
+	const nested = await open({ gh: deep, git: stubGit({ branch: "b\n" }).git });
+	nested.press("#1 ");
+	const lines = nested.rows();
+	const at = (n) => nested.lineOf(`#${n} `);
+	assert.deepEqual(nested.numbers(), [1, 2, 3, 4]);
+	for (const line of lines.slice(at(1) + 1, at(2))) assert.match(line, /^│ │ \S/, `#1's guide: ${line}`);
+	assert.match(lines[at(2)], /^│ ├ ▾ #2 /);
+	const detail2 = lines.slice(at(2) + 1, at(3));
+	assert.ok(detail2.length >= 2);
+	for (const line of detail2) assert.match(line, /^│ │ │ \S/, `#2's guide in its own marker's column, under #1's: ${line}`);
+	assert.match(lines[at(3)], /^│ │ └ ▸ #3 /, "the guide runs into #3's └");
+	assert.match(lines[at(4)], /^│ └ ▸ #4 /);
+	nested.press("#3 ");
+	nested.press("#4 ");
+	const deeper = nested.rows();
+	for (const line of deeper.slice(at(3) + 1, at(4))) assert.match(line, /^│ │     \S/, `#3 has no PR under it: ${line}`);
+	for (const line of deeper.slice(at(4) + 1, deeper.findIndex((l, i) => i > at(4) && /^└/.test(l)))) assert.match(line, /^│     \S/, `#4: ${line}`);
 });
 
 test("a branch change goes back to the new branch's PR", async () => {
