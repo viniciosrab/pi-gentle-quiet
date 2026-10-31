@@ -414,12 +414,12 @@ test("the running and queued rows of the Agents card end with ↗; the title, fi
 	const { rows, card } = await agentsCard("card-1");
 	const out = rows();
 	assert.ok(out.every((row) => [...row].length === 100), "no row wider than the card");
-	assert.match(out[2], /^│ ◔ gentle-ai-worker .* 1m12s ↗ +│$/);
-	assert.match(out[3], /^│ ○ gentle-ai-explore .* queued ↗ +│$/);
+	assert.match(out[3], /^│ ◔ gentle-ai-worker .* 1m12s ↗ +│$/);
+	assert.match(out[4], /^│ ○ gentle-ai-explore .* queued ↗ +│$/);
 	assert.doesNotMatch(out[1], /↗/, "the title");
-	assert.doesNotMatch(out[4], /↗/, "a finished task");
-	assert.doesNotMatch(out[5], /↗/, "… 1 more");
-	assert.ok(painted(card.render(100)[2], "accent", "↗"), "the ↗ in the accent color");
+	assert.doesNotMatch(out[5], /↗/, "a finished task");
+	assert.doesNotMatch(out[6], /↗/, "… 1 more");
+	assert.ok(painted(card.render(100)[3], "accent", "↗"), "the ↗ in the accent color");
 	// The metadata keeps its column: the rows read as they do with nothing running.
 	const { rows: bare } = await agentsCard("card-empty", { tasks: [] });
 	assert.deepEqual(out.map((row) => row.replace(" ↗", "  ")), bare(), "only trailing padding was replaced");
@@ -429,33 +429,33 @@ test("a row as wide as the card gives its last column to the ↗ and never grows
 	const { card } = await agentsCard("card-full");
 	const out = card.render(60).map(plain);
 	assert.ok(out.every((row) => [...row].length === 60), "no row wider than the card");
-	assert.match(out[2], /^│ ◔ gentle-ai-worker .*…↗ │$/, "a cut row ends in the ↗");
-	assert.doesNotMatch(out[4], /↗/);
+	assert.match(out[3], /^│ ◔ gentle-ai-worker .*…↗ │$/, "a cut row ends in the ↗");
+	assert.doesNotMatch(out[5], /↗/);
 });
 
 test("a left click on a ↗ row opens the popup for that task and is not passed on; other clicks reach gentle-pi", async () => {
 	const { mouse, seen, opened, sent } = await agentsCard("card-click");
-	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 2)?.handled, true);
+	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 3)?.handled, true);
 	assert.equal(opened.length, 1, "one popup");
 	assert.deepEqual(seen, [], "gentle-pi saw none of it");
 	assert.deepEqual(sent, []);
 	const tui = { terminal: { rows: 30, columns: 120 }, requestRender() {} };
 	const popupRows = opened[0].factory(tui, theme, {}, () => {}).render(80).map(plain);
 	assert.match(popupRows[1], /gentle-ai-worker · running/);
-	mouse("click", 3);
+	mouse("click", 4);
 	assert.equal(opened.length, 2, "the queued row opens its own popup");
 	assert.match(plain(opened[1].factory(tui, theme, {}, () => {}).render(80)[1]), /gentle-ai-explore · queued/);
 	assert.equal(mouse("click", 1)?.from, "gentle-pi", "the title row still collapses the card");
-	assert.equal(mouse("click", 4)?.from, "gentle-pi", "a finished row");
-	assert.equal(mouse("click", 2, "right")?.from, "gentle-pi", "another button");
-	assert.equal(mouse("wheel", 2)?.from, "gentle-pi");
+	assert.equal(mouse("click", 5)?.from, "gentle-pi", "a finished row");
+	assert.equal(mouse("click", 3, "right")?.from, "gentle-pi", "another button");
+	assert.equal(mouse("wheel", 3)?.from, "gentle-pi");
 	assert.equal(opened.length, 2);
 });
 
 test("a click on a ↗ row whose task has left the file opens gentle-pi's list instead", async () => {
 	const { mouse, opened, sent } = await agentsCard("card-gone");
 	presence(presenceRoot, "card-gone", [{ incarnation: "i1", heartbeat: now, tasks: [] }]);
-	mouse("click", 2);
+	mouse("click", 3);
 	assert.equal(opened.length, 0);
 	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]]);
 });
@@ -463,10 +463,10 @@ test("a click on a ↗ row whose task has left the file opens gentle-pi's list i
 test("without a presence file the running rows still get ↗ and a click opens gentle-pi's list", async () => {
 	const { rows, mouse, opened, sent, seen } = await agentsCard("card-nofile", { tasks: null });
 	const out = rows();
-	assert.match(out[2], /1m12s ↗ +│$/);
-	assert.match(out[3], /queued ↗ +│$/);
-	assert.doesNotMatch(out[4], /↗/);
-	mouse("click", 2);
+	assert.match(out[3], /1m12s ↗ +│$/);
+	assert.match(out[4], /queued ↗ +│$/);
+	assert.doesNotMatch(out[5], /↗/);
+	mouse("click", 3);
 	assert.equal(opened.length, 0);
 	assert.deepEqual(seen, []);
 	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]]);
@@ -474,7 +474,7 @@ test("without a presence file the running rows still get ↗ and a click opens g
 
 test("without an overlay UI a click on a ↗ row opens gentle-pi's list", async () => {
 	const { mouse, sent } = await agentsCard("card-noui", { custom: null });
-	mouse("click", 2);
+	mouse("click", 3);
 	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]]);
 });
 
@@ -1029,7 +1029,7 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	const tasks = [{ summary: summary("w1", "gentle-ai-worker", "subagent popup from Agents card", "running"), thread: thread(items) }, TASKS[1]];
 	writeSession(SESSIONS_ROOT, "2026-10-31T03-00-00-000Z_main.jsonl", sessionText("toolu_main"));
 	const { mouse, opened, tool } = await agentsCard("card-session", { tasks });
-	mouse("click", 2);
+	mouse("click", 3);
 	assert.equal(opened.length, 1);
 	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 	const out = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
@@ -1058,9 +1058,9 @@ test("a finished Agents row with a task record of this session gets ↗ and open
 	writeRecord(TASKS_ROOT, { ...record, id: "done-other", parentSessionId: "another-session", endedAt: now, label: "map files" });
 	const { rows, mouse, opened, seen, sent } = await agentsCard("card-done");
 	const out = rows();
-	assert.match(out[4], /^│ ✓ gentle-ai-explore .* 1m11s ↗ +│$/, "the finished row");
-	assert.doesNotMatch(out[5], /↗/, "… 1 more");
-	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 4)?.handled, true);
+	assert.match(out[5], /^│ ✓ gentle-ai-explore .* 1m11s ↗ +│$/, "the finished row");
+	assert.doesNotMatch(out[6], /↗/, "… 1 more");
+	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 5)?.handled, true);
 	assert.deepEqual(seen, []);
 	assert.deepEqual(sent, []);
 	assert.equal(opened.length, 1);
@@ -1082,7 +1082,7 @@ test("a finished subagent's popup starts its prompt, tool rows and answer at the
 	writeRecord(TASKS_ROOT, { id: "edge-1", agent: "gentle-ai-explore", label: "test run for display", status: "completed", sessionPath: sessionFile, parentSessionId: "card-edge", createdAt: now - 20_000, startedAt: now - 20_000, endedAt: now - 10_000 });
 	const { rows, mouse, opened } = await agentsCard("card-edge");
 	rows();
-	mouse("click", 4);
+	mouse("click", 5);
 	assert.equal(opened.length, 1);
 	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 	const out = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain).map((row) => row.slice(1, -1));
@@ -1142,7 +1142,7 @@ async function t35Popup(sessionId, p, calls) {
 	const card = await agentsCard(sessionId, { tasks });
 	const draw = async () => {
 		card.rows(); // the ↗ rows as last drawn
-		card.mouse("click", 2);
+		card.mouse("click", 3);
 		await settle(); // gentle-pi's renderer loads once
 		const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 		const out = card.opened.at(-1).factory(popupTui, theme, {}, () => {}).render(80);

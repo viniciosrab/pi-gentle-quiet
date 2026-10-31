@@ -510,13 +510,24 @@ const inProgressIcon = (row) => row.replace(IN_PROGRESS, "$1◔");
 const AGENT_GAP = /^((?:\s|\x1b\[[0-9;:]*m)*[○◐◔?✓✗–⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?:\x1b\[[0-9;:]*m)*) {2,}(?=\S|\x1b)/u;
 const agentGap = (row) => row.replace(AGENT_GAP, "$1 ");
 
-// A panel's rows drawn flattened, inside the outline when it fits and is enabled. In the side column
-// (`rail`) a blank row separates the title from the list.
+// A card's title row ("◈ Agents ▾ Collapse  1 active") with its name ("Agents") bold in toolTitle, as the
+// Status card draws its title; the icon, the fold toggle and the counts keep gentle-pi's colors.
+const CARD_NAME = /^((?:\s|\x1b\[[0-9;:]*m)*\S(?:\s|\x1b\[[0-9;:]*m)+)((?:\x1b\[[0-9;:]*m)*)([A-Za-z]+)/u;
+const cardTitle = (row, t) => row.replace(CARD_NAME, (_, lead, codes, name) => `${lead}${codes}${fg(t, "toolTitle", bold(t, name))}`);
+
+// The title of a card (`rail.spaced`) set like the Status card's: its name bold in toolTitle, a blank row under it.
+function headed(rows, t) {
+	return rows.length ? [cardTitle(rows[0], t), ...(rows.length > 1 ? ["", ...rows.slice(1)] : [])] : rows;
+}
+
+// A panel's rows drawn flattened, inside the outline when it fits and is enabled. A card (`rail.spaced`)
+// has its title set like the Status card's and a blank row under it.
 function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
 		const rows = trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
-		const spaced = rail.agents ? rows.map(agentGap) : rows;
+		const gapped = rail.agents ? rows.map(agentGap) : rows;
+		const spaced = rail.spaced ? headed(gapped, t ?? theme) : gapped;
 		return rail.runs ? markRuns(spaced, width, t ?? theme, rail.runs, 0) : spaced;
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
@@ -534,7 +545,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
 	// In the column the Todos title leaves out gentle-pi's shortcut hint; "▾ Collapse" stays.
 	if (rail.hang && rail.spaced && rows.length) rows = [quietTitle(rows[0]), ...rows.slice(1)];
-	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
+	if (rail.spaced) rows = headed(rows, t ?? theme);
 	if (rail.runs) rows = markRuns(rows, inner, t ?? theme, rail.runs, 1); // under the outline's top row
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
@@ -579,7 +590,7 @@ function blockComponent(component, options, t, key) {
 				return (width) => {
 					if (sidebar.active && !inline) return [];
 					if (hits) scheduleRuns();
-					return drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
+					return drawBlock(target, width, options, t, { spaced: true, agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
 				};
 			}
 			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? target.handleMouse?.(event, ...rest);

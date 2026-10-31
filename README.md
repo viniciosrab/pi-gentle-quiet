@@ -14,7 +14,7 @@ same; only how it is drawn changes.
   runs, then a fixed green when it ends or red when it fails, whatever the theme. Under it, one line that changes while
   the call runs, like Claude Code (pi-web-access's progress, or "Fetching…"), then its status line, such as
   `2/2 queries, 6 sources`. `ctrl+o` shows pi-web-access's full output.
-- **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
+- **Flat Todos and Agents cards** in a simple outline, using your theme's colors, headed like the Status card: the title bold, then a blank row.
 - **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
   status, model and elapsed time, then what it does in this conversation's own look: its prompt folded to one dim

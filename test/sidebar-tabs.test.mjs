@@ -154,7 +154,7 @@ test("with the column open the Agents card stays inline above the editor, drawn 
 	assert.equal(loaded.root[NODE]().type, "hstack");
 	const inline = loaded.agents.render(60).map(plain).map((row) => row.replace(/ +│$/, ""));
 	assert.ok(inline[0].startsWith("┌") && inline.at(-1).startsWith("└"));
-	assert.deepEqual(inline.slice(1, 3), ["│ ◈ Agents  1 active", "│ ◔ gentle-ai-worker"], "no blank row under the title, as in place");
+	assert.deepEqual(inline.slice(1, 4), ["│ ◈ Agents  1 active", "│", "│ ◔ gentle-ai-worker"], "a blank row under the title, as in place");
 	assert.deepEqual(loaded.todo.render(60), [], "Todos still leaves its place for the column");
 	for (const label of ["2:GIT", "3:PROF", "4:MEM", "5:TREE", "6:PR"]) {
 		loaded.clickTab(label);
