@@ -1066,3 +1066,103 @@ test("a finished Agents row with a task record of this session gets ↗ and open
 	assert.match(popupRows[1], /gentle-ai-explore · finished · .* · 71s/, "this session's record, not the newer one of another session");
 	assert.ok(popupRows.some((row) => row.includes("└ ✗ exit 1")), "its session in the quiet look");
 });
+
+// ---------------------------------------------------------------------------
+// T35 (S16, L34): web, memory and codemode calls in the popup as the main conversation draws them
+// ---------------------------------------------------------------------------
+
+// gentle-engram's chrome module, which gentle-quiet's memory rows draw with (as in memory.test.mjs).
+const engramDir = path.join(agentDir, "npm/node_modules/gentle-engram");
+mkdirSync(engramDir, { recursive: true });
+realFs.copyFileSync(new URL("./fixtures/memory-tool-chrome.js", import.meta.url), path.join(engramDir, "memory-tool-chrome.js"));
+
+// pi-web-access's own rows (as in web.test.mjs): the call as it draws it, a status line when done.
+const webNative = {
+	renderCall: (args) => ({ render: () => (args.url ? [`\x1b[1mfetch\x1b[22m ${args.url}`] : [`\x1b[1msearch\x1b[22m "${args.query}"`]) }),
+	renderResult: (result, options) => ({ render: () => (options.isPartial ? ["  searching 1/1"] : [` ${result.details?.sources ?? 0} sources`, "  brief text…"]) }),
+};
+const T35_CALLS = [
+	{ name: "web_search", arguments: { query: "pi tui overlay" }, result: { content: [{ type: "text", text: "found" }], details: { sources: 3 }, durationMs: 2100 } },
+	{ name: "fetch_content", arguments: { url: "https://example.com" }, result: { content: [{ type: "text", text: "HTTP 404 not found" }], isError: true } },
+	{ name: "mem_search", arguments: { query: "sidebar tabs" }, result: { content: [{ type: "text", text: "3 results" }], details: { data: { results: [1, 2, 3] } } } },
+	{ name: "mem_save", arguments: { title: "Fixed popup", content: "…" }, result: { content: [{ type: "text", text: "saved" }], details: {} } },
+	{ name: "codemode", arguments: { code: "const a = await mcp.x();\nreturn a;" }, result: { content: [{ type: "text", text: "Script completed\nWall time 1.2 seconds\nOutput:\nok" }], details: { calls: [{ name: "mcp__context7__query-docs", status: "done", durationMs: 800 }, { name: "mcp__codegraph__explore", status: "done", durationMs: 300 }] }, durationMs: 1300 } },
+];
+const t35Session = (p, calls = T35_CALLS) => [
+	...sessionEntries(p).slice(0, 4),
+	...calls.flatMap((call, i) => [
+		message({ role: "assistant", content: [{ type: "toolCall", id: `${p}${i + 1}`, name: call.name, arguments: call.arguments }] }, `c${i}`),
+		...(call.result ? [message({ role: "toolResult", toolCallId: `${p}${i + 1}`, toolName: call.name, isError: false, ...call.result }, `r${i}`)] : []),
+	]),
+].join("\n") + "\n";
+
+// The rows the main conversation draws for a web call (webRenderers around pi-web-access's own), without the hint.
+function mainWebRows(tool, name, args, result, isError) {
+	const renderers = tool(name, webNative);
+	const state = {};
+	const call = renderers.renderCall(args, theme, { isPartial: false, isError, state }).render(76);
+	const done = renderers.renderResult(result, { isPartial: false }, theme, { args, isError, state }).render(76);
+	clearInterval(state.webBlink);
+	return [...call, ...done].map((row) => plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, ""));
+}
+
+async function t35Popup(sessionId, p, calls) {
+	const items = [{ kind: "tool", callId: `${p}1`, name: calls[0].name, output: "", running: false, isError: false }];
+	const tasks = [{ summary: summary(p, "gentle-ai-worker", "subagent popup from Agents card", "running"), thread: thread(items) }, TASKS[1]];
+	writeSession(SESSIONS_ROOT, `2026-10-31T04-00-00-000Z_${p}.jsonl`, t35Session(p, calls));
+	const card = await agentsCard(sessionId, { tasks });
+	const draw = async () => {
+		card.rows(); // the ↗ rows as last drawn
+		card.mouse("click", 2);
+		await settle(); // gentle-pi's renderer loads once
+		const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
+		const out = card.opened.at(-1).factory(popupTui, theme, {}, () => {}).render(80);
+		return { painted: out, body: out.map(plain).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()) };
+	};
+	return { ...card, draw };
+}
+
+test("web, memory and codemode calls in the popup are the rows the main conversation draws for them", async () => {
+	const { tool, draw } = await t35Popup("card-t35", "toolu_t35_", T35_CALLS);
+	const [search, fetch, memSearch, memSave, codemode] = T35_CALLS;
+	const expected = [
+		...mainWebRows(tool, "web_search", search.arguments, search.result, false),
+		...mainWebRows(tool, "fetch_content", fetch.arguments, fetch.result, true),
+		...mainRows(tool, "mem_search", memSearch.arguments, memSearch.result),
+		...mainRows(tool, "mem_save", memSave.arguments, memSave.result),
+		...mainRows(tool, "codemode", codemode.arguments, codemode.result, { durationMs: codemode.result.durationMs }),
+	];
+	assert.ok(expected.includes(' ● search "pi tui overlay"') && expected.includes("   └ 3 sources"), `web rows: ${expected.join(" | ")}`);
+	assert.ok(expected.includes(" \u{100000} search “sidebar tabs”") && expected.includes(" └ ✓ 3 results"), `memory rows: ${expected.join(" | ")}`);
+	const { body, painted: rows } = await draw();
+	const shown = body.filter((row) => expected.includes(row));
+	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
+	assert.ok(!body.some((row) => /^ (web_search|fetch_content|mem_search|mem_save)$/.test(row)), "no bare tool name");
+	assert.ok(rows.some((row) => row.includes("\x1b[38;2;78;186;101m●")), "the done web call's fixed green dot");
+	assert.ok(rows.some((row) => row.includes("\x1b[38;2;255;107;128m●")), "the failed one's fixed red dot");
+});
+
+test("a running web call in the popup keeps a steady grey dot, and no call of the popup takes the main view's expand hint", async (t) => {
+	const calls = [T35_CALLS[0], { name: "web_search", arguments: { query: "still going" } }];
+	const { tool, draw } = await t35Popup("card-t35-run", "toolu_t35r_", calls);
+	tool("web_search", webNative);
+	// The main view's newest finished call shows the hint; the popup's finished calls must not take it.
+	const main = tool("bash", {});
+	const done = main.renderResult({ content: [{ type: "text", text: "x\ny\nz\nw" }] }, { isPartial: false }, theme, { args: { command: "ls" }, toolCallId: "main-last" });
+	assert.match(plain(done.render(76)[0]).trimEnd(), /ctrl\+o to expand$/);
+	const clock = t.mock.method(Date, "now", () => 600); // the main view's blink is off at 600 ms
+	const { body, painted: rows } = await draw();
+	clock.mock.restore();
+	assert.ok(body.includes(' ● search "still going"'), body.join("\n"));
+	assert.ok(rows.some((row) => painted(row, "dim", "●")), "the dot lit and grey");
+	assert.ok(body.includes("   └ searching 1/1"), "pi-web-access's progress line");
+	assert.ok(!body.some((row) => /ctrl\+o/.test(row)), "no expand hint in the popup");
+	assert.match(plain(done.render(76)[0]).trimEnd(), /ctrl\+o to expand$/, "the main view keeps its hint");
+});
+
+test("a web call Pi has not drawn in the main view yet still gets the dot and its name in the popup", async () => {
+	const { draw } = await t35Popup("card-t35-fresh", "toolu_t35f_", [{ name: "source_check", arguments: { query: "is pi fast" }, result: { content: [{ type: "text", text: "2 sources agree" }] } }]);
+	const { body } = await draw();
+	assert.ok(body.some((row) => /^ ● .*source.check.*is pi fast/.test(row)), body.join("\n"));
+	assert.ok(body.includes("   └ 2 sources agree"), body.join("\n"));
+});

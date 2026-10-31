@@ -19,7 +19,9 @@ same; only how it is drawn changes.
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
   status, model and elapsed time, then what it does in this conversation's own look: its prompt folded to one dim
   line, thinking dim, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
-  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends). It reads the
+  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends); web calls keep
+  pi-web-access's row behind the status dot (lit, without blinking), memory calls the memory row
+  (`search “x”`, `└ ✓ 3 results`), codemode its calls and sources, as in the conversation. It reads the
   subagent's own Pi session (`~/.pi/agent/gentle-agents/sessions/*.jsonl`, found by one of its tool call ids)
   about twice a second, only what was appended, and follows the end while the subagent works; `↑↓` `PgUp/PgDn`
   `Home/End` or the wheel scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. Before its

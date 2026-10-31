@@ -1574,10 +1574,11 @@ const WEB_RUNNING = { web_search: "Searching…", source_check: "Searching…", 
 const WEB_BLINK_MS = 600;
 const WEB_GREEN = (text) => `\x1b[38;2;78;186;101m${text}\x1b[39m`;
 const WEB_RED = (text) => `\x1b[38;2;255;107;128m${text}\x1b[39m`;
-const webDot = (t, status) => {
+// `still`: lit without blinking, for a call drawn outside the conversation (the subagent popup).
+const webDot = (t, status, still = false) => {
 	if (status === "error") return WEB_RED("●");
 	if (status !== "running") return WEB_GREEN("●");
-	return Math.floor(Date.now() / WEB_BLINK_MS) % 2 ? " " : fg(t, "dim", "●");
+	return !still && Math.floor(Date.now() / WEB_BLINK_MS) % 2 ? " " : fg(t, "dim", "●");
 };
 const withoutBackground = (line) => (line.includes("\x1b[") ? tokens(line).map((tok) => (tok.esc ? stripBackground(tok.esc) : tok.ch)).join("") : line);
 // Drops `count` leading spaces of a row, keeping its colors.
@@ -1620,7 +1621,7 @@ function webRenderers(toolName, renderers) {
 			return {
 				render(width) {
 					const rows = nativeLines(native, Math.max(1, width - 3));
-					const dot = webDot(t, state?.webStatus ?? initial);
+					const dot = webDot(t, state?.webStatus ?? initial, context.popup === true);
 					// Rows under the call (search's queries, fetch's URLs) get the link under the tool name, like the result row.
 					const link = fg(t, "dim", LINK);
 					return (rows.length ? rows : [""]).map((row, i) => truncateToWidth(i === 0 ? ` ${dot} ${row}` : `   ${link} ${dedent(row, plainText(row).length - plainText(row).trimStart().length)}`, width, "…"));
@@ -1645,7 +1646,9 @@ function webRenderers(toolName, renderers) {
 			if (!options.expanded || options.isPartial) {
 				// One line under the call: pi-web-access's first row (its progress while running, its status line when
 				// done), so it changes as the call goes, like Claude Code. The dot carries the status.
-				const order = orderOf(context.toolCallId, !options.isPartial);
+				// The popup's calls are not the conversation's: they take no place in its order and show no hint.
+				const popup = context.popup === true;
+				const order = popup ? -1 : orderOf(context.toolCallId, !options.isPartial);
 				const fallback = () => firstLine(outputLines(textOf(result))[0] ?? "done", 100);
 				return {
 					render(width) {
@@ -1655,7 +1658,7 @@ function webRenderers(toolName, renderers) {
 						if (options.isPartial) line = fg(t, "dim", row ?? WEB_RUNNING[toolName] ?? "running…");
 						else if (isError) line = WEB_RED(first ? plainText(first).trim() : fallback());
 						else line = row ?? fg(t, "dim", fallback());
-						return quietResultComponent({ summary: `  ${prefix} ${line}`, hint: options.isPartial ? "" : expandHint(t), rest: [] }, order).render(width);
+						return quietResultComponent({ summary: `  ${prefix} ${line}`, hint: options.isPartial || popup ? "" : expandHint(t), rest: [] }, order).render(width);
 					},
 					invalidate() {
 						native?.invalidate?.();
@@ -1682,12 +1685,56 @@ function webRenderers(toolName, renderers) {
 	};
 }
 
+// The renderers Pi resolved for web and memory tools (pi-web-access's, gentle-engram's), kept as the conversation
+// draws them so the subagent popup can wrap the same ones. Pi offers no way to ask for them: until the conversation
+// draws a call of that tool, the popup has none.
+const resolvedRenderers = new Map();
+let engramChrome;
+
+// pi-web-access's call row as it draws it (bold name, accent argument), for a web tool Pi has not resolved yet.
+// Its result row falls back to the first line of the result's text.
+const WEB_NAMES = { web_search: "search", fetch_content: "fetch", get_search_content: "get_search_content", source_check: "source_check" };
+function webStandIn(toolName) {
+	return {
+		renderCall(args, t) {
+			const many = (list, word) => (Array.isArray(list) && list.length > 1 ? `${list.length} ${word}` : undefined);
+			const query = args.query !== undefined ? `"${firstLine(args.query, 80)}"` : undefined;
+			const arg = many(args.queries, "queries") ?? many(args.urls, "URLs") ?? query ?? args.url ?? args.urls?.[0] ?? args.queries?.[0] ?? args.responseId ?? "";
+			return new Text(`${fg(t, "toolTitle", bold(t, `${WEB_NAMES[toolName] ?? toolName} `))}${fg(t, "accent", String(arg))}`, 0, 0);
+		},
+	};
+}
+
+// Web and memory calls in the popup, through the renderers the conversation draws them with: webRenderers around
+// pi-web-access's own (its dot lit and still, no expand hint), memoryRenderers with gentle-engram's chrome. Without
+// a state or a toolCallId they start no blink timer and take no place in the conversation's call order.
+function popupRendererRows(item, t, width, args, result) {
+	const native = resolvedRenderers.get(item.name);
+	let renderers;
+	if (WEB_TOOLS.has(item.name)) renderers = webRenderers(item.name, native ?? webStandIn(item.name));
+	else if (item.name.startsWith("mem_")) {
+		renderers = config.tools.restyle && engramChrome?.humanToolName && engramChrome?.renderResultText ? memoryRenderers(engramChrome, item.name, native ?? {}) : native;
+	}
+	if (typeof renderers?.renderCall !== "function" || typeof renderers?.renderResult !== "function") return undefined;
+	const context = { args, isPartial: !item.result, isError: item.isError, durationMs: item.durationMs, popup: true };
+	try {
+		const call = renderers.renderCall(args, t, context)?.render(width) ?? [];
+		const done = renderers.renderResult(result, { isPartial: !item.result, expanded: false }, t, context)?.render(width) ?? [];
+		return [...call, ...done].map((row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…")));
+	} catch {
+		return undefined; // the quiet row below
+	}
+}
+
 // A subagent's tool call in its pop-up (./sidebar/run-popup.ts), as the conversation draws it with quietRenderers:
 // quietCall's row, then quietResultText's summary and preview under the └ ("running…" until its result arrives).
+// Web and memory calls go through their own renderers (popupRendererRows); MCP tools without one stay quiet rows.
 // No expand hint: the pop-up has no ctrl+o.
 function popupToolRows(item, t, width) {
 	const args = item.args && typeof item.args === "object" ? item.args : {};
 	const result = item.result ? { ...item.result, isError: item.isError } : { content: [] };
+	const own = popupRendererRows(item, t, width, args, result);
+	if (own) return own;
 	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
 	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1).render(width)];
 }
@@ -3516,6 +3563,7 @@ function jobNoticeRenderer(message, options = {}, t) {
 export default async function (pi) {
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
+	engramChrome = chrome;
 	await registerPalette(pi);
 	await registerJobsCard(pi);
 	runLibLoading = loadRunLib(); // needed only once a ↗ is clicked
@@ -3640,6 +3688,7 @@ export default async function (pi) {
 	if (typeof pi.registerToolRenderer === "function") {
 		pi.registerToolRenderer((toolName, next) => {
 			const renderers = next();
+			if (renderers && (WEB_TOOLS.has(toolName) || toolName.startsWith("mem_"))) resolvedRenderers.set(toolName, renderers);
 			// codegraph has no renderers of its own, so it is quiet without any to wrap.
 			if (QUIET_TOOLS.has(toolName) && config.quiet.enabled) return quietRenderers(toolName, renderers ?? {});
 			if (!renderers) return renderers;
