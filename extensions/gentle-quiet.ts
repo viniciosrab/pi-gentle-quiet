@@ -1378,7 +1378,8 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(lines.length ? plural(lines.length, "line") : "no output"), preview: lines, keepEnd: true };
 		case "edit": {
 			const { added, removed } = diffCounts(result?.details?.diff);
-			const counts = added || removed ? `${DIFF_STYLE["+"].paint(`+${added}`)} ${DIFF_STYLE["-"].paint(`-${removed}`)}` : "edited";
+			const style = diffStyles(t);
+			const counts = added || removed ? `${style["+"].paint(`+${added}`)} ${style["-"].paint(`-${removed}`)}` : "edited";
 			return { summary: join(fg(t, "success", "✓"), counts, seconds(context.durationMs) && fg(t, "dim", `· ${seconds(context.durationMs)}`)), preview: String(result?.details?.diff ?? "").split("\n").filter((line) => /^[+-]\s*\d/.test(line)), diff: true, minPreview: 2 };
 		}
 		case "write": {
@@ -1454,24 +1455,85 @@ function quietResultText(toolName, result, options, context, t) {
 	};
 }
 
-// Minimal diff rows: no backgrounds, removed lines in soft red, added in soft green,
-// changed words a brighter tone of the same color.
-// Fixed truecolor on purpose: monochrome terminal palettes (Omarchy's grey themes)
-// turn Pi's toolDiffAdded/toolDiffRemoved into the same grey as everything else.
+// Minimal diff rows in the current theme's colors: no backgrounds, removed lines in its
+// toolDiffRemoved, added in its toolDiffAdded, changed words a brighter tone of the same color.
+// Monochrome palettes (Omarchy's grey themes) give both the same grey: when they are closer than
+// DIFF_CLOSE, added lines take the theme's text color and removed lines its muted one (dim when
+// muted is the context lines' grey), so the two still differ by lightness, without new hues.
+// A theme without concrete colors (ANSI indices) keeps its tokens, changed words in bold.
+const DIFF_CLOSE = 48; // RGB distance under which two colors read as the same
+const DIFF_WORD = 0.35; // how far changed words move toward white (dark themes) or black
 const rgb = ([r, g, b]) => `\x1b[38;2;${r};${g};${b}m`;
-const diffStyle = (text, word) => ({
-	text: rgb(text),
-	word: rgb(word),
-	paint: (value) => `${rgb(text)}${value}\x1b[39m`,
-});
-const DIFF_STYLE = {
-	"+": diffStyle([125, 170, 130], [165, 215, 170]),
-	"-": diffStyle([185, 135, 150], [215, 165, 180]), // soft rose
-};
+const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const lightness = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
 
-function diffRow({ diff, text }, width) {
+/** A theme token's concrete color: Pi's resolved colors ("" tokens become the terminal's), or its truecolor escape. */
+function themeRgb(t, token) {
+	try {
+		const color = t?.colors?.[token];
+		if (color?.kind === "rgb") return [color.r, color.g, color.b].map(Math.round);
+		const m = /\x1b\[38;2;(\d+);(\d+);(\d+)m/.exec(t?.getFgAnsi?.(token) ?? "");
+		return m ? m.slice(1).map(Number) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** A theme token's opening escape, as its fg() paints it. */
+function themeAnsi(t, token) {
+	try {
+		if (t?.getFgAnsi) return t.getFgAnsi(token);
+	} catch {
+		// fall through to fg()
+	}
+	const painted = fg(t, token, "\0");
+	return painted.slice(0, painted.indexOf("\0"));
+}
+
+function diffStyle(color, toward) {
+	const word = color.map((channel) => Math.round(channel + (toward - channel) * DIFF_WORD));
+	return { text: rgb(color), word: rgb(word), paint: (value) => `${rgb(color)}${value}\x1b[39m` };
+}
+
+function tokenStyle(t, token) {
+	const ansi = themeAnsi(t, token);
+	return { text: `\x1b[22m${ansi}`, word: `${ansi}\x1b[1m`, paint: (value) => `${ansi}${value}\x1b[22;39m` };
+}
+
+let diffCache;
+/** Styles for "+" and "-" rows, read from the theme on every render so a theme switch applies at once. */
+function diffStyles(t) {
+	const key = t?.colors ?? t;
+	if (t && diffCache?.t === t && diffCache.key === key) return diffCache.styles;
+	let added = themeRgb(t, "toolDiffAdded");
+	let removed = themeRgb(t, "toolDiffRemoved");
+	let styles;
+	if (!added || !removed) styles = { "+": tokenStyle(t, "toolDiffAdded"), "-": tokenStyle(t, "toolDiffRemoved") };
+	else {
+		let addedToken = "toolDiffAdded";
+		let removedToken = "toolDiffRemoved";
+		if (distance(added, removed) < DIFF_CLOSE) {
+			const muted = themeRgb(t, "muted");
+			const context = themeRgb(t, "toolDiffContext");
+			removedToken = muted && context && distance(muted, context) < DIFF_CLOSE ? "dim" : "muted";
+			addedToken = "text";
+			added = themeRgb(t, addedToken);
+			removed = themeRgb(t, removedToken);
+		}
+		// Brighter means toward white on a dark theme (light text), toward black on a light one.
+		const toward = lightness(themeRgb(t, "text") ?? added ?? [255, 255, 255]) >= 128 ? 255 : 0;
+		styles = {
+			"+": added ? diffStyle(added, toward) : tokenStyle(t, addedToken),
+			"-": removed ? diffStyle(removed, toward) : tokenStyle(t, removedToken),
+		};
+	}
+	diffCache = { key, t, styles };
+	return styles;
+}
+
+function diffRow({ diff, text }, width, t) {
 	const plain = truncateToWidth(`  ${text}`, Math.max(1, width - 1), "…");
-	const style = DIFF_STYLE[diff];
+	const style = diffStyles(t)[diff];
 	return style ? ` ${style.paint(plain)}` : ` ${plain}`;
 }
 
@@ -1504,7 +1566,7 @@ function orderOf(toolCallId, finished) {
 
 const hintVisible = (order) => config.quiet.hint === "all" || (config.quiet.hint === "last" && order === latestFinished);
 
-function quietResultComponent({ summary, hint: available, rest }, order) {
+function quietResultComponent({ summary, hint: available, rest }, order, t) {
 	return {
 		render(width) {
 			const hint = available && hintVisible(order) ? available : "";
@@ -1512,7 +1574,7 @@ function quietResultComponent({ summary, hint: available, rest }, order) {
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
 			lines.push(hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…"));
-			for (const line of rest) lines.push(typeof line === "object" ? diffRow(line, width) : truncateToWidth(` ${line}`, width, "…"));
+			for (const line of rest) lines.push(typeof line === "object" ? diffRow(line, width, t) : truncateToWidth(` ${line}`, width, "…"));
 			return lines;
 		},
 		invalidate() {},
@@ -1521,7 +1583,7 @@ function quietResultComponent({ summary, hint: available, rest }, order) {
 
 /**
  * Recolors one native expanded diff line ("-12 text", "+12 text", wrapped tails):
- * the line in its soft tone, Pi's inverse word highlight in the brighter tone.
+ * the line in its diff tone, Pi's inverse word highlight in the brighter tone.
  */
 function tintLine(line, style) {
 	const out = [style.text];
@@ -1543,35 +1605,38 @@ function tintLine(line, style) {
 const plainText = (line) => tokens(line).map((tok) => tok.ch ?? "").join("");
 
 /** Tints every diff line of a native expanded edit/write result; context stays as is. */
-function tintDiff(lines) {
+function tintDiff(lines, styles) {
 	let current = null; // style of the diff line a wrapped tail belongs to
 	return lines.map((line) => {
 		const plain = plainText(line);
 		const m = /^\s*([+-])\s*\d/.exec(plain); // "-2" or padded "- 882"
-		if (m) current = DIFF_STYLE[m[1]];
+		if (m) current = styles[m[1]];
 		else if (/^\s*\d/.test(plain) || plain.trim() === "" || /^\s*\.\.\./.test(plain)) current = null;
 		return current ? tintLine(line, current) : line;
 	});
 }
 
 /** Shifts a component one column right (Pi's text margin) and drops its backgrounds. */
-function padded(component, { diff = false } = {}) {
+function padded(component, { diff = false, t } = {}) {
 	if (!component || typeof component.render !== "function") return component;
 	// Expanded outputs can be thousands of lines and redraw on every frame:
 	// reuse the previous result while the native lines are unchanged.
 	let lastIn;
 	let lastOut;
 	let lastWidth;
+	let lastStyles;
 	return new Proxy(component, {
 		get(target, key) {
 			if (key === "render") {
 				return (width) => {
 					const lines = target.render(Math.max(1, width - 1));
-					if (lastIn && lastWidth === width && lastIn.length === lines.length && lines.every((line, i) => line === lastIn[i])) return lastOut;
+					const styles = diff ? diffStyles(t) : undefined;
+					if (lastIn && lastWidth === width && lastStyles === styles && lastIn.length === lines.length && lines.every((line, i) => line === lastIn[i])) return lastOut;
 					lastIn = lines;
 					lastWidth = width;
+					lastStyles = styles;
 					// Lines without escape sequences have no background to drop.
-					const shown = diff ? tintDiff(lines) : lines;
+					const shown = diff ? tintDiff(lines, styles) : lines;
 					lastOut = shown.map((line, i) => (diff && line !== lines[i] ? ` ${line}` : ` ${line.includes("\x1b[") ? tokens(line).map((tok) => (tok.esc ? stripBackground(tok.esc) : tok.ch)).join("") : line}`));
 					return lastOut;
 				};
@@ -1757,7 +1822,7 @@ function popupToolRows(item, t, width) {
 	const own = popupRendererRows(item, t, width, args, result);
 	if (own) return own;
 	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
-	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1).render(width)];
+	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1, t).render(width)];
 }
 
 // Claude Code's "$ command" row: the full width, wrapped to two rows under the command and cut with "…".
@@ -1825,7 +1890,7 @@ function quietRenderers(toolName, renderers) {
 					// Pi's renderer reuses its own previous component only, never ours.
 					const native = renderers.renderResult(result, options, t, { ...context, lastComponent: state?.quietNative });
 					if (state) state.quietNative = native;
-					if (native) return padded(native, { diff: toolName === "edit" || toolName === "write" });
+					if (native) return padded(native, { diff: toolName === "edit" || toolName === "write", t });
 				} catch {
 					// fall back to the summary below
 				}
@@ -1835,7 +1900,7 @@ function quietRenderers(toolName, renderers) {
 				return new Text(textOf(result).replace(/\s+$/, ""), 1, 0);
 			}
 			const order = orderOf(context.toolCallId, !options.isPartial);
-			return quietResultComponent(quietResultText(toolName, result, options, context, t), order);
+			return quietResultComponent(quietResultText(toolName, result, options, context, t), order, t);
 		},
 	};
 }
