@@ -90,7 +90,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T30 | S15 (L30) | worker mvvqn61h-3-24i4: subagent popup (presence file, thread renderer), ↗ on running Agents rows | d31bb61 |
 | T31 | S15 (L30) | worker mvvr0mjj-4-ym0t: job popup (/proc log path, live tail), ↗ on running Jobs rows | 3b30d09 |
 | T34 | S16 (L33) | worker mvvv9pey-1-9tq1: subagent popup from its session file in the quiet tool look; ↗ on finished rows | f8fb834 |
-| T35 | S16 (L34) | worker: web, memory and codemode tools in the popup as in the main conversation | |
+| T35 | S16 (L34) | worker mvvvskdf-2-a3ot: web, memory and codemode tools in the popup as in the main conversation | 318d1a9 |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
