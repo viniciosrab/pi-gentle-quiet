@@ -6,7 +6,8 @@
 //                   relations waiting for judgment. A click on the title collapses it to one row; its rows
 //                   are not actions.
 //   Active Handoff  the project's latest session summary, folded to one row (`#920 · 1h ago · <goal>`); a
-//                   click on the title or the card toggles the full text. Without one, a click fetches again.
+//                   click on the title toggles the full text, a click on the content opens the whole summary
+//                   read-only in the preview pop-up. Without one, a click fetches again.
 //   Saved this session     the memories the agent saved or updated in this Pi session (./mem-session.ts).
 //   Recalled this session  the memories it read (mem_get_observation), searched (mem_search, with the hits)
 //                          or loaded (mem_context).
@@ -226,11 +227,13 @@ export function createMemTab(host, deps) {
 			s.handoffOpen = !s.handoffOpen;
 			redraw();
 		};
+		// The title folds the card; its content opens the whole summary in the pop-up.
+		const read = () => openMemory({ id: record.id, type: record.type || "session_summary", title: record.title, body: (record.rawLines ?? []).join("\n") }, "Handoff");
 		const title = pair(join(host.icons?.memory, "Active Handoff"), fg("dim", s.handoffOpen ? "▲" : "▼"), inner);
 		const age = record.date ? relativeTime(record.date, deps.now()) : "recent";
 		if (!s.handoffOpen) {
 			const row = `${fg("accent", `#${record.id ?? "?"}`)} ${fg("dim", "·")} ${fg("muted", age)} ${fg("dim", "·")} ${fg("text", goalOf(record))}`;
-			place(out, title, [{ text: truncateToWidth(row, inner, "…"), action: toggle }], width, toggle);
+			place(out, title, [{ text: truncateToWidth(row, inner, "…"), action: read }], width, toggle);
 			return;
 		}
 		const items = [
@@ -253,7 +256,7 @@ export function createMemTab(host, deps) {
 			}
 		}
 		items.push("");
-		place(out, title, items.map((text) => ({ text, action: toggle })), width, toggle);
+		place(out, title, items.map((text) => ({ text, action: read })), width, toggle);
 	};
 
 	// The session's memories, scanned again only when the branch changed.
@@ -277,12 +280,12 @@ export function createMemTab(host, deps) {
 	};
 
 	// The memory read-only in the preview pop-up: Engram's text when its server has it, else the session's.
-	const openMemory = (memory) => {
+	const openMemory = (memory, label = "Memory") => {
 		const heading = [`#${memory.id}`, memory.type, memory.title].filter(Boolean).join(" · ");
 		const text = fetchObservation(memory.id, deps)
 			.catch(() => undefined)
 			.then((observation) => (typeof observation?.content === "string" && observation.content.trim() ? observation.content : (memory.body ?? "")));
-		openPreview(host.ctx(), { text, title: heading, label: "Memory" });
+		openPreview(host.ctx(), { text, title: heading, label });
 	};
 	const cut = (text, room) => (visibleWidth(text) > room ? truncateToWidth(text, Math.max(1, room), "…") : text);
 

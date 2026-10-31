@@ -42,13 +42,19 @@ same; only how it is drawn changes.
   (the picker's own keys then; `esc` closes it first), `e` its effort, `s` or `ctrl+s` Save, `u` Use in this session,
   `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF
   has the keyboard no key reaches the editor; without the side column `alt+p` reaches Pi as before; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
-  some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
+  some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
-  source); **PR** the repository's open pull requests from `gh`, one per row with a checks summary (✓ ✗ ⧗),
-  the current branch's PR first with its detail (state, mergeability, each CI check, the review decision and
-  unresolved review comments), a click opening the PR or a check in the browser. Files open in your editor (`e` in the preview) in a herdr tab
+  source); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR
+  based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
+  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
+  ⧗ CI 5/10, ✗ CI 9/10; skipped ones left out) that stands for a ✗ CI or ⧗ CI verdict; a click on a PR
+  expands its detail under its bold title (mergeability, review, then `Checks 2/3` and `Threads 4` over each check and
+  each unresolved thread, and a blank row closing the block) or closes it, several open at once, the current branch's PR (◉) to begin with,
+  the stack's line running on through the detail of a PR with PRs under it, and a check or a thread
+  opens in the browser. On the current branch's PR, [ Fix N threads with agent ] and [ Fix CI ] put the
+  threads or the failed checks in Pi's editor for you to send. Files open in your editor (`e` in the preview) in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is. **Blocks** → Tab order
   in `/gentle-quiet` reorders the tabs: pick one, Move up / Move down (PR second gives
   `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order. You can also
