@@ -1,6 +1,6 @@
 // The TREE tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's
-// project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ PROJECT · <project>
-// ══ [ ↗ nvim ]" in the card title style, then the project's tree with git badges on the right ("M", "?",
+// project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ <project>   [ ↗ ]"
+// in the card title style, then the project's tree with git badges on the right ("M", "?",
 // "A", "U" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
 // (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), the icons Neo-tree draws in LazyVim
 // (./nerd-icons.ts): mini.icons' glyph for the file, Neo-tree's folders, one cell of the terminal's Nerd Font,
@@ -19,7 +19,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import path from "node:path";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
-import { editorCommand, launchDeps } from "./tree-launch.ts";
+import { launchDeps } from "./tree-launch.ts";
 import { nerdIcon } from "./nerd-icons.ts";
 import { openPreview } from "./tree-preview.ts";
 import { collectDirs, flattenTree, parseGitStatus, parseIgnored, projectName, scanTree } from "./tree-scan.ts";
@@ -27,8 +27,6 @@ import { collectDirs, flattenTree, parseGitStatus, parseIgnored, projectName, sc
 /** How often the tree is read again while shown, and how long a launch failure stays on the card. */
 export const treeTiming = { rescanMs: 3000, noticeMs: 8000 };
 
-const ICON = "⌂";
-const COMPACT_WIDTH = 38; // cute's: under it the badge is "[ ↗ ]"
 const CODE = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
 const DATA = new Set(["json", "yaml", "yml", "toml", "lock"]);
 // What a "(n hidden items)" row holds in the click map.
@@ -70,6 +68,9 @@ export function createTab(host: SidebarHost): SidebarTab {
 
 	const paint = (role, text) => host.fg(role, text);
 	// The row's icon and the space after it; a listed hidden entry has it dim, as Neo-tree does.
+	// The header's house: "⌂", or with nerd icons the same outline drawn larger, the codicon house (nf-cod-home), two
+	// spaces after it as the rows have.
+	const home = () => (host.treeIcons === "nerd" ? "\u{EB06} " : "⌂");
 	const icon = (node, open) => {
 		if (host.treeIcons !== "nerd") return `${node.isDirectory ? (open ? "📂" : "📁") : "📄"} `;
 		const { char, color } = nerdIcon(node.name, { isDirectory: node.isDirectory, open, empty: node.isDirectory && node.itemCount === 0 });
@@ -213,24 +214,17 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return `${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut) - visibleWidth(right)))}${right}`;
 	};
 
-	const headerRow = (width, inner) => {
-		const label = editorCommand().label;
-		const compact = width < COMPACT_WIDTH;
-		const badge = compact ? `${paint("dim", "[")} ${paint("accent", "↗")} ${paint("dim", "]")}` : `${paint("dim", "[")} ${paint("accent", "↗")} ${paint("toolTitle", label)} ${paint("dim", "]")}`;
-		const badgeWidth = visibleWidth(compact ? "[ ↗ ]" : `[ ↗ ${label} ]`);
-		const room = inner - badgeWidth - 3; // a space, at least one "═", a space
-		const prefix = `${ICON} PROJECT · `;
+	const headerRow = (inner) => {
+		const badge = `${paint("dim", "[")} ${paint("accent", "↗")} ${paint("dim", "]")}`;
+		const room = inner - visibleWidth("[ ↗ ]") - 2; // at least two spaces before the badge
+		const prefix = `${home()} `;
 		let title = "";
-		if (room >= 18) {
+		if (room >= visibleWidth(prefix) + 2) {
 			const name = state.name ?? path.basename(state.cwd ?? "") ?? "";
 			const space = room - visibleWidth(prefix);
 			title = `${prefix}${visibleWidth(name) > space ? truncateToWidth(name, space, "…") : name}`;
-		} else if (room >= 10) title = `${ICON} PROJECT`;
-		else if (room >= 6) title = `${ICON} TREE`;
-		else if (room >= 1) title = ICON;
-		const lead = title ? `${paint("toolTitle", host.bold(title))} ` : "";
-		const fill = Math.max(1, inner - visibleWidth(title) - (title ? 1 : 0) - badgeWidth - 1);
-		return spread(`${lead}${paint("border", "═".repeat(fill))}`, badge, inner);
+		} else if (room >= visibleWidth(home())) title = home();
+		return spread(title ? paint("toolTitle", host.bold(title)) : "", badge, inner);
 	};
 
 	const fileRow = (row, inner) => {
@@ -268,7 +262,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			if (state.noCwd) body.push(paint("muted", "No project folder"));
 			else if (state.error) body.push(paint("warning", `Cannot read the folder: ${state.error.code ?? state.error.message ?? state.error}`));
 			else if (!state.tree) body.push(paint("dim", "Scanning…"));
-			else if (!state.tree.length) body.push(`${paint("dim", "No files in the project")} ${paint("dim", "·")} ${paint("accent", ICON)}`);
+			else if (!state.tree.length) body.push(`${paint("dim", "No files in the project")} ${paint("dim", "·")} ${paint("accent", home().trim())}`);
 			else {
 				const rows = flat();
 				const overflow = rows.length > capacity;
@@ -285,7 +279,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 				}
 			}
 			while (body.length < capacity) body.push("");
-			return host.box([headerRow(width, inner), second, ...body.map((row) => spread(row, "", inner))], width);
+			return host.box([headerRow(inner), second, ...body.map((row) => spread(row, "", inner))], width);
 		},
 
 		handleClick(line, button) {

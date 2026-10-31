@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ScrollView } from "@earendil-works/pi-tui";
-import { load, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
+import { load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 import { TAB_FACTORIES } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
@@ -64,11 +64,12 @@ test("the status line is a Status card and a Context card on top of the column, 
 });
 
 test("the column draws Todos in the square outline, a blank row under its title, and no Agents card", async () => {
-	const { rows } = await wide();
+	const { rows, rail } = await wide();
 	const out = rows();
 	const tops = out.flatMap((row, i) => (row.startsWith("┌") ? [i] : []));
 	assert.equal(tops.length, 1);
 	assert.deepEqual(out.slice(1, 4).map((row) => row.replace(/ +│$/, "")), ["│ ≡ Todos  1 of 2", "│", "│ ◔ Write it"], "a blank row under the title");
+	assert.ok(painted(rail.render(60)[1], "toolTitle", theme.bold("Todos")), "the title bold in toolTitle, as in the Status card");
 	assert.equal(out[4].replace(/ +│$/, ""), "│ ○ Test it", "items stay tight");
 	assert.ok(!out.some((row) => row.includes("Agents")), "Agents stays above the editor");
 	assert.ok(out.every((row) => [...row].length <= 59), "rows fit the column minus its scrollbar");
@@ -238,7 +239,7 @@ test("Todos leaves its usual place while the column is open; the Agents card sta
 	const { todo, agents } = await wide();
 	assert.deepEqual(todo.render(100), []);
 	const inline = agents.render(60).map(plain).map((row) => row.replace(/ +│$/, ""));
-	assert.deepEqual(inline, ["┌──────────────────────────────────────────────────────────┐", "│ ◈ Agents  1 active", "│ ◔ gentle-ai-worker", "└──────────────────────────────────────────────────────────┘"]);
+	assert.deepEqual(inline, ["┌──────────────────────────────────────────────────────────┐", "│ ◈ Agents  1 active", "│", "│ ◔ gentle-ai-worker", "└──────────────────────────────────────────────────────────┘"]);
 	const narrow = await wide({ columns: 139 });
 	assert.deepEqual(narrow.agents.render(60), agents.render(60), "the same rows as below the breakpoint");
 });
