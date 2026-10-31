@@ -82,7 +82,7 @@ export const musicDeps = {
  * How often the status is read while the card is drawn, how long after the last draw the timer stops, how long a
  * notice stays, and how often and how long a player just started (or stopped) is waited for.
  */
-export const musicTiming = { pollMs: 1500, idleMs: 4000, noticeMs: 5000, startPollMs: 300, startMs: 5000 };
+export const musicTiming = { pressMs: 180, pollMs: 1500, idleMs: 4000, noticeMs: 5000, startPollMs: 300, startMs: 5000 };
 
 // Nerd Font's Material icons, as the branch icon in the Status card: JetBrains Mono has no ⏮ ⏸ ⏭.
 const PREV = "\u{F04AE}";
@@ -472,7 +472,9 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 			const controls = buttons.map((button) => button.glyph).join("  ");
 			const gap = inner - visibleWidth(time) - visibleWidth(controls);
 			const timeText = paint("muted", time);
-			const controlsText = buttons.map((button) => paint(button.role, button.glyph)).join("  ");
+			// The control clicked last flashes inverse for musicTiming.pressMs, so the click is felt.
+			const pressed = state.pressed && Date.now() < state.pressed.until ? state.pressed.index : -1;
+			const controlsText = buttons.map((button, index) => (index === pressed ? `\x1b[7m${paint(button.role, button.glyph)}\x1b[27m` : paint(button.role, button.glyph))).join("  ");
 			const start = gap >= 2 ? inner - visibleWidth(controls) : 0;
 			state.controls = { line: rows.length, hits: buttons.map((button, index) => ({ ...button, from: start + index * 3, to: start + index * 3 + 1 })) };
 			rows.push(gap >= 2 ? `${timeText}${" ".repeat(gap)}${controlsText}` : controlsText);
@@ -509,6 +511,9 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 			if (!controls || line !== controls.line) return false;
 			const hit = controls.hits.find((candidate) => x >= candidate.from - 1 && x <= candidate.to);
 			if (!hit) return false;
+			state.pressed = { index: controls.hits.indexOf(hit), until: Date.now() + musicTiming.pressMs };
+			requestRender();
+			setTimeout(requestRender, musicTiming.pressMs + 10).unref?.();
 			if (hit.heart) {
 				void love(status.track).catch(() => undefined);
 				return true;

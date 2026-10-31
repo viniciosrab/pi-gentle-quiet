@@ -9,6 +9,7 @@
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
 // theme) but with code blocks framed instead of fenced and "•" bullets, without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
 // footer). Where this Pi cannot render Markdown, the source is shown and there is no m.
+// While a Markdown file's preview is open (either view), Pi's screen behind it is drawn dim (BACKDROP, below).
 //
 // Given text instead of a file (a memory from the MEM tab, ./mem.ts) shows the same way: "Read-only — <label>",
 // its title on the path row, the body rendered as Markdown (m for its source), and no e, as there is no file.
@@ -244,9 +245,60 @@ function closeOnOutsidePress(tui, preview) {
 	};
 }
 
+// A Markdown file's preview dims Pi behind it. Pi has no overlay option for a backdrop, and pi-tui does not
+// export its TUI class, so the prototype that owns the live TUI's compositeOverlays is wrapped, once per
+// process: while a visible overlay carries BACKDROP, the base lines are redrawn without their colors, in the
+// preview theme's dim (faint without one), before Pi draws the overlays over them. Image lines stay; blank
+// lines stay blank. Only the last `termHeight` lines, the screen, change: on the main screen Pi hands over the
+// whole conversation, and a changed line above the screen would make it clear the scrollback and redraw all. The wrapper calls the latest loaded copy of backdropLines, so /reload applies, and any
+// error leaves Pi's lines as they were.
+const BACKDROP = Symbol.for("gentle-quiet.backdrop");
+const BACKDROP_PATCHED = Symbol.for("gentle-quiet.backdropPatched");
+const BACKDROP_LINES = Symbol.for("gentle-quiet.backdropLines");
+const SGR = /\x1b\[[0-9;:]*m/g;
+const isImageLine = (line) => line.includes("\x1b_G") || line.includes("\x1b]1337;File=");
+
+function backdropLines(tui, lines, termHeight) {
+	const entry = tui.overlayStack?.find((candidate) => candidate?.component?.[BACKDROP] && tui.isOverlayVisible(candidate));
+	if (!entry) return lines;
+	// A fixed near-black (#1f1f1f), not a theme role: under the "system" theme in a terminal that reports no colors
+	// (herdr) every role is an ANSI index the terminal paints lighter, and some terminals ignore faint.
+	const dim = (text) => `\x1b[38;2;31;31;31m${text}\x1b[39m`;
+	const top = Math.max(0, lines.length - (Number(termHeight) || lines.length));
+	return lines.map((line, index) => {
+		if (index < top || typeof line !== "string" || !line || isImageLine(line)) return line;
+		const bare = line.replace(SGR, "");
+		return bare.trim() ? dim(bare) : bare;
+	});
+}
+globalThis[BACKDROP_LINES] = backdropLines;
+
+function patchBackdrop(tui) {
+	let proto = tui;
+	while (proto && !Object.hasOwn(proto, "compositeOverlays")) proto = Object.getPrototypeOf(proto);
+	if (!proto || proto === tui || typeof proto.compositeOverlays !== "function" || proto[BACKDROP_PATCHED]) return;
+	const original = proto.compositeOverlays;
+	proto.compositeOverlays = function (lines, termWidth, termHeight, ...rest) {
+		let base = lines;
+		try {
+			if (Array.isArray(lines)) base = globalThis[BACKDROP_LINES]?.(this, lines, termHeight) ?? lines;
+		} catch {
+			base = lines;
+		}
+		return original.call(this, base, termWidth, termHeight, ...rest);
+	};
+	proto[BACKDROP_PATCHED] = true;
+}
+
 class FilePreview {
 	constructor({ file, relPath, tui, theme, done, onEdit, loading, label }) {
 		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label });
+		if (file !== undefined && languageOf(file) === "Markdown") this[BACKDROP] = true;
+		try {
+			patchBackdrop(tui);
+		} catch {
+			// a TUI that cannot be patched: no backdrop
+		}
 		this.unwrapMouse = closeOnOutsidePress(tui, this);
 		this.top = 0;
 		this.content = undefined;

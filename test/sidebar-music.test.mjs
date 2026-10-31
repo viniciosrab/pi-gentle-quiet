@@ -570,6 +570,23 @@ test("a click on previous, play/pause or next runs that cliamp command and reads
 	assert.ok(!calls.slice(before).some((args) => ["prev", "toggle", "next"].includes(args[0])));
 });
 
+test("a clicked control flashes, drawn inverse for a moment, so the click is felt; then it is drawn as before", async (t) => {
+	const saved = { ...musicTiming };
+	Object.assign(musicTiming, { pressMs: 60 });
+	t.after(() => Object.assign(musicTiming, saved));
+	const { rows, raw, mouse } = await column(t, (args) => (args[0] === "status" ? status() : args[0] === "remote" ? playlists() : ""));
+	const out = rows();
+	const y = out.findIndex((row) => row.includes(PAUSE));
+	for (const glyph of [NEXT, PREV, PAUSE]) {
+		assert.equal(mouse("click", y, [...rows()[y]].indexOf(glyph))?.handled, true);
+		const pressed = raw()[y];
+		assert.match(pressed, new RegExp(`\\x1b\\[7m(?:\\x1b\\[[0-9;]*m)*${glyph}`, "u"), `${glyph} flashes, inverse`);
+		assert.equal(plain(pressed), plain(raw()[y]), "the row's text does not move");
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		assert.ok(!raw()[y].includes("\x1b[7m"), `${glyph} back to normal`);
+	}
+});
+
 test("shuffle: on in accent, off dim; a click runs cliamp shuffle toggle, flips it at once, then reads the status", async (t) => {
 	const on = await column(t, (args) => (args[0] === "status" ? status({ shuffle: true }) : args[0] === "remote" ? playlists() : ""));
 	const lit = on.raw().find((row) => plain(row).includes(PAUSE));
