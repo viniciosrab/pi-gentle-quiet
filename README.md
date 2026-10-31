@@ -18,7 +18,7 @@ same; only how it is drawn changes.
 - **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
   status, model and elapsed time, then what it does in this conversation's own look: its prompt folded to one dim
-  line, thinking dim, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
+  line, thinking folded to one "Thinking..." row as in the main conversation, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
   `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends); web calls keep
   pi-web-access's row behind the status dot (lit, without blinking), memory calls the memory row
   (`search “x”`, `└ ✓ 3 results`), codemode its calls and sources, as in the conversation. It reads the

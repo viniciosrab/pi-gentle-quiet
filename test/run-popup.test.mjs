@@ -888,7 +888,7 @@ test("session entries become the popup's items: the prompt, thinking, text and e
 // A stand-in for gentle-quiet's tool rows: what the popup hands each tool call to.
 const stubTool = (item, t) => [t.fg("toolTitle", ` TOOL ${item.name} ${item.result ? (item.isError ? "error" : "done") : "running"}`)];
 
-test("the session is drawn in order: the prompt folded and dim, thinking dim, text as Markdown, each tool by the drawing it is given", () => {
+test("the session is drawn in order: the prompt folded and dim, thinking as one Thinking... row, text as Markdown, each tool by the drawing it is given", () => {
 	const { sessions } = agentRoot();
 	const log = new SessionLog(writeSession(sessions, "draw.jsonl", sessionText("d")));
 	log.poll();
@@ -897,7 +897,7 @@ test("the session is drawn in order: the prompt folded and dim, thinking dim, te
 	assert.deepEqual(rows, [
 		" › Implement T34 …",
 		"",
-		" Reading the spec first.",
+		" Thinking...",
 		"",
 		" TOOL bash done",
 		"",
@@ -910,7 +910,7 @@ test("the session is drawn in order: the prompt folded and dim, thinking dim, te
 		" TOOL bash running",
 	]);
 	assert.ok(painted(raw[0], "dim"), "the prompt dim");
-	assert.ok(painted(raw[2], "dim"), "thinking dim");
+	assert.ok(painted(raw[2], "dim", "\x1b[3mThinking...") && plain(raw[2]) === " Thinking...", "thinking: one dim italic Thinking... row, as the main view");
 	assert.ok(raw[6].includes("\x1b[1mread\x1b[22m"), "the text through Pi's Markdown");
 	const broken = sessionLines(log.items, theme, 60, () => { throw new Error("boom"); }).map(plain);
 	assert.ok(broken.some((row) => row.includes("bash")), "a failing drawing falls back to the tool's name");
@@ -931,7 +931,7 @@ test("with the session file found, the popup draws it under the task header inst
 	const sessionFile = writeSession(sessions, "popup.jsonl", sessionText("p"));
 	const { body, component } = sessionPopup({ finder: { find: () => sessionFile } });
 	assert.match(plain(component.render(80)[1]), /gentle-ai-worker · running/);
-	assert.deepEqual(body(), [" › Implement T34 …", " Reading the spec first.", " TOOL bash done", " Spec read. Writing the tests.", " TOOL read done", " TOOL bash error", " TOOL bash running"]);
+	assert.deepEqual(body(), [" › Implement T34 …", " Thinking...", " TOOL bash done", " Spec read. Writing the tests.", " TOOL read done", " TOOL bash error", " TOOL bash running"]);
 	appendFileSync(sessionFile, `${message({ role: "assistant", content: [{ type: "text", text: "All green." }] }, "e9")}\n`);
 	component.refresh();
 	assert.equal(body().at(-1), " All green.", "appended entries show on the next poll");
@@ -1043,7 +1043,8 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	const shown = body.filter((row) => expected.includes(row));
 	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
 	assert.ok(expected.includes(" $ git status --short") && expected.includes(" └ ✗ exit 1") && expected.includes(" └ running…"), "the rows compared are the quiet ones");
-	assert.ok(body.includes(" Reading the spec first."), "thinking");
+	assert.ok(body.includes(" Thinking..."), "thinking folded as the main view shows it");
+	assert.ok(!body.some((row) => row.includes("Reading the spec first.")), "the thinking text itself is not shown");
 	assert.ok(body.includes(" Spec read. Writing the tests."), "text");
 	assert.ok(!body.some((row) => row.startsWith("Tool · ")), "not the presence thread");
 });
