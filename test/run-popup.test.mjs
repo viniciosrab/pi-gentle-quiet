@@ -661,15 +661,18 @@ function runningLog(id, text) {
 
 test("running job rows of the Jobs card end with ↗ without widening them; the title, a blank row and finished rows do not", async () => {
 	const { publish, rows } = await jobsColumn();
-	publish([{ id: "job-7", label: "npm run build", startedAt: now - 12_000 }, { id: "job-8", label: "npm test", startedAt: now - 9_000, status: "exited", endedAt: now - 1_000, exitCode: 0 }]);
+	// The card counts from the clock it draws with, not the file's load time: under a loaded suite they differ.
+	const at = Date.now();
+	publish([{ id: "job-7", label: "npm run build", startedAt: at - 12_000 }, { id: "job-8", label: "npm test", startedAt: at - 9_000, status: "exited", endedAt: at - 1_000, exitCode: 0 }]);
 	const out = rows();
 	assert.ok(out.slice(0, 6).every((row) => [...row].length === [...out[0]].length), "every row as wide as the card");
 	assert.match(out[1], /^│ ⧗ Jobs ▾ Collapse {2}2 jobs +│$/u);
 	assert.doesNotMatch(out[1], /↗/);
-	assert.match(out[3], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm run build +12s ?↗ │$/u, "in the padding past the elapsed time");
+	assert.match(out[3], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm run build +1[23]s ?↗ │$/u, "in the padding past the elapsed time");
 	assert.match(out[4], /^│ ✓ npm test +8s +│$/u, "a finished job keeps its row");
 	assert.doesNotMatch(out[4], /↗/);
-	assert.equal(out[3].indexOf("12s"), out[4].indexOf("8s") - 1, "the elapsed column does not move");
+	const end = (row) => { const m = /\d+s/.exec(row); return m.index + m[0].length; };
+	assert.equal(end(out[3]), end(out[4]), "the elapsed column does not move");
 });
 
 test("a click on a running job row opens its popup; the title still collapses; the Todos card still gets its clicks", async (t) => {
