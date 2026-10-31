@@ -1,8 +1,8 @@
 // The GIT tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's Git tab
 // (src/git/git-graph-card.ts, git-working-tree-card.ts): two cards splitting the height 50/50.
 //
-// - Top, "⎇ Git": the branch with its status badges, the ASCII commit graph (git log --graph, 20 commits) and
-//   the changes row; "[ Graph | Branches ]" in its title switches to the branch list (ahead/behind, gone, age).
+// - Top, "⎇ Git": the branch with its status badges, then the branch list (ahead/behind, gone, age) it opens on;
+//   "[ Graph | Branches ]" in its title switches to the ASCII commit graph (git log --graph, 20 commits) and back.
 // - Bottom, "Working tree": the changed files with TREE's icon for each, then +n −n and the status letter on the
 //   right, as VS Code's. A click on a branch in the list turns it into the branch diff inspector,
 //   "Diff · <branch>", with [ ✕ ] to close it.
@@ -52,7 +52,7 @@ function fitRow(row, inner) {
 
 export function createTab(host: SidebarHost): SidebarTab {
 	const data = createGitData(host);
-	const state = { view: "graph", selected: null, folded: { graph: false, tree: false }, scroll: { graph: 0, tree: 0, diff: 0 } };
+	const state = { view: "branches", selected: null, folded: { graph: false, tree: false }, scroll: { graph: 0, tree: 0, diff: 0 } };
 	let drawn = { cards: [], hits: new Map() }; // what the last render put where, for the mouse
 	let root; // the repository's top folder: git paths are relative to it
 
