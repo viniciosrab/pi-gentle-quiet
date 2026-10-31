@@ -38,6 +38,13 @@
 //   handleWheel?(delta: number, line: number, x: number): boolean
 //       The wheel over the tab's content (delta > 0 scrolls down). Return true to keep it (a card scrolling
 //       its own list, an account switcher); false or no method and the column scrolls.
+//   handleKey?(data: string): boolean
+//       A key while the tab has the keyboard (host.focus): Pi's raw input, before the editor sees it. Return
+//       true when the tab used it. While the tab has the keyboard every key is kept from the editor anyway;
+//       an Esc the tab does not use gives the keyboard back to the editor.
+//   keyOverlay?(): Component | undefined
+//       The pop-up the tab has open over Pi (a picker), whose keys still come through handleKey. Any other
+//       component taking Pi's focus (a dialog, another screen) gives the keyboard back to it.
 //   onShow?(): void
 //       The tab became the active one (also on its first render): refresh its data here.
 //   onHide?(): void
@@ -87,6 +94,10 @@
 //       gentle-quiet's configured icons (memory, todo, agents, jobs, rdd, other, branch).
 //   treeIcons: "emoji" | "nerd"; treeHidden: boolean; setTreeHidden(value: boolean): void
 //       TREE's settings in /gentle-quiet: its icons, and whether it lists hidden entries (set and saved).
+//   focus(id: string): void; blur(): void; focused(): string | undefined
+//       The column's keyboard: focus gives the tab `id` the keys (handleKey) until Esc, another tab, a
+//       narrower terminal or blur gives them back to Pi's editor; focused() is the tab holding them.
+//       PROF's alt+p (gentle-quiet.ts) opens PROF and focuses it.
 // ---------------------------------------------------------------------------------------------------
 // @ts-nocheck
 
@@ -121,6 +132,10 @@ export interface SidebarHost {
 	readonly treeHidden: boolean;
 	/** Sets Tree hidden items and saves it in gentle-quiet.json. */
 	setTreeHidden(value: boolean): void;
+	/** Gives the tab `id` the keyboard; blur() gives it back to the editor. */
+	focus?(id: string): void;
+	blur?(): void;
+	focused?(): string | undefined;
 }
 
 export interface SidebarTab {
@@ -128,6 +143,8 @@ export interface SidebarTab {
 	render(width: number, height: number): string[];
 	handleClick?(line: number, button: string, x: number, event?: any): boolean;
 	handleWheel?(delta: number, line: number, x: number): boolean;
+	handleKey?(data: string): boolean;
+	keyOverlay?(): any;
 	onShow?(): void;
 	onHide?(): void;
 	invalidate?(): void;
@@ -275,6 +292,23 @@ export function renderTabBar(width, activeId, t, order = DEFAULT_TAB_ORDER, drag
 		divider: paint(t, "border", "─".repeat(Math.max(0, width))),
 		hitboxes: hitboxes.filter((box) => box.startX < width).map((box) => ({ ...box, endX: Math.min(box.endX, width) })),
 	};
+}
+
+/**
+ * What the column does with raw input `data` while a tab has the keyboard: "pass" for what is not a key (a mouse
+ * report, a terminal's answer) so Pi still gets it, "release" for a paste (the keyboard goes back and the paste
+ * lands in the editor), "key" for the rest. `parseKey` is pi-tui's, when it has one.
+ */
+export function keyInput(data, parseKey = undefined) {
+	if (typeof data !== "string" || !data.length) return "pass";
+	if (data.startsWith("\x1b[200~")) return "release";
+	if (data.startsWith("\x1b[<") || data.startsWith("\x1b[M") || data === "\x1b[I" || data === "\x1b[O") return "pass";
+	if (typeof parseKey !== "function" || [...data].length === 1) return "key";
+	try {
+		return parseKey(data) ? "key" : "pass";
+	} catch {
+		return "key";
+	}
 }
 
 /** The tab under column `x` of the bar; between two tabs, the nearer one. */

@@ -46,7 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { cycleTab, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
+import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
 const AGENT_DIR = (() => {
@@ -2734,7 +2734,12 @@ const RAIL_WIDTH = 60;
 const RAIL_GAP = 2;
 
 // active: the wide layout is painting; the status line and the panels it holds paint nothing in their usual places.
-const sidebar = { tui: undefined, active: false, dispose: undefined };
+// focusTab(id): opens a tab with the keyboard on it (PROF's shortcut); false when the column cannot show.
+const sidebar = { tui: undefined, active: false, dispose: undefined, focusTab: undefined };
+// Opens the PROF tab with the keyboard, as gentle-pi's /gentle:profiles keys; alt+p is Pi's only on Windows and WSL.
+// Caught by the column's input listener, not pi.registerShortcut: it acts only while the column can show, and
+// otherwise reaches Pi as before.
+const PROF_KEY = "alt+p";
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
@@ -2779,7 +2784,7 @@ function railCard(title, rows, width, t) {
 }
 
 // What a tab module gets from gentle-quiet (the contract is in ./sidebar/tabs.ts).
-function tabHost(tui) {
+function tabHost(tui, keyboard) {
 	const host = {
 		get theme() {
 			return theme;
@@ -2825,6 +2830,9 @@ function tabHost(tui) {
 			}
 			tui.requestRender?.();
 		},
+		focus: (id) => keyboard?.focus(id),
+		blur: () => keyboard?.blur(),
+		focused: () => keyboard?.focused(),
 	};
 	return host;
 }
@@ -2874,6 +2882,7 @@ function installSidebar(tui) {
 	let shown = "main"; // the tab whose onShow ran last
 	// `id` takes the column: the tab it replaces is told it is hidden.
 	const show = (id) => {
+		if (keyed !== undefined && keyed !== id) keyed = undefined; // the keyboard stays with its tab
 		if (shown === id) return false;
 		const previous = views.get(shown);
 		shown = id;
@@ -2953,9 +2962,82 @@ function installSidebar(tui) {
 		},
 	};
 
+	// The column's keyboard: a tab given it (alt+p for PROF, or a click on its card) gets Pi's raw keys before
+	// the editor, through an input listener, until Esc it does not use, alt+p again, another tab, a narrower
+	// terminal, a paste, or another component taking Pi's focus (a dialog; the tab's own pop-up is not one).
+	let keyed; // the tab id holding the keyboard
+	let owner; // what had Pi's focus when it got it: the editor, as a rule
+	const blur = () => {
+		if (keyed === undefined) return;
+		keyed = undefined;
+		tui.requestRender?.();
+	};
+	const keyboard = {
+		focus(id) {
+			if (!wanted() || tab !== id) return;
+			if (keyed !== id) owner = tui.focusedComponent;
+			keyed = id;
+			tui.requestRender?.();
+		},
+		blur,
+		focused: () => keyed,
+	};
+	const focusTab = (id) => {
+		if (!wanted()) return false;
+		select(id);
+		keyboard.focus(id);
+		return true;
+	};
+	sidebar.focusTab = focusTab;
+	const pressed = (data, key) => {
+		try {
+			return matchesKey(data, key);
+		} catch {
+			return false;
+		}
+	};
+	const onKey = (data) => {
+		if (keyed === undefined) return pressed(data, PROF_KEY) && focusTab("prof") ? { consume: true } : undefined;
+		const kind = keyInput(data, PiTui.parseKey);
+		if (kind === "pass") return undefined;
+		const entry = tab === keyed ? view(keyed) : undefined;
+		let overlay;
+		try {
+			overlay = entry?.tab?.keyOverlay?.();
+		} catch {
+			overlay = undefined;
+		}
+		const focusNow = tui.focusedComponent;
+		if (!wanted() || tab !== keyed || !entry?.tab || kind === "release" || pressed(data, "ctrl+c") || (focusNow !== owner && (!overlay || focusNow !== overlay))) {
+			blur();
+			return undefined;
+		}
+		if (PiTui.isKeyRelease?.(data)) return { consume: true };
+		if (!overlay && pressed(data, PROF_KEY)) {
+			blur();
+			return { consume: true };
+		}
+		let used = false;
+		try {
+			used = entry.tab.handleKey?.(data) === true;
+		} catch {
+			used = true; // the tab's own trouble; the key still stays out of the editor
+		}
+		if (!used && pressed(data, Key.escape)) blur();
+		tui.requestRender?.();
+		return { consume: true };
+	};
+	if (typeof tui.addInputListener === "function") {
+		const unsubscribe = tui.addInputListener(onKey);
+		cleanups.push(() => (typeof unsubscribe === "function" ? unsubscribe() : tui.removeInputListener?.(onKey)));
+	}
+	cleanups.push(() => {
+		if (sidebar.focusTab === focusTab) sidebar.focusTab = undefined;
+	});
+
 	// Every tab but MAIN scrolls in a column of its own, so each keeps its scroll position. They are tab
 	// modules, created the first time they are opened.
-	const tabHostApi = tabHost(tui);
+	const tabHostApi = tabHost(tui, keyboard);
 	const views = new Map(); // tab id -> { id, tab, error, rows, hits, column }
 	const view = (id) => {
 		if (views.has(id)) return views.get(id);
@@ -3059,7 +3141,10 @@ function installSidebar(tui) {
 			const replacement = () => {
 				sidebar.active = false;
 				if (jobsCard) jobsCard.drawn = false;
-				if (!wanted()) return nativeNode.call(root);
+				if (!wanted()) {
+					keyed = undefined; // no column, no keyboard mode
+					return nativeNode.call(root);
+				}
 				try {
 					const width = column.getContentWidth(RAIL_WIDTH);
 					// The cards first: the Status card leaves out the job count while the Jobs card shows the jobs.

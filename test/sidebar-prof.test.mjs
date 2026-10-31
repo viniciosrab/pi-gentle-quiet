@@ -160,7 +160,7 @@ const boxed = (rows, width) => {
 
 /** A stand-in for gentle-quiet's tab host. */
 function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40 } = {}) {
-	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [] };
+	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [], focuses: [], focused: undefined };
 	// Pi's overlay UI, recording what it is asked to show; component() builds it like Pi does.
 	const tui = {
 		terminal: { columns, rows },
@@ -220,6 +220,16 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 		},
 		gauge: (percent) => theme.fg("accent", `◔${percent}`),
 		icons: {},
+		// The column's keyboard, as gentle-quiet hands it to a tab.
+		// Recorded; held only when a test grants it (calls.keyboard), so the other tests see the card unfocused.
+		focus: (id) => {
+			calls.focuses.push(id);
+			if (calls.keyboard) calls.focused = id;
+		},
+		blur: () => {
+			calls.focused = undefined;
+		},
+		focused: () => calls.focused,
 	};
 	return { host: h, calls };
 }
@@ -974,4 +984,195 @@ test("without gentle-pi's writers, or with Gentle Shell on, every click runs /ge
 		assert.equal(storeText(env), before);
 		assert.equal(bindings().get("s1"), undefined);
 	}
+});
+
+// ---- The keyboard, as gentle-pi's /gentle:profiles screen (T26) ----
+
+const KEY = { left: "\x1b[D", right: "\x1b[C", up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", ctrlS: "\x13" };
+const INVERSE = "\x1b[7m";
+/** The roster row the keyboard has selected (▸), plain, or undefined. */
+const marked = (rows) => rows().find((row) => /^│ ▸ /.test(row));
+const HINT = /←→ profile · ↑↓ agent/;
+
+test("a left click anywhere on the Profiles card gives the tab the keyboard; the click still does its own", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	assert.equal(tab.handleClick(3, "left", out[3].length + 2), false, "past the last chip: nothing to do");
+	assert.deepEqual(calls.focuses, ["prof"], "but the card has the keyboard");
+	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
+	assert.equal(calls.focuses.length, 2);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "the chip still selects");
+	calls.focused = undefined;
+	assert.equal(tab.handleClick(3, "right", 4), false);
+	assert.equal(tab.handleClick(rowIndex(rows(), /Plan usage/) + 2, "left", 4), false);
+	assert.equal(calls.focuses.length, 2, "not a right click, not the Plan usage card");
+});
+
+test("unfocused, the card is as today: no selected row, no hint, and keys are not the tab's", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { rows, draw } = await opened(env);
+	assert.equal(marked(rows), undefined);
+	assert.ok(!rows().some((row) => HINT.test(row)));
+	assert.ok(!draw().some((row) => row.includes(INVERSE)));
+});
+
+test("focused: the selected row is marked ▸ in reverse video, ↑↓ move it over the orchestrator and the agents, and a dim hint fits the card", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, draw, calls } = await opened(env);
+	calls.focused = "prof";
+	assert.match(marked(rows), /^│ ▸ orchestrator +claude-opus-5-5 \(high\)/, "the orchestrator first");
+	const raw = draw();
+	const at = rows().findIndex((row) => /^│ ▸ /.test(row));
+	assert.ok(raw[at].includes(INVERSE) && painted(raw[at], "accent", "▸"));
+	const hint = rows().findIndex((row) => HINT.test(row));
+	assert.ok(hint > rowIndex(rows(), /\[ Save \]/), `under the buttons:\n${rows().join("\n")}`);
+	assert.ok(raw[hint].includes(role("dim")));
+	assert.ok(rows().every((row) => [...row].length <= 59));
+	assert.equal(tab.handleKey(KEY.down), true);
+	assert.match(marked(rows), /▸ custom/);
+	for (let i = 0; i < 10; i++) tab.handleKey(KEY.down);
+	assert.match(marked(rows), /▸ review-risk/, "stops at the last agent");
+	tab.handleKey(KEY.up);
+	assert.match(marked(rows), /▸ jd-judge-a/);
+	for (let i = 0; i < 10; i++) tab.handleKey(KEY.up);
+	assert.match(marked(rows), /▸ orchestrator/, "stops at the orchestrator");
+	const wide = tab.render(100, 40).map(plain);
+	assert.ok(wide.some((row) => row.includes("←→ profile · ↑↓ agent · enter model · e effort · s save · u use · d default · esc")), wide.join("\n"));
+	assert.ok(tab.render(30, 40).map(plain).every((row) => [...row].length <= 30), "cut to a narrow column");
+});
+
+test("←→ show the previous or next profile, as a click on its chip, and stop at the ends", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	assert.equal(tab.handleKey(KEY.left), true);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "Balanced");
+	tab.handleKey(KEY.left);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "still Balanced: the first");
+	tab.handleKey(KEY.right);
+	tab.handleKey(KEY.right);
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "Low");
+	tab.handleKey(KEY.right);
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "still Low: the last");
+	assert.equal(bindings().get("s1"), undefined, "only shown, as a chip click");
+	assert.deepEqual(calls.sent, []);
+});
+
+test("←→ away from unsaved edits ask as a click does; s saves and switches, d discards, esc stays", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const startWrites = writes();
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleKey(KEY.left);
+	assert.ok(rows().some((row) => row === "│ Max has 1 unsaved change."));
+	assert.ok(rows().some((row) => /s save and switch · d discard · esc stay/.test(row)), "the hint follows the question");
+	assert.equal(tab.handleKey(KEY.escape), true, "esc answers Stay; the keyboard stays");
+	await settle();
+	assert.ok(!rows().some((row) => /unsaved change\./.test(row)));
+	assert.ok(rows().some((row) => /● 1 unsaved/.test(row)));
+	tab.handleKey(KEY.left);
+	tab.handleKey("d");
+	await settle();
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "Discard: on to Balanced");
+	assert.equal(writes(), startWrites);
+	tab.handleKey(KEY.right);
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleKey(KEY.right);
+	tab.handleKey("s");
+	await settle();
+	assert.equal(writes(), startWrites + 1, "Save and switch");
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "on to Low");
+});
+
+test("enter opens the model picker on the selected row; while it is open the keys are its own, and esc closes it first", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	tab.handleKey(KEY.down);
+	tab.handleKey(KEY.down);
+	assert.equal(tab.handleKey(KEY.enter), true);
+	await settle();
+	assert.equal(calls.custom.length, 1, "one pop-up");
+	const picker = calls.component();
+	assert.ok(pickerRows(picker).some((row) => row.includes("Model · gentle-ai-explore · Max")));
+	assert.ok(pickerRows(picker).some((row) => row.includes("● claude-bridge/claude-sonnet-5-5")));
+	assert.equal(tab.handleKey(KEY.escape), true, "esc goes to the picker");
+	assert.equal(calls.done.length, 1, "and closes it");
+	assert.equal(tab.handleKey(KEY.escape), false, "the next esc is the column's: it gives the keyboard back");
+	assert.equal(storeText(env), before);
+	// enter and the picker's own keys pick a model, staged on that row.
+	tab.handleKey(KEY.enter);
+	await settle();
+	const second = calls.component();
+	for (const char of "grok") assert.equal(tab.handleKey(char), true);
+	tab.handleKey(KEY.enter);
+	await settle();
+	assert.equal(calls.done.length, 2);
+	assert.ok(rows().some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), rows().join("\n"));
+	assert.ok(second.closed);
+	assert.equal(storeText(env), before, "staged, not written");
+});
+
+test("e steps the selected row's effort, as a click on it", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const saved = { ...thinkingSupport };
+	thinkingSupport.load = async () => {
+		throw new Error("no pi-ai");
+	};
+	try {
+		assert.equal(tab.handleKey("e"), true);
+		await settle();
+		assert.ok(rows().some((row) => /orchestrator +claude-opus-5-5 \(xhigh\)/.test(row)), rows().join("\n"));
+		tab.handleKey(KEY.down);
+		tab.handleKey(KEY.down);
+		tab.handleKey(KEY.down);
+		tab.handleKey("e");
+		await settle();
+		assert.ok(rows().some((row) => /jd-judge-a +claude-opus-5-5 \(xhigh\)/.test(row)));
+	} finally {
+		Object.assign(thinkingSupport, saved);
+	}
+	assert.ok(rows().some((row) => /● 2 unsaved/.test(row)));
+});
+
+test("s and ctrl+s save, u uses in this session, d makes default: the buttons' own actions", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const startWrites = writes();
+	assert.equal(tab.handleKey("s"), true);
+	await settle();
+	assert.ok(calls.notices.some(([text]) => text === "Nothing to save."));
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	assert.equal(tab.handleKey(KEY.ctrlS), true);
+	await settle();
+	assert.equal(writes(), startWrites + 1);
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	tab.handleKey(KEY.left);
+	assert.equal(tab.handleKey("u"), true);
+	await settle();
+	assert.equal(bindings().get("s1")?.name, "Balanced");
+	assert.equal(tab.handleKey("d"), true);
+	await settle();
+	assert.deepEqual(calls.sent, [["/gentle:profiles", { expandPromptTemplates: true }]]);
+	assert.equal(tab.handleKey("x"), false, "a key it has no use for");
+	bindings().delete("s1");
+});
+
+test("without gentle-pi's writers the keys do what the clicks do: /gentle:profiles", async () => {
+	const env = install();
+	const { tab, calls } = await opened(env);
+	calls.focused = "prof";
+	for (const key of [KEY.right, KEY.enter, "e", "s", "u", "d"]) assert.equal(tab.handleKey(key), true, JSON.stringify(key));
+	await settle();
+	assert.equal(calls.sent.length, 6);
+	assert.ok(calls.sent.every(([text]) => text === "/gentle:profiles"));
+	assert.equal(calls.custom.length, 0);
 });

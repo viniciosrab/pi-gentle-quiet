@@ -12,8 +12,9 @@ export const PICKER_MAX_WIDTH = 55;
 const MAX_CHOICES = 12;
 const CHROME = 5; // top, title, filter, footer, bottom
 const EDGE = { top: "▔", bottom: "▁", left: "▏", right: "▕", topLeft: "\u{1FB7D}", topRight: "\u{1FB7E}", bottomRight: "\u{1FB7F}", bottomLeft: "\u{1FB7C}" };
-const RAW = { pageUp: ["\x1b[5~"], pageDown: ["\x1b[6~"], backspace: ["\x7f", "\b"] };
-const pressed = (data, name) => {
+const RAW = { pageUp: ["\x1b[5~"], pageDown: ["\x1b[6~"], backspace: ["\x7f", "\b"], "ctrl+s": ["\x13"] };
+/** True when `data` is the key `name` (a Key name or a pi-tui key id such as "ctrl+s"), raw sequences included. */
+export const pressed = (data, name) => {
 	try {
 		if (matchesKey(data, Key?.[name] ?? name)) return true;
 	} catch {
@@ -193,16 +194,19 @@ class Picker {
 /**
  * Opens the picker over Pi: `choices` (strings) under `title`, `current` marked, placed under the clicked row
  * (`at`: the click's screenX/screenY and its x in the row, when known) and kept on screen. `onPick(choice)`
- * runs once a choice is picked; nothing runs when it closes otherwise. False when Pi has no overlay UI here.
+ * runs once a choice is picked; nothing runs when it closes otherwise. `onOpen(picker)` gets the pop-up once Pi
+ * builds it (its handleInput, its `closed`), for a caller that hands it keys. False when Pi has no overlay UI here.
  */
-export function openPicker(ctx, { title, choices, current, onPick, at }) {
+export function openPicker(ctx, { title, choices, current, onPick, at, onOpen }) {
 	try {
 		if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
 		let host;
 		const result = ctx.ui.custom(
 			(tui, theme, _keybindings, done) => {
 				host = tui;
-				return new Picker({ tui, theme, done, title, choices, current, onPick });
+				const picker = new Picker({ tui, theme, done, title, choices, current, onPick });
+				onOpen?.(picker);
+				return picker;
 			},
 			{
 				overlay: true,

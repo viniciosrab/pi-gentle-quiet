@@ -33,7 +33,13 @@ same; only how it is drawn changes.
   `[ Save ]`. `[ Use in this session ]` binds the profile to this session (◉), saving unsaved edits first; leaving a profile
   with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` saves and opens `/gentle:profiles`, where
   gentle-pi keeps its Make default; the Profiles title opens that editor too, and so does every click with Gentle Shell on or
-  a gentle-pi without these functions; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
+  a gentle-pi without these functions. PROF also takes the keyboard, with the keys of gentle-pi's screen: `alt+p` opens
+  PROF with the keyboard on it, and so does a click on the Profiles card (the click still does its own). The selected row
+  shows `▸` in reverse video and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
+  click does: `s` save and switch, `d` discard, `esc` stay), `↑` `↓` the orchestrator and the agents, `enter` its model
+  (the picker's own keys then; `esc` closes it first), `e` its effort, `s` or `ctrl+s` Save, `u` Use in this session,
+  `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF
+  has the keyboard no key reaches the editor; without the side column `alt+p` reaches Pi as before; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
   some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
