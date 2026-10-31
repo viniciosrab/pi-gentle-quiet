@@ -72,7 +72,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T27 | S14 (L27) | parent (pr-data.ts, tests) + worker mvvoludg-1-jdbd (pr.ts): PR tab as a stack with verdicts, accordion detail, Fix with agent, one GraphQL call | 354f8a8 |
 | T28 | S14 (L28) | worker mvvpcqjx-1-x7al: CI chip with the passed/total count on every PR row | 705cc6c |
 | T29 | S14 (L29) | worker mvvpi4f9-1-eiso: several PRs open at once; stack lines joined through an open PR's detail | 310f30d |
-| T32 | S14 (L31) | worker: PR blocks — bold title, indented muted detail, section labels, blank row after an open PR | |
+| T32 | S14 (L31) | worker mvvs28sd-1-ineu: PR blocks — bold title, indented muted detail, section labels, blank row after an open PR | c1cdafc |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
