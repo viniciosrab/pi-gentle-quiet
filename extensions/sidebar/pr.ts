@@ -1,28 +1,31 @@
 // The PR tab of gentle-quiet's side column (the contract is in ./tabs.ts): the repository's open pull requests
-// and CI in one card, read with gh (./pr-data.ts), read-only towards GitHub.
+// as their stack, each with the one thing it waits on, read with gh (./pr-data.ts), read-only towards GitHub.
 //
-// - The current branch's PR, when it is open, first with its detail:
-//   - "#17 <title>", its state (open, draft) and mergeability.
-//   - Checks: one row per check with its state flush right (✓ passed, ✗ failed, ⧗ running, – skipped),
-//     counted in the section title ("Checks 2/3").
-//   - Reviews: the review decision, the unresolved review comments and the latest one's author and first line.
-// - The other open PRs, one row each: "#21 <title>" and flush right its checks summary (✓ all passed, ✗ one
-//   failed, ⧗ one running, nothing without checks), "draft" before it for drafts. Under an "Open pull requests"
-//   title after the detail. No branch names and no ahead/behind counts.
+// - The title counts the open PRs ("⇄ Pull requests · 4"). Every PR is one row: "#19 <title>" and flush right
+//   its verdict, the most serious of ✗ conflicts, ✗ CI, ✗ changes, ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review,
+//   ⊘ blocked, ↓ behind, else ✓ ready. The current branch's PR is marked ◉ before it.
+// - The rows follow the stack: a PR whose base is another open PR's head sits under it ("├ #19", "└ #20").
+//   No branch names anywhere.
+// - One PR at a time is expanded (▾, the others ▸), the current branch's PR to begin with. Its detail sits
+//   under its row: mergeability, review and "no checks" on one row, each check with its state, each unresolved
+//   thread (severity, title, file:line; eight at most, then "+N more"), then the buttons.
+// - On the current branch's PR only, when Pi's editor is there, [ Fix N threads with agent ] and [ Fix CI ]
+//   (when a check failed) put the threads or the failed checks in the editor, after any draft already there;
+//   nothing is sent, the user reads it and presses Enter. [ Open ] opens the PR.
 // - No open PR: "No open pull requests". Without gh, signed out or outside GitHub: one dim row saying so.
 //
-// A click on a PR's rows opens it in the browser, on a check its details link, on the latest comment the
-// comment (xdg-open, detached). The column scrolls what does not fit. The PRs are read when the tab is shown,
-// every 30 s while it stays shown and when the branch changes (probed every 5 s); nothing runs while it is
-// hidden, and render() only draws what was read.
+// A click on a PR's row expands it and closes the other, or closes it when it was open; that choice stays
+// across refreshes and goes back to the current branch's PR when the branch or the folder changes. A click on
+// a check or a thread opens it in the browser (xdg-open, detached). The column scrolls what does not fit. The
+// PRs are read when the tab is shown, every 30 s while it stays shown and when the branch changes (probed
+// every 5 s); nothing runs while it is hidden, and render() only draws what was read.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
-import { loadPr, prDeps, prTiming } from "./pr-data.ts";
+import { ciPrompt, loadPr, prDeps, prTiming, stackOf, threadsPrompt, verdictOf } from "./pr-data.ts";
 
 const TITLE = "⇄ Pull requests";
-const STATES = { open: ["success", "● open"], draft: ["dim", "◌ draft"], merged: ["accent", "● merged"], closed: ["error", "● closed"] };
 const MERGES = {
 	clean: ["success", "✓ clean"],
 	conflicts: ["error", "✗ conflicts"],
@@ -32,26 +35,37 @@ const MERGES = {
 	checking: ["dim", "… checking"],
 };
 const CHECKS = { passed: ["success", "✓ passed"], failed: ["error", "✗ failed"], running: ["warning", "⧗ running"], skipped: ["dim", "– skipped"] };
-const SUMMARY = { passed: ["success", "✓"], failed: ["error", "✗"], running: ["warning", "⧗"] };
 const REVIEWS = { approved: ["success", "✓ approved"], "changes requested": ["error", "✗ changes requested"], "review required": ["warning", "⧗ review required"] };
+const VERDICTS = {
+	conflicts: ["error", "✗ conflicts"],
+	"ci-failed": ["error", "✗ CI"],
+	changes: ["error", "✗ changes"],
+	"ci-running": ["warning", "⧗ CI"],
+	draft: ["dim", "◌ draft"],
+	review: ["warning", "⧗ review"],
+	blocked: ["warning", "⊘ blocked"],
+	behind: ["warning", "↓ behind"],
+	ready: ["success", "✓ ready"],
+};
+const MAX_THREADS = 8;
 
 export function createTab(host: SidebarHost): SidebarTab {
 	const state = {
 		cwd: undefined,
 		result: undefined, // the last read (pr-data's loadPr), kept while the next one runs
+		branch: undefined, // the branch of the last read
+		expanded: undefined, // the expanded PR's number; null: none; undefined: the current branch's PR
 		loading: undefined,
 		queued: false,
 		loadedAt: undefined,
 		renderedAt: 0,
 		timer: undefined,
 		probing: false,
-		hits: new Map(), // line -> url
+		hits: new Map(), // line -> { toggle } | { url } | { spans }
 		disposed: false,
 	};
 
 	const c = (role, text) => host.fg(role, text);
-	const title = (text) => c("toolTitle", host.bold(text));
-	const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 	// One read at a time; a request while one runs reads again right after it.
 	const refresh = () => {
@@ -60,6 +74,8 @@ export function createTab(host: SidebarHost): SidebarTab {
 		if (cwd !== state.cwd) {
 			state.cwd = cwd;
 			state.result = undefined;
+			state.branch = undefined;
+			state.expanded = undefined;
 		}
 		if (!cwd) return;
 		if (state.loading) {
@@ -72,7 +88,11 @@ export function createTab(host: SidebarHost): SidebarTab {
 			.then((result) => {
 				state.loading = undefined;
 				if (state.disposed) return;
-				if (cwd === state.cwd) state.result = result;
+				if (cwd === state.cwd) {
+					if (state.result && (result.branch ?? "") !== (state.branch ?? "")) state.expanded = undefined;
+					state.result = result;
+					state.branch = result.branch;
+				}
 				host.requestRender(); // also tells the timer the tab is still drawn
 				if (state.queued) {
 					state.queued = false;
@@ -118,36 +138,108 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return `${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut) - visibleWidth(right)))}${right}`;
 	};
 	const badge = ([role, text]) => c(role, text);
+	// `head` then the plain `text` painted in `role`, the text cut first so the head keeps its colors.
+	const tail = (head, role, text, right, inner) => {
+		const room = Math.max(0, inner - visibleWidth(head) - (right ? visibleWidth(right) + 1 : 0));
+		return `${head}${c(role, visibleWidth(text) > room ? truncateToWidth(text, room, "…") : text)}`;
+	};
 
-	const prRows = ({ pr, threads }) => {
+	// The PR whose detail is shown: the one clicked open, else (or when it is gone) the current branch's PR.
+	const expandedOf = ({ prs, current }) => {
+		if (state.expanded === null) return undefined;
+		if (state.expanded !== undefined && prs.some((pr) => pr.number === state.expanded)) return state.expanded;
+		return current;
+	};
+
+	const verdictBadge = (pr) => {
+		const verdict = verdictOf(pr);
+		if (verdict.kind !== "threads") return badge(VERDICTS[verdict.kind]);
+		if (!verdict.count) return c("warning", "⚠ threads?");
+		const many = verdict.count !== 1 || verdict.partial;
+		return c("warning", `⚠ ${verdict.count}${verdict.partial ? "+" : ""} ${many ? "threads" : "thread"}`);
+	};
+
+	// Pi's editor, when this session has one an extension may fill.
+	const editorUi = () => {
+		const ui = host.ctx()?.ui;
+		return typeof ui?.setEditorText === "function" ? ui : undefined;
+	};
+
+	// The prompt goes in the editor after a draft already there; nothing is sent.
+	const fill = (prompt) => {
+		const ui = editorUi();
+		if (!ui) return false;
+		const draft = ui.getEditorText?.();
+		ui.setEditorText(typeof draft === "string" && draft.trim() ? `${draft.trimEnd()}\n\n${prompt}` : prompt);
+		return true;
+	};
+
+	// Buttons in accent two apart, a new row when the next one does not fit `inner`.
+	const buttonBar = (buttons, inner) => {
 		const rows = [];
-		rows.push({ left: `${c("accent", `#${pr.number}`)} ${c("text", pr.title)}`, url: pr.url });
+		let row;
+		for (const { label, action } of buttons) {
+			const text = `[ ${label} ]`;
+			const len = visibleWidth(text);
+			if (!row || row.width + 2 + len > inner) rows.push((row = { parts: [], spans: [], width: 0 }));
+			const startX = row.width ? row.width + 2 : 0;
+			row.parts.push(c("accent", text));
+			row.spans.push({ startX, endX: startX + len, action });
+			row.width = startX + len;
+		}
+		return rows.map(({ parts, spans }) => ({ text: parts.join("  "), spans }));
+	};
+
+	// The expanded PR's rows under its own, each led by `indent`.
+	const detailRows = (pr, isCurrent, indent, inner) => {
+		const lead = visibleWidth(indent);
+		const room = Math.max(1, inner - lead);
+		const rows = [];
+		const push = (row) => rows.push({ ...row, left: `${c("dim", indent)}${spread(row.left, row.right ?? "", room)}`, right: undefined });
+
 		const merge = pr.merge && MERGES[pr.merge];
-		rows.push({ left: [badge(STATES[pr.state] ?? STATES.open), merge && badge(merge)].filter(Boolean).join(c("dim", " · ")), url: pr.url });
+		const facts = [pr.draft && badge(VERDICTS.draft), merge && badge(merge), pr.review ? badge(REVIEWS[pr.review]) : c("dim", "no review yet"), !pr.checks.length && c("dim", "no checks")];
+		push({ left: facts.filter(Boolean).join(c("dim", " · ")) });
 
-		const checks = pr.checks;
-		const counted = checks.filter((check) => check.state !== "skipped");
-		const passed = counted.filter((check) => check.state === "passed").length;
-		const role = checks.some((check) => check.state === "failed") ? "error" : checks.some((check) => check.state === "running") ? "warning" : "success";
-		rows.push({ left: "" }, { left: checks.length ? `${title("Checks")} ${c(role, `${passed}/${counted.length}`)}` : title("Checks") });
-		if (!checks.length) rows.push({ left: c("dim", "No checks") });
-		for (const check of checks) rows.push({ left: c("text", check.name), right: badge(CHECKS[check.state] ?? CHECKS.running), url: check.url });
+		for (const check of pr.checks) {
+			const right = badge(CHECKS[check.state] ?? CHECKS.running);
+			push({ left: tail("", "text", check.name, right, room), right, hit: check.url && { url: check.url } });
+		}
 
-		rows.push({ left: "" }, { left: title("Reviews") });
-		rows.push({ left: pr.review ? badge(REVIEWS[pr.review]) : c("dim", "no review decision") });
-		const latest = threads ? threads.latest : pr.comments.latest;
-		if (threads) rows.push({ left: threads.unresolved ? c("warning", `● ${plural(threads.unresolved, "unresolved comment", "unresolved comments")}`) : c("success", "✓ no unresolved comments") });
-		else rows.push({ left: `${c("muted", plural(pr.comments.count, "comment", "comments"))} ${c("dim", "· review threads unavailable")}` });
-		if (latest) rows.push({ left: `${c("accent", latest.author)}${c("dim", ":")} ${c("text", latest.line || "…")}`, url: latest.url });
+		for (const thread of pr.threads.slice(0, MAX_THREADS)) {
+			const severity = thread.severity && c(/^P[01]$/.test(thread.severity) ? "error" : "warning", thread.severity);
+			const where = thread.path ? `${thread.path.split("/").pop()}${thread.line ? `:${thread.line}` : ""}` : "";
+			const right = where && c("dim", where);
+			const left = tail(`${[c("warning", "●"), severity].filter(Boolean).join(" ")} `, "text", thread.title || "…", right, room);
+			push({ left, right, hit: thread.url && { url: thread.url } });
+		}
+		if (pr.threads.length > MAX_THREADS) push({ left: c("dim", `+${pr.threads.length - MAX_THREADS} more`), hit: { url: pr.url } });
+
+		// The agent's buttons, then [ Open ] on its own row.
+		const fixes = [];
+		if (isCurrent && editorUi()) {
+			const count = pr.threads.length;
+			const many = count !== 1 || pr.threadsPartial;
+			if (count) fixes.push({ label: `Fix ${count}${pr.threadsPartial ? "+" : ""} ${many ? "threads" : "thread"} with agent`, action: () => fill(threadsPrompt(pr)) });
+			if (pr.checks.some((check) => check.state === "failed")) fixes.push({ label: "Fix CI", action: () => fill(ciPrompt(pr)) });
+		}
+		const bars = [...buttonBar(fixes, room), ...buttonBar([{ label: "Open", action: () => prDeps.open(pr.url) }], room)];
+		for (const bar of bars) {
+			rows.push({ left: `${c("dim", indent)}${bar.text}`, hit: { spans: bar.spans.map((span) => ({ ...span, startX: span.startX + lead, endX: span.endX + lead })) } });
+		}
 		return rows;
 	};
 
-	const listRows = ({ current, open }) => {
-		const rows = current ? prRows(current) : [];
-		if (current && open.length) rows.push({ left: "" }, { left: `${title("Open pull requests")} ${c("muted", String(open.length))}` });
-		for (const item of open) {
-			const right = [item.draft && c("dim", "draft"), item.checks && badge(SUMMARY[item.checks])].filter(Boolean).join(" ");
-			rows.push({ left: `${c("accent", `#${item.number}`)} ${c("text", item.title)}`, right, url: item.url });
+	const listRows = (result, inner) => {
+		const open = expandedOf(result);
+		const rows = [];
+		for (const { pr, prefix, cont } of stackOf(result.prs, result.owner)) {
+			const isCurrent = pr.number === result.current;
+			const isOpen = pr.number === open;
+			const right = `${isCurrent ? `${c("accent", "◉")} ` : ""}${verdictBadge(pr)}`;
+			const left = tail(`${c("dim", `${prefix}${isOpen ? "▾" : "▸"}`)} ${c("accent", `#${pr.number}`)} `, "text", pr.title, right, inner);
+			rows.push({ left, right, hit: { toggle: pr.number } });
+			if (isOpen) rows.push(...detailRows(pr, isCurrent, `${cont}  `, inner));
 		}
 		if (!rows.length) rows.push({ left: c("muted", "No open pull requests") });
 		return rows;
@@ -169,20 +261,35 @@ export function createTab(host: SidebarHost): SidebarTab {
 			if (!state.cwd) rows = [{ left: c("dim", "No working directory") }];
 			else if (!result) rows = [{ left: c("dim", "refreshing…") }];
 			else if (result.kind === "problem") rows = [{ left: c("dim", result.message) }];
-			else rows = listRows(result);
+			else rows = listRows(result, inner);
+			const title = result?.kind === "list" && result.prs.length ? `${TITLE} · ${result.prs.length}` : TITLE;
 			const offset = (host.box([], width).length ? 1 : 0) + 2; // the outline's top, the title and its blank row
+			const left = Math.ceil((width - host.inner(width)) / 2); // the outline's columns before a row
 			state.hits = new Map();
 			rows.forEach((row, index) => {
-				if (row.url) state.hits.set(offset + index, row.url);
+				if (!row.hit) return;
+				const hit = row.hit.spans ? { spans: row.hit.spans.map((span) => ({ ...span, startX: span.startX + left, endX: span.endX + left })) } : row.hit;
+				state.hits.set(offset + index, hit);
 			});
-			return host.card(TITLE, rows.map((row) => spread(row.left, row.right ?? "", inner)), width);
+			return host.card(title, rows.map((row) => spread(row.left, row.right ?? "", inner)), width);
 		},
 
-		handleClick(line, button) {
+		handleClick(line, button, x) {
 			if (button !== "left") return false;
-			const url = state.hits.get(line);
-			if (!url) return false;
-			prDeps.open(url);
+			const hit = state.hits.get(line);
+			if (!hit) return false;
+			if (hit.toggle !== undefined) {
+				const result = state.result;
+				state.expanded = result?.kind === "list" && expandedOf(result) === hit.toggle ? null : hit.toggle;
+				return true;
+			}
+			if (hit.url) {
+				prDeps.open(hit.url);
+				return true;
+			}
+			const span = hit.spans?.find((item) => x >= item.startX && x < item.endX);
+			if (!span) return false;
+			span.action();
 			return true;
 		},
 

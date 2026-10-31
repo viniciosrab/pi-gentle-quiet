@@ -1,13 +1,15 @@
-// The PR tab's data: the repository's open pull requests from `gh pr list`, and when the current branch has one
-// of them its detail from `gh pr view --json ...` with its unresolved review threads from `gh api graphql`.
-// Every process call is asynchronous with a timeout; a failure comes back as a short problem for the card,
-// never a throw. The tab only reads from GitHub. Parsers are pure functions.
+// The PR tab's data: every open pull request of the repository from one `gh api graphql` call, with its base
+// and head, mergeability, review decision, checks and unresolved review threads; the current branch's PR among
+// them (matched by branch and head repository), its stack, its verdict and the prompts that hand its threads or
+// failed checks to the agent. The process call is asynchronous with a timeout; a failure comes back as a short
+// problem for the card, never a throw. The tab only reads from GitHub. Parsers are pure functions.
+// gh resolves {owner} and {repo} from the folder's remotes; an Enterprise host is chosen with GH_HOST.
 // @ts-nocheck
 
 import { execFile, spawn } from "node:child_process";
 import type { SidebarHost } from "./tabs.ts";
 
-/** How often the PR is read again while shown, how often the branch is probed, and the gh timeout (ms). */
+/** How often the PRs are read again while shown, how often the branch is probed, and the gh timeout (ms). */
 export const prTiming = { refreshMs: 30_000, probeMs: 5000, timeoutMs: 10_000 };
 
 /** What the tab runs with; tests swap these for stand-ins. */
@@ -20,13 +22,17 @@ export const prDeps = {
 	open: (url) => openUrl(url),
 };
 
-const LIST_FIELDS = "number,title,url,isDraft,headRefName,author,statusCheckRollup";
-const LIST_LIMIT = "30";
+const LIMIT = 30;
+const PR_FIELDS =
+	"number title url isDraft baseRefName headRefName headRepositoryOwner{login} mergeable mergeStateStatus reviewDecision " +
+	"commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}} " +
+	"reviewThreads(last:100){totalCount nodes{isResolved path line comments(first:1){nodes{author{login} body url}}}}";
 
-const FIELDS = "number,title,state,isDraft,mergeable,mergeStateStatus,url,headRefName,baseRefName,reviewDecision,statusCheckRollup,comments,reviews,latestReviews";
-
-const THREADS_QUERY =
-	"query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(last:100){nodes{isResolved comments(last:1){nodes{author{login} body url createdAt}}}}}}}";
+// The newest open PRs, and apart ("mine") the open PRs of the current branch, so its PR shows even past LIMIT.
+const QUERY =
+	`query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){owner{login} ` +
+	`pullRequests(states:OPEN,first:${LIMIT},orderBy:{field:CREATED_AT,direction:DESC}){nodes{...pr}} ` +
+	`mine:pullRequests(states:OPEN,headRefName:$branch,first:10){nodes{...pr}}}} fragment pr on PullRequest{${PR_FIELDS}}`;
 
 /** Opens a web link in the browser with xdg-open, detached; false when it cannot start. */
 export function openUrl(url) {
@@ -54,7 +60,7 @@ function gh(args, cwd) {
 	});
 }
 
-/** Why a `gh pr` call failed, for the card: "none" when the branch has no PR. */
+/** Why a gh call failed, for the card: "none" when the branch has no PR. */
 export function ghProblem(error, stderr = "") {
 	const text = `${stderr}\n${error?.message ?? ""}`;
 	if (error?.code === "ENOENT") return "gh is not installed";
@@ -70,7 +76,7 @@ export function ghProblem(error, stderr = "") {
 const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
 const SKIPPED = new Set(["SKIPPED", "NEUTRAL", "STALE"]);
 
-/** statusCheckRollup as { name, state: passed | failed | running | skipped, url }. */
+/** A commit's check runs and status contexts as { name, state: passed | failed | running | skipped, url }. */
 export function parseChecks(rollup = []) {
 	return (Array.isArray(rollup) ? rollup : []).map((item) => {
 		const name = item?.name || item?.context || "check";
@@ -97,57 +103,13 @@ export function checksSummary(checks = []) {
 	return "passed";
 }
 
-/** `gh pr list --json` as rows: { number, title, url, draft, head, author, checks }. */
-export function parseList(json) {
-	return (Array.isArray(json) ? json : []).map((item) => ({
-		number: item?.number,
-		title: String(item?.title ?? ""),
-		url: item?.url,
-		draft: Boolean(item?.isDraft),
-		head: item?.headRefName ?? "",
-		author: item?.author?.login ?? "",
-		checks: checksSummary(parseChecks(item?.statusCheckRollup)),
-	}));
-}
-
 const MERGE = { CLEAN: "clean", HAS_HOOKS: "clean", DIRTY: "conflicts", BLOCKED: "blocked", UNSTABLE: "unstable", BEHIND: "behind" };
 const REVIEW = { APPROVED: "approved", CHANGES_REQUESTED: "changes requested", REVIEW_REQUIRED: "review required" };
 
-/** `gh pr view --json` as the card needs it. */
-export function parsePr(json) {
-	const raw = String(json?.state ?? "").toUpperCase();
-	const state = raw === "MERGED" ? "merged" : raw === "CLOSED" ? "closed" : json?.isDraft ? "draft" : "open";
-	const live = state === "open" || state === "draft";
-	let merge;
-	if (live) merge = json?.mergeable === "CONFLICTING" ? "conflicts" : (MERGE[json?.mergeStateStatus] ?? (json?.mergeStateStatus === "DRAFT" ? undefined : "checking"));
-	const comments = [...(json?.comments ?? []), ...(json?.reviews ?? []).filter((review) => review?.body)];
-	const latest = comments.reduce((best, item) => (!best || String(item?.createdAt ?? item?.submittedAt ?? "") > String(best?.createdAt ?? best?.submittedAt ?? "") ? item : best), undefined);
-	return {
-		number: json?.number,
-		title: String(json?.title ?? ""),
-		state,
-		merge,
-		url: json?.url,
-		head: json?.headRefName ?? "",
-		base: json?.baseRefName ?? "",
-		review: REVIEW[json?.reviewDecision],
-		checks: parseChecks(json?.statusCheckRollup),
-		comments: { count: comments.length, latest: latest && { author: latest.author?.login ?? "?", line: firstLine(latest.body), url: latest.url } },
-	};
-}
-
-/** The review threads from `gh api graphql`: how many are unresolved and the latest unresolved comment. */
-export function parseThreads(json) {
-	const nodes = json?.data?.repository?.pullRequest?.reviewThreads?.nodes;
-	if (!Array.isArray(nodes)) return undefined;
-	const open = nodes.filter((node) => node && !node.isResolved).map((node) => node.comments?.nodes?.at(-1)).filter(Boolean);
-	const latest = open.reduce((best, item) => (!best || String(item.createdAt ?? "") > String(best.createdAt ?? "") ? item : best), undefined);
-	return { unresolved: open.length, latest: latest && { author: latest.author?.login ?? "?", line: firstLine(latest.body), url: latest.url } };
-}
-
-/** The first line of a comment with its HTML and Markdown markup taken out. */
-export function firstLine(body = "") {
-	const text = String(body ?? "")
+// A comment's text without HTML comments, tags and the common entities.
+const unhtml = (body = "") =>
+	String(body ?? "")
+		.replace(/\r/g, "")
 		.replace(/<!--[\s\S]*?-->/g, "")
 		.replace(/<[^>]*>/g, "")
 		.replace(/&nbsp;/g, " ")
@@ -156,7 +118,10 @@ export function firstLine(body = "") {
 		.replace(/&quot;/g, '"')
 		.replace(/&#39;/g, "'")
 		.replace(/&amp;/g, "&");
-	const line = text.split(/\r?\n/).map((row) => row.trim()).find(Boolean) ?? "";
+
+/** The first line of a comment with its HTML and Markdown markup taken out. */
+export function firstLine(body = "") {
+	const line = unhtml(body).split("\n").map((row) => row.trim()).find(Boolean) ?? "";
 	return line
 		.replace(/^#+\s*/, "")
 		.replace(/^>\s*/, "")
@@ -166,17 +131,168 @@ export function firstLine(body = "") {
 		.trim();
 }
 
-/** The GitHub host, owner, repository and number in a PR's URL. */
-const repoOf = (url) => {
-	const m = /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(String(url ?? ""));
-	return m ? { host: m[1], owner: m[2], name: m[3], number: m[4] } : undefined;
-};
+const BODY_LIMIT = 1500;
+
+// The comment after its first line, for the agent: markup kept, HTML out, at most three lines apart.
+function restOf(body = "") {
+	const lines = unhtml(body).split("\n");
+	const first = lines.findIndex((line) => line.trim());
+	const rest = (first < 0 ? "" : lines.slice(first + 1).join("\n")).replace(/\n{3,}/g, "\n\n").trim();
+	return rest.length > BODY_LIMIT ? `${rest.slice(0, BODY_LIMIT).trimEnd()}…` : rest;
+}
+
+// A reviewer's severity badge ("P1"), as Greptile puts it at the head of a comment.
+const severityOf = (body = "") => /<img[^>]*\balt="(P\d)"/i.exec(String(body ?? ""))?.[1]?.toUpperCase();
+
+function parsePull(item) {
+	const draft = Boolean(item?.isDraft);
+	const status = item?.mergeStateStatus;
+	const merge = item?.mergeable === "CONFLICTING" ? "conflicts" : (MERGE[status] ?? (status === "DRAFT" ? undefined : "checking"));
+	const contexts = item?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes;
+	const nodes = Array.isArray(item?.reviewThreads?.nodes) ? item.reviewThreads.nodes : [];
+	const threads = nodes
+		.filter((node) => node && !node.isResolved)
+		.map((node) => {
+			const comment = node.comments?.nodes?.[0];
+			return {
+				path: node.path ?? "",
+				line: node.line ?? undefined,
+				author: comment?.author?.login ?? "?",
+				title: firstLine(comment?.body),
+				severity: severityOf(comment?.body),
+				body: restOf(comment?.body),
+				url: comment?.url,
+			};
+		});
+	return {
+		number: item?.number,
+		title: String(item?.title ?? ""),
+		url: item?.url,
+		draft,
+		base: item?.baseRefName ?? "",
+		head: item?.headRefName ?? "",
+		headOwner: item?.headRepositoryOwner?.login,
+		merge,
+		review: REVIEW[item?.reviewDecision],
+		checks: parseChecks(contexts),
+		threads,
+		threadsPartial: Number(item?.reviewThreads?.totalCount ?? nodes.length) > nodes.length,
+	};
+}
+
+/**
+ * The GraphQL answer as { owner, prs } (the repository's owner and its open PRs, newest first, then the current
+ * branch's PRs the first page left out), or { problem } when GitHub answered an error or nothing readable.
+ * `branch` keeps only the "mine" PRs of that branch; without it they are all kept.
+ */
+export function parsePulls(json, branch = undefined) {
+	const repo = json?.data?.repository;
+	if (!repo) return { owner: undefined, prs: [], problem: json?.errors?.[0]?.message || "unreadable answer" };
+	const prs = (repo.pullRequests?.nodes ?? []).filter(Boolean).map(parsePull);
+	for (const item of repo.mine?.nodes ?? []) {
+		if (!item || (branch !== undefined && item.headRefName !== branch)) continue;
+		if (!prs.some((pr) => pr.number === item.number)) prs.push(parsePull(item));
+	}
+	return { owner: repo.owner?.login, prs };
+}
+
+// The owner in a remote's URL: git@github.com:owner/repo.git, https://github.com/owner/repo, ssh://…/owner/repo.
+const ownerOfUrl = (url) => /[:/]([^/:]+)\/[^/]+?(?:\.git)?\/?$/.exec(String(url ?? "").trim())?.[1];
+
+/**
+ * The open PR of `branch`: its head is that branch in the repository the branch is pushed to (`remoteUrl`, the
+ * upstream remote's URL), else in the repository itself, so a fork's PR from a same-named branch is not taken.
+ */
+export function currentPr(prs, branch, owner, remoteUrl = undefined) {
+	if (!branch) return undefined;
+	const want = ownerOfUrl(remoteUrl) ?? owner;
+	return prs.find((pr) => pr.head === branch && (pr.headOwner ?? owner) === want);
+}
+
+/**
+ * The PRs as their stack, in drawing order: a PR whose base is another open PR's head (a branch of this
+ * repository) under it, siblings in the list's order. Each entry: { pr, prefix, cont, depth }, where prefix is
+ * the tree's lead before the row ("", "├ ", "│ └ ") and cont the lead of the rows under it.
+ */
+export function stackOf(prs, owner) {
+	const parent = new Map();
+	for (const pr of prs) {
+		const base = prs.find((other) => other !== pr && other.head === pr.base && (other.headOwner ?? owner) === owner);
+		if (base) parent.set(pr, base);
+	}
+	const children = new Map();
+	for (const pr of prs) if (parent.has(pr)) children.set(parent.get(pr), [...(children.get(parent.get(pr)) ?? []), pr]);
+	const out = [];
+	const seen = new Set();
+	const walk = (pr, lead, last, depth) => {
+		if (seen.has(pr)) return;
+		seen.add(pr);
+		const prefix = depth ? `${lead}${last ? "└ " : "├ "}` : "";
+		const cont = depth ? `${lead}${last ? "  " : "│ "}` : "";
+		out.push({ pr, prefix, cont, depth });
+		const kids = (children.get(pr) ?? []).filter((kid) => !seen.has(kid));
+		kids.forEach((kid, index) => walk(kid, cont, index === kids.length - 1, depth + 1));
+	};
+	for (const pr of prs) if (!parent.has(pr)) walk(pr, "", true, 0);
+	for (const pr of prs) walk(pr, "", true, 0); // bases that loop: each PR still once
+	return out;
+}
+
+/**
+ * What a PR waits on, the most serious first: conflicts, ci-failed, changes, threads ({ count, partial }),
+ * ci-running, draft, review, blocked, behind, else ready. Threads not all read never count as none.
+ */
+export function verdictOf(pr) {
+	const states = pr.checks.map((check) => check.state);
+	if (pr.merge === "conflicts") return { kind: "conflicts" };
+	if (states.includes("failed")) return { kind: "ci-failed" };
+	if (pr.review === "changes requested") return { kind: "changes" };
+	if (pr.threads.length || pr.threadsPartial) return { kind: "threads", count: pr.threads.length, partial: pr.threadsPartial };
+	if (states.includes("running")) return { kind: "ci-running" };
+	if (pr.draft) return { kind: "draft" };
+	if (pr.review === "review required") return { kind: "review" };
+	if (pr.merge === "blocked") return { kind: "blocked" };
+	if (pr.merge === "behind") return { kind: "behind" };
+	return { kind: "ready" };
+}
+
+/** The editor text that hands a PR's unresolved review threads to the agent. */
+export function threadsPrompt(pr) {
+	const items = pr.threads.map((thread, index) => {
+		const where = thread.line ? `${thread.path}:${thread.line}` : thread.path;
+		const who = thread.severity ? `${thread.author} (${thread.severity})` : thread.author;
+		return [`${index + 1}. ${where}, ${who}: ${thread.url ?? pr.url}`, thread.title, ...(thread.body ? ["", thread.body] : [])].join("\n");
+	});
+	const partial = pr.threadsPartial ? ["Only the newest review threads were read: check the PR for older ones too.", ""] : [];
+	return [`Address the unresolved review threads on PR #${pr.number} (${pr.url}):`, "", ...items.flatMap((item) => [item, ""]), ...partial, "Fix each one in this branch, or tell me why it should stay as it is."].join("\n");
+}
+
+/** The editor text that hands a PR's failed checks to the agent. */
+export function ciPrompt(pr) {
+	const failed = pr.checks.filter((check) => check.state === "failed");
+	return [
+		`These checks failed on PR #${pr.number} (${pr.url}):`,
+		...failed.map((check) => `- ${check.name}${check.url ? `: ${check.url}` : ""}`),
+		"",
+		`Find out why (gh pr checks ${pr.number}, gh run view --log-failed) and fix it in this branch.`,
+	].join("\n");
+}
+
+// The URL of the remote the current branch is pushed to, when it has an upstream.
+async function upstreamUrl(host, cwd) {
+	try {
+		const upstream = (await host.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd))?.trim();
+		if (!upstream || !upstream.includes("/")) return undefined;
+		return (await host.git(["remote", "get-url", upstream.split("/")[0]], cwd))?.trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * Everything the tab shows for `cwd`, read once:
- *   { kind: "list", branch, current, open }   current: { pr, threads } for the branch's open PR, else undefined
- *                                             (threads undefined when graphql failed); open: the other open PRs
- *   { kind: "problem", branch, message }      no gh, signed out, not GitHub, ...
+ *   { kind: "list", branch, owner, prs, current }   current: the number of the branch's open PR, else undefined
+ *   { kind: "problem", branch, message }            no gh, signed out, not GitHub, ...
  */
 export async function loadPr(host: SidebarHost, cwd) {
 	let branch = "";
@@ -185,44 +301,19 @@ export async function loadPr(host: SidebarHost, cwd) {
 	} catch {
 		branch = "";
 	}
-	const list = await gh(["pr", "list", "--state", "open", "--json", LIST_FIELDS, "--limit", LIST_LIMIT], cwd);
-	if (!list.ok) {
-		const problem = ghProblem(list.error, list.stderr);
-		return problem === "none" ? { kind: "list", branch, current: undefined, open: [] } : { kind: "problem", branch, message: problem };
+	const remoteUrl = branch ? await upstreamUrl(host, cwd) : undefined;
+	const answer = await gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", `branch=${branch}`, "-f", `query=${QUERY}`], cwd);
+	if (!answer.ok) {
+		const problem = ghProblem(answer.error, answer.stderr);
+		return { kind: "problem", branch, message: problem === "none" ? "No open pull requests" : problem };
 	}
-	let rows;
+	let json;
 	try {
-		rows = parseList(JSON.parse(list.stdout));
+		json = JSON.parse(answer.stdout);
 	} catch {
 		return { kind: "problem", branch, message: "gh: unreadable answer" };
 	}
-	const mine = branch ? rows.find((row) => row.head === branch) : undefined;
-	const current = mine && (await loadDetail(mine.number, cwd));
-	return { kind: "list", branch, current, open: current ? rows.filter((row) => row !== mine) : rows };
-}
-
-/** The detail of open PR `number`: { pr, threads }, or undefined when `gh pr view` fails. */
-async function loadDetail(number, cwd) {
-	const view = await gh(["pr", "view", String(number), "--json", FIELDS], cwd);
-	if (!view.ok) return undefined;
-	let pr;
-	try {
-		pr = parsePr(JSON.parse(view.stdout));
-	} catch {
-		return undefined;
-	}
-	let threads;
-	const repo = repoOf(pr.url);
-	if (repo) {
-		const args = ["api", "graphql", ...(repo.host === "github.com" ? [] : ["--hostname", repo.host]), "-F", `owner=${repo.owner}`, "-F", `name=${repo.name}`, "-F", `number=${repo.number}`, "-f", `query=${THREADS_QUERY}`];
-		const answer = await gh(args, cwd);
-		if (answer.ok) {
-			try {
-				threads = parseThreads(JSON.parse(answer.stdout));
-			} catch {
-				threads = undefined;
-			}
-		}
-	}
-	return { pr, threads };
+	const { owner, prs, problem } = parsePulls(json, branch);
+	if (problem) return { kind: "problem", branch, message: `gh: ${problem}` };
+	return { kind: "list", branch, owner, prs, current: currentPr(prs, branch, owner, remoteUrl)?.number };
 }

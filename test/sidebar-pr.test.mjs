@@ -3,77 +3,89 @@ import { test } from "node:test";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
 import { createTab } from "../extensions/sidebar/pr.ts";
-import { checksSummary, firstLine, ghProblem, openUrl, parseChecks, parseList, parsePr, parseThreads, prDeps, prTiming } from "../extensions/sidebar/pr-data.ts";
+import {
+	checksSummary,
+	ciPrompt,
+	currentPr,
+	firstLine,
+	ghProblem,
+	openUrl,
+	parseChecks,
+	parsePulls,
+	prDeps,
+	prTiming,
+	stackOf,
+	threadsPrompt,
+	verdictOf,
+} from "../extensions/sidebar/pr-data.ts";
 
-const PR = {
-	number: 17,
-	title: "feat(sidebar): tabs in the side column (MAIN, GIT, PROF, MEM, TREE) and a TREE file preview",
-	state: "OPEN",
-	isDraft: false,
-	mergeable: "MERGEABLE",
-	mergeStateStatus: "UNSTABLE",
-	url: "https://github.com/o/r/pull/17",
-	headRefName: "feat/x",
-	baseRefName: "main",
-	reviewDecision: "CHANGES_REQUESTED",
-	statusCheckRollup: [
-		{ __typename: "CheckRun", name: "CI", status: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "https://ci/1" },
-		{ __typename: "CheckRun", name: "Greptile Review", status: "IN_PROGRESS", conclusion: "", detailsUrl: "https://greptile/17" },
-		{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "FAILURE", detailsUrl: "https://ci/lint" },
-		{ __typename: "StatusContext", context: "deploy", state: "SUCCESS", targetUrl: "https://deploy/17" },
-		{ __typename: "CheckRun", name: "docs", status: "COMPLETED", conclusion: "SKIPPED", detailsUrl: "https://ci/docs" },
-	],
-	comments: [],
-	reviews: [],
-	latestReviews: [],
-};
-
-const THREADS = {
-	data: {
-		repository: {
-			pullRequest: {
-				reviewThreads: {
-					nodes: [
-						{ isResolved: true, comments: { nodes: [{ author: { login: "bob" }, body: "done", url: "https://github.com/o/r/pull/17#r0", createdAt: "2026-10-30T09:00:00Z" }] } },
-						{
-							isResolved: false,
-							comments: { nodes: [{ author: { login: "greptile-apps" }, body: '<a href="#"><img alt="P1" src="x.svg"></a> **Tab-heavy previews can freeze Pi**\n\nMore text', url: "https://github.com/o/r/pull/17#r1", createdAt: "2026-10-30T08:00:00Z" }] },
-						},
-						{ isResolved: false, comments: { nodes: [{ author: { login: "alice" }, body: "older one", url: "https://github.com/o/r/pull/17#r2", createdAt: "2026-10-29T08:00:00Z" }] } },
-					],
-				},
-			},
-		},
-	},
-};
-
-const author = (login) => ({ login });
+const url = (n) => `https://github.com/o/r/pull/${n}`;
 const run = (name, status, conclusion = "") => ({ __typename: "CheckRun", name, status, conclusion, detailsUrl: `https://ci/${name}` });
+const context = (name, state) => ({ __typename: "StatusContext", context: name, state, targetUrl: `https://ctx/${name}` });
+const badge = (sev) => (sev ? `<a href="#"><img alt="${sev}" src="https://x/badges/${sev.toLowerCase()}.svg" align="top"></a> ` : "");
+const thread = (title, { resolved = false, path = "extensions/sidebar/pr.ts", line = 12, author = "greptile-apps", sev, id = title.length } = {}) => ({
+	isResolved: resolved,
+	path,
+	line,
+	originalLine: line ?? 7,
+	comments: { nodes: [{ author: { login: author }, body: `${badge(sev)}**${title}**\n\n<!-- hidden -->Why ${title.toLowerCase()} &amp; more.\n\n\n\nLast line.`, url: `${url(0)}#discussion_r${id}` }] },
+});
 
-// `gh pr list --state open`: the current branch's PR (feat/x) among others with every checks summary.
-const LIST = [
-	{ number: 21, title: "fix(tabs): wheel over the tab bar skips hidden tabs", url: "https://github.com/o/r/pull/21", isDraft: false, headRefName: "fix/wheel", author: author("alice"), statusCheckRollup: [run("CI", "COMPLETED", "SUCCESS"), run("docs", "COMPLETED", "SKIPPED")] },
-	{ number: 20, title: "feat(mem): show the handoff's age next to its title in the MEM tab", url: "https://github.com/o/r/pull/20", isDraft: true, headRefName: "feat/age", author: author("bob"), statusCheckRollup: [run("CI", "IN_PROGRESS"), run("lint", "COMPLETED", "SUCCESS")] },
-	{ number: 17, title: PR.title, url: PR.url, isDraft: false, headRefName: "feat/x", author: author("vini"), statusCheckRollup: PR.statusCheckRollup },
-	{ number: 15, title: "chore: bump pi-tui", url: "https://github.com/o/r/pull/15", isDraft: false, headRefName: "chore/tui", author: author("carol"), statusCheckRollup: [run("CI", "COMPLETED", "FAILURE"), run("lint", "IN_PROGRESS")] },
-	{ number: 12, title: "docs: README screenshots", url: "https://github.com/o/r/pull/12", isDraft: false, headRefName: "docs/shots", author: author("dan"), statusCheckRollup: [] },
-];
+// One PR as GitHub's GraphQL answers it.
+function node({ number, title, base = "main", head, owner = "o", draft = false, mergeable = "MERGEABLE", merge = "CLEAN", review = "", checks = [], threads = [], threadsTotal }) {
+	return {
+		number,
+		title,
+		url: url(number),
+		isDraft: draft,
+		baseRefName: base,
+		headRefName: head,
+		headRepositoryOwner: owner === null ? null : { login: owner },
+		mergeable,
+		mergeStateStatus: merge,
+		reviewDecision: review,
+		commits: { nodes: [{ commit: { statusCheckRollup: checks.length ? { contexts: { totalCount: checks.length, nodes: checks } } : null } }] },
+		reviewThreads: { totalCount: threadsTotal ?? threads.length, nodes: threads },
+	};
+}
 
-// What `gh` answers: `list` for `gh pr list`, `view` for `gh pr view`, `graphql` for `gh api graphql`; a
-// { code, stderr } fails.
-function stubGh(answers = {}) {
-	const table = { list: LIST, view: PR, graphql: THREADS, ...answers };
+// This repository's real stack: #18 on main, #19 and #20 on #18, the session on #20's branch.
+const P18 = node({
+	number: 18,
+	title: "feat(sidebar): PR tab, tab order and drag, file preview, MEM rework, Nerd Font icons",
+	head: "feat/sidebar-pr-tab",
+	threads: [
+		thread("File names break TREE", { sev: "P1", path: "extensions/sidebar/nerd-icons.ts", line: null }),
+		thread("Another fork's PR appears", { sev: "P1", path: "extensions/sidebar/pr-data.ts", line: 200 }),
+		thread("Current PR can disappear", { sev: "P2", path: "extensions/sidebar/pr-data.ts", line: 188 }),
+		thread("Older comments go missing", { path: "extensions/sidebar/pr-data.ts", line: 29, author: "alice" }),
+		thread("Already handled", { resolved: true }),
+	],
+});
+const P19 = node({ number: 19, title: "feat(sidebar): GIT file rows with the TREE's icon and the status letter last", base: "feat/sidebar-pr-tab", head: "feat/git-icons", checks: [run("CI", "COMPLETED", "SUCCESS")] });
+const P20 = node({
+	number: 20,
+	title: "feat(sidebar): PROF keyboard mode with gentle-pi's profile screen keys",
+	base: "feat/sidebar-pr-tab",
+	head: "feat/prof-keyboard",
+	review: "REVIEW_REQUIRED",
+	checks: [run("CI", "COMPLETED", "SUCCESS"), run("lint", "COMPLETED", "FAILURE"), context("deploy", "PENDING"), run("docs", "COMPLETED", "SKIPPED")],
+	threads: [thread("Dialogs lose their keys", { sev: "P1", path: "extensions/sidebar/prof.ts", line: 212 }), thread("Esc twice", { path: "extensions/sidebar/prof.ts", line: 40, author: "bob" })],
+});
+const P15 = node({ number: 15, title: "chore: bump pi-tui", head: "chore/tui", checks: [run("CI", "COMPLETED", "FAILURE"), run("lint", "IN_PROGRESS")] });
+
+const answer = (nodes, mine = []) => ({ data: { repository: { owner: { login: "o" }, pullRequests: { nodes }, mine: { nodes: mine } } } });
+const STACK = answer([P20, P19, P18, P15]);
+
+// What `gh api graphql` answers: an object, a function of the arguments, or { code, stderr } to fail.
+function stubGh(reply = STACK) {
 	const calls = [];
 	prDeps.execFile = (bin, args, options, done) => {
 		calls.push({ bin, args, cwd: options?.cwd, timeout: options?.timeout });
-		const key = args[0] === "api" ? "graphql" : args[1] === "list" ? "list" : "view";
-		let answer = table[key];
-		if (typeof answer === "function") answer = answer(args);
+		const value = typeof reply === "function" ? reply(args) : reply;
 		setImmediate(() => {
-			if (answer?.code !== undefined) {
-				const error = Object.assign(new Error(answer.stderr ?? "failed"), { code: answer.code });
-				done(error, "", answer.stderr ?? "");
-			} else done(null, JSON.stringify(answer), "");
+			if (value?.code !== undefined) done(Object.assign(new Error(value.stderr ?? "failed"), { code: value.code }), "", value.stderr ?? "");
+			else done(null, typeof value === "string" ? value : JSON.stringify(value), "");
 		});
 	};
 	return calls;
@@ -92,36 +104,48 @@ function stubTimers() {
 		if (timer) timer.cleared = true;
 	};
 	prDeps.now = () => clock;
-	return {
-		timers,
-		live: () => timers.filter((timer) => !timer.cleared),
-		advance: (ms) => {
-			clock += ms;
-		},
-	};
+	return { live: () => timers.filter((timer) => !timer.cleared), advance: (ms) => (clock += ms) };
 }
 
 const opened = [];
-prDeps.open = (url) => opened.push(url);
+prDeps.open = (link) => opened.push(link);
 
 const pad = (row, width) => {
 	const cut = visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…");
 	return cut + " ".repeat(Math.max(0, width - visibleWidth(cut)));
 };
 
-// What `git` answers, by the arguments the tab passes to host.git.
-function stubGit({ branch = "feat/x\n" } = {}) {
-	const state = { branch };
+// What `git` answers, by the arguments the tab passes to host.git; `remotes` maps a remote to its URL.
+function stubGit({ branch = "feat/prof-keyboard\n", upstream, remotes = {} } = {}) {
+	const state = { branch, upstream, remotes };
+	const calls = [];
 	const git = (args) => {
 		const line = args.join(" ");
-		if (line === "branch --show-current") return typeof state.branch === "function" ? state.branch() : state.branch;
+		calls.push(line);
+		if (line === "branch --show-current") return state.branch;
+		if (line === "rev-parse --abbrev-ref --symbolic-full-name @{u}") return state.upstream;
+		if (args[0] === "remote" && args[1] === "get-url") return state.remotes[args[2]];
 		return undefined;
 	};
-	return { state, git };
+	return { state, git, calls };
 }
 
-function makeHost({ git = stubGit().git, cwd = "/repo", outline = true } = {}) {
+// Pi's editor as ctx.ui shows it to an extension.
+function stubEditor(text = "") {
+	const editor = { text, sets: [] };
+	editor.ui = {
+		getEditorText: () => editor.text,
+		setEditorText: (value) => {
+			editor.sets.push(value);
+			editor.text = value;
+		},
+	};
+	return editor;
+}
+
+function makeHost({ git = stubGit().git, cwd = "/repo", outline = true, editor = stubEditor() } = {}) {
 	let renders = 0;
+	const sent = [];
 	const box = (rows, width) =>
 		outline
 			? [theme.fg("border", `┌${"─".repeat(width - 2)}┐`), ...rows.map((row) => `${theme.fg("border", "│")} ${pad(row, width - 4)} ${theme.fg("border", "│")}`), theme.fg("border", `└${"─".repeat(width - 2)}┘`)]
@@ -134,8 +158,8 @@ function makeHost({ git = stubGit().git, cwd = "/repo", outline = true } = {}) {
 		box,
 		inner: (width) => (outline ? width - 4 : width - 1),
 		cwd: () => cwd,
-		ctx: () => undefined,
-		pi: undefined,
+		ctx: () => (editor ? { ui: editor.ui } : undefined),
+		pi: { sendUserMessage: (text) => sent.push(text) },
 		agentDir: "/agent",
 		requestRender: () => renders++,
 		git: (args) => Promise.resolve().then(() => git(args)),
@@ -144,17 +168,17 @@ function makeHost({ git = stubGit().git, cwd = "/repo", outline = true } = {}) {
 		gauge: () => "",
 		icons: { branch: "⎇" },
 	};
-	return { host, renders: () => renders };
+	return { host, sent, renders: () => renders };
 }
 
 const settle = async () => {
-	for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+	for (let i = 0; i < 8; i++) await new Promise((resolve) => setImmediate(resolve));
 };
 
-async function open({ gh = {}, git, outline, width = 59, height = 40 } = {}) {
+async function open({ gh = STACK, git, outline, editor, width = 59, height = 60 } = {}) {
 	const calls = stubGh(gh);
 	const clock = stubTimers();
-	const made = makeHost({ git, outline });
+	const made = makeHost({ git, outline, editor });
 	const tab = createTab(made.host);
 	tab.onShow?.();
 	const first = tab.render(width, height);
@@ -163,195 +187,308 @@ async function open({ gh = {}, git, outline, width = 59, height = 40 } = {}) {
 	const rows = () => draw().map(plain);
 	const lineOf = (text) => rows().findIndex((row) => row.includes(text));
 	const row = (text) => draw().find((line) => plain(line).includes(text));
-	return { ...made, tab, calls, clock, first, draw, rows, lineOf, row, width };
+	// A left click at the middle of `label` on the row that holds it.
+	const press = (label, button = "left") => {
+		const line = lineOf(label);
+		const x = rows()[line].indexOf(label) + Math.floor(label.length / 2);
+		return tab.handleClick(line, button, x);
+	};
+	const numbers = () => rows().filter((line) => /[▸▾] #\d+/.test(line)).map((line) => Number(/#(\d+)/.exec(line)[1]));
+	return { ...made, tab, calls, clock, first, draw, rows, lineOf, row, press, numbers, width };
 }
 
-test("the current branch's open PR first: number and title cut with …, an open badge and its mergeability", async () => {
-	const { rows, row, first, calls } = await open();
+test("one gh api graphql call reads every open PR, with the branch for the current one", async () => {
+	const { calls, first } = await open();
 	assert.ok(first.map(plain).some((line) => line.includes("refreshing…")), "the first load says so");
-	assert.ok(painted(first.find((line) => plain(line).includes("refreshing…")), "dim"));
-	const out = rows();
-	assert.ok(out.every((line) => [...line].length <= 59), "within the column");
-	const header = out.find((line) => line.includes("#17"));
-	assert.match(header, /│ #17 feat\(sidebar\): tabs in the side column .*… +│$/);
-	assert.ok(painted(row("open"), "success", "● open"));
-	assert.ok(painted(row("open"), "warning", "! unstable"));
-	assert.ok(out.findIndex((line) => line.includes("#17")) < out.findIndex((line) => line.includes("#21")), "before the other PRs");
-	assert.ok(!out.some((line) => line.includes("refreshing…")));
-	const list = calls.find((call) => call.args[1] === "list");
-	assert.equal(list.bin, "gh");
-	assert.deepEqual(list.args.slice(0, 4), ["pr", "list", "--state", "open"]);
-	const json = list.args[list.args.indexOf("--json") + 1].split(",");
-	for (const field of ["number", "title", "url", "isDraft", "headRefName", "author", "statusCheckRollup"]) assert.ok(json.includes(field), field);
-	assert.equal(list.args[list.args.indexOf("--limit") + 1], "30");
-	const view = calls.find((call) => call.args[1] === "view");
-	assert.equal(view.bin, "gh");
-	assert.deepEqual(view.args.slice(0, 4), ["pr", "view", "17", "--json"]);
-	for (const field of ["number", "title", "state", "isDraft", "mergeable", "mergeStateStatus", "url", "headRefName", "baseRefName", "reviewDecision", "statusCheckRollup"]) {
-		assert.ok(view.args[4].split(",").includes(field), field);
+	assert.equal(calls.length, 1, "one gh call");
+	const [call] = calls;
+	assert.equal(call.bin, "gh");
+	assert.deepEqual(call.args.slice(0, 2), ["api", "graphql"]);
+	const field = (flag, name) => call.args.find((arg, i) => call.args[i - 1] === flag && arg.startsWith(`${name}=`));
+	assert.equal(field("-F", "owner"), "owner={owner}");
+	assert.equal(field("-F", "name"), "name={repo}");
+	assert.equal(field("-f", "branch"), "branch=feat/prof-keyboard");
+	const query = field("-f", "query");
+	for (const part of ["pullRequests(states:OPEN", "mine:pullRequests(states:OPEN,headRefName:$branch", "headRepositoryOwner", "baseRefName", "mergeStateStatus", "reviewDecision", "statusCheckRollup", "reviewThreads", "totalCount"]) {
+		assert.ok(query.includes(part), part);
 	}
-	for (const call of [list, view]) {
-		assert.equal(call.cwd, "/repo");
-		assert.ok(call.timeout >= 5000 && call.timeout <= 15000, "a timeout around 10 s");
+	assert.equal(call.cwd, "/repo");
+	assert.ok(call.timeout >= 5000 && call.timeout <= 15000, "a timeout around 10 s");
+});
+
+test("the stack: a PR on another open PR's head sits under it; no branch names anywhere", async () => {
+	const { rows, numbers, draw } = await open();
+	assert.deepEqual(numbers(), [18, 20, 19, 15], "the base first, its PRs under it, then the others in GitHub's order");
+	const out = rows();
+	assert.match(out.find((line) => line.includes("#18")), /^│ [▸▾] #18 /);
+	assert.match(out.find((line) => line.includes("#20 ")), /^│ ├ ▾ #20 /);
+	assert.match(out.find((line) => line.includes("#19")), /^│ └ ▸ #19 /);
+	assert.match(out.find((line) => line.includes("#15")), /^│ ▸ #15 /);
+	assert.ok(!out.some((line) => /feat\/|chore\/|\bmain\b|⎇/.test(line)), "no branch names");
+	assert.ok(out[1].includes("⇄ Pull requests · 4"), "the title counts the open PRs");
+	assert.ok(draw().every((line) => visibleWidth(line) <= 59), "within the column");
+});
+
+test("each row: number in accent, the title cut with …, and flush right its verdict", async () => {
+	const { row, rows } = await open();
+	assert.ok(painted(row("#18"), "accent", "#18"));
+	assert.match(plain(row("#18")), /│ ▸ #18 feat\(sidebar\): PR tab, .*… ⚠ 4 threads │$/);
+	assert.ok(painted(row("#18"), "warning", "⚠ 4 threads"), "unresolved threads, the resolved one not counted");
+	assert.match(plain(row("#19")), /│ └ ▸ #19 .*… ✓ ready │$/);
+	assert.ok(painted(row("#19"), "success", "✓ ready"));
+	assert.match(plain(row("#15")), /│ ▸ #15 chore: bump pi-tui +✗ CI │$/);
+	assert.ok(painted(row("#15"), "error", "✗ CI"), "a failed check wins over a running one");
+	assert.match(plain(row("#20 ")), /│ ├ ▾ #20 .*… ◉ ✗ CI │$/, "the current branch's PR is marked ◉");
+	assert.ok(painted(row("#20 "), "accent", "◉"));
+	assert.ok(rows().every((line) => [...line].length <= 59));
+});
+
+test("verdicts: the most serious one wins, in order", () => {
+	const pr = (fields) => parsePulls(answer([node({ number: 1, title: "t", head: "h", ...fields })])).prs[0];
+	const failed = [run("CI", "COMPLETED", "FAILURE")];
+	const running = [run("CI", "IN_PROGRESS")];
+	const open1 = [thread("x")];
+	const cases = [
+		[{ mergeable: "CONFLICTING", merge: "DIRTY", checks: failed, review: "CHANGES_REQUESTED", threads: open1 }, "conflicts"],
+		[{ checks: failed, review: "CHANGES_REQUESTED", threads: open1, draft: true }, "ci-failed"],
+		[{ review: "CHANGES_REQUESTED", threads: open1, checks: running }, "changes"],
+		[{ threads: open1, checks: running, draft: true }, "threads"],
+		[{ checks: running, draft: true, review: "REVIEW_REQUIRED" }, "ci-running"],
+		[{ draft: true, merge: "DRAFT", review: "REVIEW_REQUIRED" }, "draft"],
+		[{ review: "REVIEW_REQUIRED", merge: "BLOCKED" }, "review"],
+		[{ merge: "BLOCKED" }, "blocked"],
+		[{ merge: "BEHIND" }, "behind"],
+		[{ checks: [run("CI", "COMPLETED", "SUCCESS"), run("docs", "COMPLETED", "SKIPPED")], review: "APPROVED" }, "ready"],
+		[{}, "ready"],
+	];
+	for (const [fields, kind] of cases) assert.equal(verdictOf(pr(fields)).kind, kind, `${JSON.stringify(fields)} → ${kind}`);
+	assert.equal(verdictOf(pr({ threads: [thread("a"), thread("b"), thread("c", { resolved: true })] })).count, 2);
+});
+
+test("every verdict as the row draws it", async () => {
+	const failed = [run("CI", "COMPLETED", "FAILURE")];
+	const nodes = [
+		node({ number: 9, title: "a", head: "a", mergeable: "CONFLICTING", merge: "DIRTY" }),
+		node({ number: 8, title: "b", head: "b", checks: failed }),
+		node({ number: 7, title: "c", head: "c", review: "CHANGES_REQUESTED" }),
+		node({ number: 6, title: "d", head: "d", threads: [thread("one")] }),
+		node({ number: 5, title: "e", head: "e", checks: [run("CI", "QUEUED")] }),
+		node({ number: 4, title: "f", head: "f", draft: true, merge: "DRAFT" }),
+		node({ number: 3, title: "g", head: "g", review: "REVIEW_REQUIRED", merge: "BLOCKED" }),
+		node({ number: 2, title: "h", head: "h", merge: "BLOCKED" }),
+		node({ number: 1, title: "i", head: "i", merge: "BEHIND" }),
+	];
+	const { row } = await open({ gh: answer(nodes), git: stubGit({ branch: "other\n" }).git });
+	for (const [n, role, text] of [
+		[9, "error", "✗ conflicts"],
+		[8, "error", "✗ CI"],
+		[7, "error", "✗ changes"],
+		[6, "warning", "⚠ 1 thread"],
+		[5, "warning", "⧗ CI"],
+		[4, "dim", "◌ draft"],
+		[3, "warning", "⧗ review"],
+		[2, "warning", "⊘ blocked"],
+		[1, "warning", "↓ behind"],
+	]) {
+		assert.ok(plain(row(`#${n} `)).trimEnd().endsWith(`${text} │`), `#${n}: ${text}`);
+		assert.ok(painted(row(`#${n} `), role, text), `#${n}: ${role}`);
 	}
 });
 
-test("the open PRs: one row each, #N and title cut with …, the checks summary flush right, drafts marked", async () => {
-	const { rows, row, draw } = await open();
+test("the current branch's PR starts expanded with its detail; the others are collapsed", async () => {
+	const { rows, row, lineOf } = await open();
 	const out = rows();
-	const section = out.findIndex((line) => line.includes("Open pull requests"));
-	assert.ok(section > out.findIndex((line) => line.includes("Reviews")), "after the current PR's detail");
-	assert.equal(out[section - 1].replace(/[│ ]/g, ""), "", "a blank row before the section");
-	const listed = out.slice(section + 1).filter((line) => /│ #\d+/.test(line));
-	assert.deepEqual(listed.map((line) => /#(\d+)/.exec(line)[1]), ["21", "20", "15", "12"], "in gh's order, the current PR not twice");
-	assert.equal(out.filter((line) => line.includes("#17")).length, 1);
-	assert.match(plain(row("#21")), /│ #21 fix\(tabs\): wheel over the tab bar .*… ✓ │$/);
-	assert.ok(painted(row("#21"), "success", "✓"), "all passed (a skipped check does not count)");
-	assert.ok(painted(row("#15"), "accent", "#15"));
-	assert.match(plain(row("#20")), /│ #20 feat\(mem\): .*… draft ⧗ │$/);
-	assert.ok(painted(row("#20"), "warning", "⧗") && painted(row("#20"), "dim", "draft"), "running, a draft");
-	assert.match(plain(row("#15")), /│ #15 chore: bump pi-tui +✗ │$/);
-	assert.ok(painted(row("#15"), "error", "✗"), "a failure wins over a running check");
-	assert.match(plain(row("#12")), /│ #12 docs: README screenshots +│$/, "no checks: nothing on the right");
-	assert.ok(draw().every((line) => visibleWidth(line) <= 59));
+	const at = lineOf("#20 ");
+	const detail = out.slice(at + 1, lineOf("#19"));
+	assert.match(detail[0], /^│ │   ✓ clean · ⧗ review required +│$/, "mergeability and review, indented under the row");
+	assert.ok(painted(row("✓ clean"), "success", "✓ clean"));
+	assert.ok(painted(row("✓ clean"), "warning", "⧗ review required"));
+	assert.ok(detail.some((line) => /│ │   CI +✓ passed │$/.test(line)));
+	assert.ok(detail.some((line) => /│ │   lint +✗ failed │$/.test(line)));
+	assert.ok(painted(row("lint"), "error", "✗ failed"));
+	assert.ok(detail.some((line) => /│ │   deploy +⧗ running │$/.test(line)), "a status context is a check");
+	assert.ok(detail.some((line) => /│ │   docs +– skipped │$/.test(line)));
+	assert.ok(detail.some((line) => /│ │   ● P1 Dialogs lose their keys +prof\.ts:212 │$/.test(line)), "a thread: severity, title, file:line");
+	assert.ok(painted(row("Dialogs"), "error", "P1"));
+	assert.ok(detail.some((line) => /│ │   ● Esc twice +prof\.ts:40 │$/.test(line)), "no severity, none drawn");
+	assert.ok(detail.some((line) => /│ │   \[ Fix 2 threads with agent \]  \[ Fix CI \] +│$/.test(line)), "gentle-pi's buttons, two apart");
+	assert.ok(detail.some((line) => /│ │   \[ Open \] +│$/.test(line)), "[ Open ] on a row of its own, under the agent's buttons");
+	assert.ok(!out.some((line) => /Fix|P2|Older comments/.test(line) && out.indexOf(line) > lineOf("#19")), "#18 and #19 show no detail");
+	assert.ok(!out.some((line) => line.includes("Current PR can disappear")), "#18 collapsed");
 });
 
-test("no branch rows and no ahead/behind counts, with or without a PR for the branch", async () => {
-	for (const branch of ["feat/x\n", "feat/other\n"]) {
-		const { rows, calls } = await open({ git: stubGit({ branch }).git });
-		const out = rows();
-		assert.ok(!out.some((line) => /⎇|↑\d|↓\d|not pushed|up to date|No pull request for|feat\/x|feat\/other|→ main/.test(line)), branch);
-		assert.ok(!calls.some((call) => call.args[0] === "rev-list"));
-	}
+test("no checks and no review decision are said once, dim", async () => {
+	const { row, rows } = await open({ git: stubGit({ branch: "feat/sidebar-pr-tab\n" }).git });
+	const facts = row("no review yet");
+	assert.match(plain(facts), /^│   ✓ clean · no review yet · no checks +│$/);
+	assert.ok(painted(facts, "dim", "no review yet") && painted(facts, "dim", "no checks"));
+	assert.ok(rows().some((line) => /│   ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)), "an outdated thread without a line: the file alone");
 });
 
-test("no open PR for the branch: only the list, without gh pr view or graphql", async () => {
-	const { rows, calls } = await open({ git: stubGit({ branch: "feat/other\n" }).git });
+test("a click on a row expands it and closes the other; on the open one it closes; the choice survives a refresh", async () => {
+	const { tab, rows, press, lineOf, clock, draw } = await open();
+	opened.length = 0;
+	assert.equal(press("#18"), true);
+	assert.ok(rows().some((line) => line.includes("Current PR can disappear")), "#18 open");
+	assert.ok(!rows().some((line) => line.includes("Dialogs lose their keys")), "#20 closed");
+	assert.match(rows()[lineOf("#18")], /▾ #18/);
+	assert.match(rows()[lineOf("#20 ")], /▸ #20/);
+	assert.deepEqual(opened, [], "expanding opens nothing");
+	assert.ok(rows().some((line) => line.includes("[ Open ]")) && !rows().some((line) => line.includes("Fix")), "no agent button on another branch's PR");
+	clock.advance(prTiming.refreshMs);
+	draw();
+	clock.live()[0].fn();
+	await settle();
+	assert.ok(rows().some((line) => line.includes("Current PR can disappear")), "still #18 after a refresh");
+	assert.equal(press("#18"), true);
+	assert.ok(!rows().some((line) => /Current PR can disappear|Dialogs lose/.test(line)), "all closed");
+	assert.ok(!rows().some((line) => line.includes("[ Open ]")));
+	assert.equal(tab.handleClick(lineOf("#19"), "right", 5), false, "a right click does nothing");
+	assert.ok(!rows().some((line) => line.includes("[ Open ]")));
+});
+
+test("a branch change goes back to the new branch's PR", async () => {
+	const git = stubGit();
+	const { press, rows, clock, draw } = await open({ git: git.git });
+	press("#18");
+	git.state.branch = "feat/git-icons\n";
+	draw();
+	clock.live()[0].fn();
+	await settle();
+	await settle();
 	const out = rows();
-	assert.deepEqual(out.filter((line) => /│ #\d+/.test(line)).map((line) => /#(\d+)/.exec(line)[1]), ["21", "20", "17", "15", "12"]);
-	assert.ok(!out.some((line) => /Checks|Reviews|Open pull requests/.test(line)), "no detail, no section title");
-	assert.deepEqual(calls.map((call) => call.args[1]), ["list"], "one gh call");
+	assert.match(out.find((line) => line.includes("#19")), /▾ #19 .*◉ ✓ ready/);
+	assert.ok(!out.some((line) => line.includes("Current PR can disappear")));
+});
+
+test("clicks on a check, a thread and [ Open ] open the browser; the facts row and blank rows do nothing", async () => {
+	const { tab, press, lineOf, rows } = await open();
+	opened.length = 0;
+	assert.equal(press("lint"), true);
+	assert.equal(press("deploy"), true);
+	assert.equal(press("Dialogs lose their keys"), true);
+	assert.equal(press("[ Open ]"), true);
+	assert.deepEqual(opened, ["https://ci/lint", "https://ctx/deploy", `${url(0)}#discussion_r23`, url(20)]);
+	assert.equal(tab.handleClick(lineOf("✓ clean"), "left", 6), false);
+	assert.equal(tab.handleClick(lineOf("[ Open ]"), "left", rows()[lineOf("[ Open ]")].length - 2), false, "past the buttons");
+	assert.equal(tab.handleClick(rows().length + 5, "left", 5), false);
+	assert.equal(tab.handleClick(lineOf("lint"), "right", 5), false);
+	assert.equal(tab.handleWheel?.(1, 0, 0) ?? false, false, "the column scrolls the overflow");
+});
+
+test("[ Fix N threads with agent ] fills the editor with the unresolved threads and sends nothing", async () => {
+	const editor = stubEditor();
+	const { press, sent } = await open({ editor });
+	opened.length = 0;
+	assert.equal(press("[ Fix 2 threads with agent ]"), true);
+	assert.equal(editor.sets.length, 1);
+	assert.equal(
+		editor.text,
+		[
+			`Address the unresolved review threads on PR #20 (${url(20)}):`,
+			"",
+			`1. extensions/sidebar/prof.ts:212, greptile-apps (P1): ${url(0)}#discussion_r23`,
+			"Dialogs lose their keys",
+			"",
+			"Why dialogs lose their keys & more.",
+			"",
+			"Last line.",
+			"",
+			`2. extensions/sidebar/prof.ts:40, bob: ${url(0)}#discussion_r9`,
+			"Esc twice",
+			"",
+			"Why esc twice & more.",
+			"",
+			"Last line.",
+			"",
+			"Fix each one in this branch, or tell me why it should stay as it is.",
+		].join("\n"),
+	);
+	assert.deepEqual(sent, [], "never sent to the agent");
+	assert.deepEqual(opened, []);
+});
+
+test("a draft in the editor is kept: the prompt goes after it", async () => {
+	const editor = stubEditor("my own note\n\n");
+	const { press } = await open({ editor });
+	press("[ Fix CI ]");
+	assert.equal(
+		editor.text,
+		["my own note", "", `These checks failed on PR #20 (${url(20)}):`, "- lint: https://ci/lint", "", "Find out why (gh pr checks 20, gh run view --log-failed) and fix it in this branch."].join("\n"),
+	);
+});
+
+test("without Pi's editor there is no agent button; [ Open ] stays", async () => {
+	const { rows } = await open({ editor: null });
+	assert.ok(rows().some((line) => /│ │   \[ Open \] +│$/.test(line)));
+	assert.ok(!rows().some((line) => line.includes("Fix")));
+});
+
+test("a fork's PR with the same branch name is not the current one; the branch's upstream remote decides", async () => {
+	const fork = node({ number: 30, title: "someone else's", head: "feat/prof-keyboard", owner: "someone" });
+	const gh = answer([fork, P20]);
+	const mine = await open({ gh });
+	assert.match(mine.rows().find((line) => line.includes("#20 ")), /▾ #20 .*◉/);
+	assert.ok(!mine.rows().find((line) => line.includes("#30")).includes("◉"));
+	const git = stubGit({ upstream: "fork/feat/prof-keyboard\n", remotes: { fork: "git@github.com:someone/r.git\n" } });
+	const theirs = await open({ gh, git: git.git });
+	assert.match(theirs.rows().find((line) => line.includes("#30")), /▾ #30 .*◉/);
+	assert.ok(git.calls.includes("remote get-url fork"));
+	assert.equal(currentPr(parsePulls(gh).prs, "feat/prof-keyboard", "o", "https://github.com/someone/r").number, 30, "an https remote");
+	assert.equal(currentPr(parsePulls(gh).prs, "feat/none", "o", undefined), undefined);
+});
+
+test("the current PR past the first 30 still shows, from the branch's own query", async () => {
+	const { numbers, rows } = await open({ gh: answer([P19, P18, P15], [P20]) });
+	assert.deepEqual(numbers(), [18, 19, 20, 15], "joined to its stack");
+	assert.match(rows().find((line) => line.includes("#20 ")), /▾ #20 .*◉/);
+	const twice = await open({ gh: answer([P20, P18], [P20]) });
+	assert.deepEqual(twice.numbers(), [18, 20], "listed once");
+});
+
+test("more review threads than were read: the count says so and the PR is never ready for them", async () => {
+	const some = node({ number: 5, title: "busy", head: "busy", threads: [thread("one"), thread("two")], threadsTotal: 150 });
+	const none = node({ number: 4, title: "quiet", head: "quiet", threads: [thread("done", { resolved: true })], threadsTotal: 150 });
+	const { row } = await open({ gh: answer([some, none]), git: stubGit({ branch: "busy\n" }).git });
+	assert.ok(plain(row("#5 ")).includes("⚠ 2+ threads"));
+	assert.ok(plain(row("#4 ")).includes("⚠ threads?"));
+	assert.ok(painted(row("#4 "), "warning", "⚠ threads?"));
+	assert.ok(plain(row("[ Fix")).includes("[ Fix 2+ threads with agent ]"));
 });
 
 test("no open pull requests: one row saying so", async () => {
-	const { draw } = await open({ gh: { list: [] } });
+	const { draw } = await open({ gh: answer([]) });
 	const out = draw();
 	assert.ok(out.some((line) => plain(line).includes("No open pull requests")));
-	assert.equal(out.filter((row) => /\w/.test(plain(row).replace(/[│┌┐└┘─]/g, ""))).length, 2, "the title and one row");
+	assert.ok(out.some((line) => plain(line).includes("⇄ Pull requests ")) && !out.some((line) => plain(line).includes("· 0")));
+	assert.equal(out.filter((line) => /\w/.test(plain(line).replace(/[│┌┐└┘─]/g, ""))).length, 2, "the title and one row");
 });
 
-test("gh pr view failing for the current PR: it stays in the list as a plain row", async () => {
-	const { rows } = await open({ gh: { view: { code: 1, stderr: "HTTP 502" } } });
-	const out = rows();
-	assert.deepEqual(out.filter((line) => /│ #\d+/.test(line)).map((line) => /#(\d+)/.exec(line)[1]), ["21", "20", "17", "15", "12"]);
-	assert.ok(!out.some((line) => /Checks|Reviews/.test(line)));
-});
-
-test("checks: one row each, the name at the start and the state flush right in its color, counted in the title", async () => {
-	const { rows, row } = await open();
-	const out = rows();
-	const title = out.findIndex((line) => line.includes("Checks"));
-	assert.match(out[title], /Checks 2\/4/);
-	assert.equal(out[title - 1].replace(/[│ ]/g, ""), "", "a blank row before the section");
-	assert.match(row("CI ") && plain(row("✓ passed")), /│ CI +✓ passed │$/);
-	assert.ok(painted(row("✓ passed"), "success", "✓ passed"));
-	assert.match(plain(row("lint")), /│ lint +✗ failed │$/);
-	assert.ok(painted(row("lint"), "error", "✗ failed"));
-	assert.match(plain(row("Greptile Review")), /│ Greptile Review +⧗ running │$/);
-	assert.ok(painted(row("Greptile Review"), "warning", "⧗ running"));
-	assert.match(plain(row("docs")), /│ docs +– skipped │$/);
-	assert.ok(painted(row("docs"), "dim", "– skipped"));
-	assert.ok(out.some((line) => /│ deploy +✓ passed │$/.test(line)), "a status context counts as a check");
-	assert.ok(!out.some((line) => /^│ ─+/.test(line)), "no divider rules");
-});
-
-test("reviews: the decision, the unresolved review comments and the latest one's author and first line", async () => {
-	const { rows, row, calls } = await open();
-	const out = rows();
-	assert.ok(out.some((line) => line.includes("Reviews")));
-	assert.ok(painted(row("changes requested"), "error", "✗ changes requested"));
-	assert.ok(out.some((line) => line.includes("2 unresolved comments")));
-	assert.ok(out.some((line) => line.includes("greptile-apps: Tab-heavy previews can freeze Pi")), "the latest unresolved comment, markup stripped");
-	assert.ok(!out.some((line) => line.includes("alice")), "only the latest");
-	const graphql = calls.find((call) => call.args[0] === "api");
-	assert.ok(graphql.args.includes("graphql"));
-	assert.ok(graphql.args.some((arg) => arg === "owner=o") && graphql.args.some((arg) => arg === "name=r") && graphql.args.some((arg) => arg === "number=17"));
-});
-
-test("an approved PR with no unresolved comments, and a review left to do", async () => {
-	const approved = await open({ gh: { view: { ...PR, reviewDecision: "APPROVED" }, graphql: { data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } } } });
-	assert.ok(painted(approved.row("approved"), "success", "✓ approved"));
-	assert.ok(approved.rows().some((line) => line.includes("no unresolved comments")));
-	const required = await open({ gh: { view: { ...PR, reviewDecision: "REVIEW_REQUIRED" } } });
-	assert.ok(painted(required.row("review required"), "warning", "⧗ review required"));
-});
-
-test("without the review threads (graphql failing) the PR's comment count shows instead, and nothing throws", async () => {
-	const comments = [{ author: { login: "carol" }, body: "Looks fine\nsecond", createdAt: "2026-10-30T10:00:00Z", url: "https://github.com/o/r/pull/17#c1" }];
-	const { rows } = await open({ gh: { view: { ...PR, comments }, graphql: { code: 1, stderr: "HTTP 502" } } });
-	const out = rows();
-	assert.ok(out.some((line) => line.includes("1 comment")));
-	assert.ok(out.some((line) => line.includes("carol: Looks fine")));
-	assert.ok(out.some((line) => line.includes("#17")));
-});
-
-test("draft, merged and closed badges; mergeability only while the PR is open", async () => {
-	const draft = await open({ gh: { view: { ...PR, isDraft: true, mergeStateStatus: "DRAFT" } } });
-	assert.ok(painted(draft.row("draft"), "dim", "◌ draft"));
-	const merged = await open({ gh: { view: { ...PR, state: "MERGED", mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN" } } });
-	assert.ok(painted(merged.row("merged"), "accent", "● merged"));
-	assert.ok(!merged.rows().some((line) => /unstable|clean|conflicts|blocked/.test(line)));
-	const closed = await open({ gh: { view: { ...PR, state: "CLOSED" } } });
-	assert.ok(painted(closed.row("closed"), "error", "● closed"));
-	const conflicts = await open({ gh: { view: { ...PR, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" } } });
-	assert.ok(painted(conflicts.row("conflicts"), "error", "✗ conflicts"));
-	const clean = await open({ gh: { view: { ...PR, mergeStateStatus: "CLEAN" } } });
-	assert.ok(painted(clean.row("clean"), "success", "✓ clean"));
-	const blocked = await open({ gh: { view: { ...PR, mergeStateStatus: "BLOCKED" } } });
-	assert.ok(painted(blocked.row("blocked"), "warning", "⊘ blocked"));
-});
-
-test("without gh, signed out, or outside GitHub: one dim row saying so, and no throw", async () => {
-	for (const [answer, text] of [
+test("without gh, signed out, outside GitHub or a GraphQL error: one dim row saying so, and no throw", async () => {
+	for (const [reply, text] of [
 		[{ code: "ENOENT", stderr: "" }, "gh is not installed"],
 		[{ code: 4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n" }, "gh is not signed in"],
 		[{ code: 1, stderr: "none of the git remotes configured for this repository point to a known GitHub host.\n" }, "Not a GitHub repository"],
 		[{ code: 1, stderr: "failed to run git: fatal: not a git repository (or any of the parent directories): .git\n" }, "Not a git repository"],
-		[{ code: 1, stderr: "something odd\nmore" }, "gh: something odd"],
+		[{ code: 1, stderr: "GraphQL: Could not resolve to a Repository\nmore" }, "gh: GraphQL: Could not resolve to a Repository"],
+		[{ errors: [{ message: "Something went wrong" }] }, "gh: Something went wrong"],
+		["not json", "gh: unreadable answer"],
 	]) {
-		const { draw } = await open({ gh: { list: answer } });
+		const { draw } = await open({ gh: reply });
 		const out = draw();
 		const line = out.find((row) => plain(row).includes(text));
 		assert.ok(line, text);
 		assert.ok(painted(line, "dim"), `${text}: dim`);
 		assert.equal(out.filter((row) => /\w/.test(plain(row).replace(/[│┌┐└┘─]/g, ""))).length, 2, `${text}: the title and one row`);
 	}
-	const bad = await open({ gh: { list: () => "not json" } });
-	assert.doesNotThrow(() => bad.draw());
-});
-
-test("a click on the PR header opens the PR, on a check its details link, on a listed PR that PR; other clicks are left alone", async () => {
-	const { tab, lineOf, rows } = await open();
-	opened.length = 0;
-	assert.equal(tab.handleClick(lineOf("#17"), "left", 5), true);
-	assert.equal(tab.handleClick(lineOf("● open"), "left", 5), true);
-	assert.equal(tab.handleClick(lineOf("lint"), "left", 5), true);
-	assert.equal(tab.handleClick(lineOf("deploy"), "left", 5), true);
-	assert.equal(tab.handleClick(lineOf("#20"), "left", 5), true);
-	assert.equal(tab.handleClick(lineOf("#12"), "left", 5), true);
-	assert.deepEqual(opened, ["https://github.com/o/r/pull/17", "https://github.com/o/r/pull/17", "https://ci/lint", "https://deploy/17", "https://github.com/o/r/pull/20", "https://github.com/o/r/pull/12"]);
-	assert.equal(tab.handleClick(lineOf("Checks"), "left", 5), false);
-	assert.equal(tab.handleClick(lineOf("Open pull requests"), "left", 5), false);
-	assert.equal(tab.handleClick(lineOf("lint"), "right", 5), false);
-	assert.equal(tab.handleClick(rows().length + 5, "left", 5), false);
-	assert.equal(tab.handleWheel?.(1, 0, 0) ?? false, false, "the column scrolls the overflow");
 });
 
 test("without the outline the hits move with the rows", async () => {
-	const { tab, lineOf } = await open({ outline: false });
+	const { press } = await open({ outline: false });
 	opened.length = 0;
-	tab.handleClick(lineOf("Greptile Review"), "left", 3);
-	assert.deepEqual(opened, ["https://greptile/17"]);
+	press("deploy");
+	press("[ Open ]");
+	assert.deepEqual(opened, ["https://ctx/deploy", url(20)]);
 });
 
 test("openUrl runs xdg-open detached", () => {
@@ -362,8 +499,8 @@ test("openUrl runs xdg-open detached", () => {
 		return { on() {}, unref() {} };
 	};
 	try {
-		assert.equal(openUrl("https://github.com/o/r/pull/17"), true);
-		assert.deepEqual(runs, [{ bin: "xdg-open", args: ["https://github.com/o/r/pull/17"], detached: true, stdio: "ignore" }]);
+		assert.equal(openUrl(url(17)), true);
+		assert.deepEqual(runs, [{ bin: "xdg-open", args: [url(17)], detached: true, stdio: "ignore" }]);
 		prDeps.spawn = () => {
 			throw new Error("no xdg-open");
 		};
@@ -377,26 +514,24 @@ test("openUrl runs xdg-open detached", () => {
 test("refreshes every 30 s while shown and on a branch change, without the refreshing note; stops when hidden or disposed", async () => {
 	const git = stubGit();
 	const { tab, calls, clock, draw } = await open({ git: git.git });
-	const views = () => calls.filter((call) => call.args[1] === "list").length;
-	assert.equal(views(), 1);
+	assert.equal(calls.length, 1);
 	assert.equal(clock.live().length, 1, "one timer while shown");
 	const timer = clock.live()[0];
 	timer.fn();
 	await settle();
-	assert.equal(views(), 1, "a probe within 30 s reads no PR");
-	assert.equal(calls.length, 3, "list, view and graphql, once");
+	assert.equal(calls.length, 1, "a probe within 30 s reads no PR");
 	clock.advance(prTiming.refreshMs);
 	draw();
 	timer.fn();
-	assert.ok(!draw().map(plain).some((row) => row.includes("refreshing…")), "the cached PR stays while it refreshes");
+	assert.ok(!draw().map(plain).some((row) => row.includes("refreshing…")), "the cached PRs stay while they refresh");
 	await settle();
-	assert.equal(views(), 2, "30 s later it reads again");
+	assert.equal(calls.length, 2, "30 s later it reads again");
 	git.state.branch = "feat/y\n";
 	draw();
 	timer.fn();
 	await settle();
 	await settle();
-	assert.equal(views(), 3, "a new branch reads again");
+	assert.equal(calls.length, 3, "a new branch reads again");
 	tab.onHide?.();
 	assert.equal(clock.live().length, 0, "hidden: no polling");
 	draw();
@@ -415,48 +550,61 @@ test("the timer stops on its own when the tab is no longer drawn", async () => {
 	assert.equal(clock.live().length, 0);
 });
 
-test("parsers: checks, PR, threads, first lines and gh errors", () => {
+test("parsers: checks, pulls, the stack, prompts, first lines and gh errors", () => {
 	assert.deepEqual(
-		parseChecks(PR.statusCheckRollup).map((check) => [check.name, check.state, check.url]),
+		parseChecks(P20.commits.nodes[0].commit.statusCheckRollup.contexts.nodes).map((check) => [check.name, check.state, check.url]),
 		[
-			["CI", "passed", "https://ci/1"],
-			["Greptile Review", "running", "https://greptile/17"],
+			["CI", "passed", "https://ci/CI"],
 			["lint", "failed", "https://ci/lint"],
-			["deploy", "passed", "https://deploy/17"],
+			["deploy", "running", "https://ctx/deploy"],
 			["docs", "skipped", "https://ci/docs"],
 		],
 	);
-	assert.equal(parseChecks([{ __typename: "StatusContext", context: "x", state: "PENDING" }])[0].state, "running");
-	assert.equal(parseChecks([{ __typename: "CheckRun", name: "y", status: "COMPLETED", conclusion: "TIMED_OUT" }])[0].state, "failed");
-	assert.equal(parseChecks([{ __typename: "CheckRun", name: "z", status: "COMPLETED", conclusion: "NEUTRAL" }])[0].state, "skipped");
-	const pr = parsePr(PR);
-	assert.equal(pr.state, "open");
-	assert.equal(pr.merge, "unstable");
-	assert.equal(pr.review, "changes requested");
-	assert.equal(parsePr({ ...PR, isDraft: true }).state, "draft");
-	assert.equal(parsePr({ ...PR, state: "MERGED" }).merge, undefined);
-	const threads = parseThreads(THREADS);
-	assert.equal(threads.unresolved, 2);
-	assert.equal(threads.latest.author, "greptile-apps");
-	assert.equal(parseThreads({}), undefined);
-	assert.equal(firstLine("<!-- x -->\n\n## **Hello** `world` &amp; you\nnext"), "Hello world & you");
-	assert.equal(ghProblem({ code: "ENOENT" }, ""), "gh is not installed");
-	assert.equal(ghProblem({ code: 1 }, 'no pull requests found for branch "x"'), "none");
-	assert.equal(ghProblem({ code: 1 }, "HTTP 401: Bad credentials"), "gh is not signed in");
+	assert.equal(parseChecks([context("x", "ERROR")])[0].state, "failed");
+	assert.equal(parseChecks([run("y", "COMPLETED", "TIMED_OUT")])[0].state, "failed");
+	assert.equal(parseChecks([run("z", "COMPLETED", "NEUTRAL")])[0].state, "skipped");
 	assert.equal(checksSummary([]), undefined);
 	assert.equal(checksSummary([{ state: "skipped" }]), undefined, "only skipped checks: no summary");
-	assert.equal(checksSummary([{ state: "passed" }, { state: "skipped" }]), "passed");
-	assert.equal(checksSummary([{ state: "passed" }, { state: "running" }]), "running");
 	assert.equal(checksSummary([{ state: "running" }, { state: "failed" }]), "failed");
+	const { owner, prs } = parsePulls(STACK);
+	assert.equal(owner, "o");
+	const p20 = prs.find((pr) => pr.number === 20);
+	assert.deepEqual([p20.base, p20.head, p20.headOwner, p20.merge, p20.review, p20.draft], ["feat/sidebar-pr-tab", "feat/prof-keyboard", "o", "clean", "review required", false]);
 	assert.deepEqual(
-		parseList(LIST).map((row) => [row.number, row.draft, row.head, row.author, row.checks]),
+		p20.threads.map((t) => [t.path, t.line, t.author, t.title, t.severity]),
 		[
-			[21, false, "fix/wheel", "alice", "passed"],
-			[20, true, "feat/age", "bob", "running"],
-			[17, false, "feat/x", "vini", "failed"],
-			[15, false, "chore/tui", "carol", "failed"],
-			[12, false, "docs/shots", "dan", undefined],
+			["extensions/sidebar/prof.ts", 212, "greptile-apps", "Dialogs lose their keys", "P1"],
+			["extensions/sidebar/prof.ts", 40, "bob", "Esc twice", undefined],
 		],
 	);
-	assert.deepEqual(parseList(null), []);
+	assert.equal(prs.find((pr) => pr.number === 18).threads[0].line, undefined, "an outdated thread has no line");
+	assert.deepEqual(parsePulls({}), { owner: undefined, prs: [], problem: "unreadable answer" });
+	assert.deepEqual(
+		stackOf(prs, "o").map(({ pr, prefix }) => [pr.number, prefix]),
+		[
+			[18, ""],
+			[20, "├ "],
+			[19, "└ "],
+			[15, ""],
+		],
+	);
+	const deep = parsePulls(answer([node({ number: 3, title: "c", base: "b", head: "c" }), node({ number: 2, title: "b", base: "a", head: "b" }), node({ number: 4, title: "d", base: "a", head: "d" }), node({ number: 1, title: "a", head: "a" })])).prs;
+	assert.deepEqual(
+		stackOf(deep, "o").map(({ pr, prefix }) => [pr.number, prefix]),
+		[
+			[1, ""],
+			[2, "├ "],
+			[3, "│ └ "],
+			[4, "└ "],
+		],
+	);
+	const loop = parsePulls(answer([node({ number: 2, title: "b", base: "a", head: "b" }), node({ number: 1, title: "a", base: "b", head: "a" })])).prs;
+	assert.deepEqual(stackOf(loop, "o").map(({ pr }) => pr.number).sort(), [1, 2], "a loop of bases still lists each PR once");
+	const forkBase = parsePulls(answer([node({ number: 2, title: "b", base: "a", head: "b" }), node({ number: 1, title: "a", head: "a", owner: "someone" })])).prs;
+	assert.deepEqual(stackOf(forkBase, "o").map(({ prefix }) => prefix), ["", ""], "a fork's branch is not a base in this repository");
+	assert.match(threadsPrompt(p20), /^Address the unresolved review threads on PR #20/);
+	assert.match(ciPrompt(p20), /- lint: https:\/\/ci\/lint/);
+	assert.equal(firstLine("<!-- x -->\n\n## **Hello** `world` &amp; you\nnext"), "Hello world & you");
+	assert.equal(ghProblem({ code: "ENOENT" }, ""), "gh is not installed");
+	assert.equal(ghProblem({ code: 1 }, "HTTP 401: Bad credentials"), "gh is not signed in");
 });
