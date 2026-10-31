@@ -10,8 +10,27 @@ function host({ columns = 180, rows = 40 } = {}) {
 	const root = { render: () => [], [NODE]: () => native };
 	const terminal = { columns, rows };
 	let renders = 0;
-	const tui = { terminal, mode: "fullscreen", layoutRoot: root, requestRender: () => renders++ };
-	return { tui, root, native, terminal, renders: () => renders };
+	// Pi's raw input listeners, run before the focused component (the editor) as Pi's TUI does.
+	const listeners = new Set();
+	const editor = [];
+	const tui = {
+		terminal,
+		mode: "fullscreen",
+		layoutRoot: root,
+		requestRender: () => renders++,
+		addInputListener: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
+	};
+	/** Types `data` as Pi's terminal would: what the listeners leave goes to the editor. */
+	const type = (data) => {
+		let current = data;
+		for (const listener of listeners) {
+			const result = listener(current);
+			if (result?.consume) return;
+			if (result?.data !== undefined) current = result.data;
+		}
+		if (current.length) editor.push(current);
+	};
+	return { tui, root, native, terminal, renders: () => renders, type, editor, listeners };
 }
 
 const footerData = { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} };
@@ -401,4 +420,122 @@ test("moveTabTo puts a tab at a place, clamped, and slotAt finds the nearest slo
 	assert.equal(slotAt(slots, 8), 1);
 	assert.equal(slotAt(slots, 18), 2);
 	assert.equal(slotAt(slots, 99), 2);
+});
+
+// ---- The column's keyboard (T26): alt+p (caught by the column, not a Pi shortcut), or a click on a tab that asks for it ----
+
+// A tab that asks for the keyboard on a click and records the keys it gets; esc is not its own.
+function keyTab(id) {
+	const seen = { keys: [], host: undefined };
+	const factory = (host) => {
+		seen.host = host;
+		return {
+			id,
+			render: (width) => [host.focused() === id ? "focused".padEnd(width) : "idle".padEnd(width)],
+			handleClick(_line, button) {
+				if (button === "left") host.focus(id);
+				return true;
+			},
+			handleKey(data) {
+				seen.keys.push(data);
+				return data !== "\x1b";
+			},
+		};
+	};
+	return { seen, factory };
+}
+
+test("alt+p opens PROF with the keyboard: keys go to the tab, not the editor; esc gives them back", async () => {
+	const { seen, factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		assert.equal(loaded.shortcuts["alt+p"], undefined, "the column's own key, not a Pi shortcut");
+		loaded.type("a");
+		assert.deepEqual(loaded.editor, ["a"], "unfocused: the editor types as before");
+		loaded.type("alt+p");
+		assert.deepEqual(loaded.editor, ["a"], "alt+p is the column's");
+		assert.match(loaded.barRows()[0], /\[ 3:PROF \]/, "the PROF tab opens");
+		assert.equal(loaded.rows()[0].trim(), "focused");
+		for (const key of ["\x1b[D", "\x1b[B", "\r", "e", "s", "\x13", "u", "d", "q"]) loaded.type(key);
+		assert.deepEqual(loaded.editor, ["a"], "nothing reached the editor");
+		assert.deepEqual(seen.keys, ["\x1b[D", "\x1b[B", "\r", "e", "s", "\x13", "u", "d", "q"]);
+		loaded.type("\x1b");
+		assert.deepEqual(loaded.editor, ["a"], "esc itself is taken");
+		assert.equal(loaded.rows()[0].trim(), "idle", "the keyboard is the editor's again");
+		loaded.type("b");
+		assert.deepEqual(loaded.editor, ["a", "b"]);
+		assert.equal(seen.keys.length, 10);
+	});
+});
+
+test("a click on the tab's card asks for the keyboard; mouse and terminal reports still pass through", async () => {
+	const { seen, factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		loaded.clickTab("3:PROF");
+		loaded.rows();
+		loaded.type("x");
+		assert.deepEqual(loaded.editor, ["x"], "opening the tab alone keeps the editor's keyboard");
+		loaded.content().handleMouse({ type: "click", button: "left", x: 3, y: 0, width: 60, height: 38, screenX: 123, screenY: 2 });
+		loaded.type("y");
+		assert.deepEqual(loaded.editor, ["x"]);
+		assert.deepEqual(seen.keys, ["y"]);
+		const mouse = "\x1b[<0;10;5M";
+		loaded.type(mouse);
+		loaded.type("\x1b[200~pasted\x1b[201~");
+		assert.deepEqual(loaded.editor, ["x", mouse, "\x1b[200~pasted\x1b[201~"], "a mouse report and a paste are not keys for the tab");
+		assert.equal(loaded.rows()[0].trim(), "idle", "a paste gives the keyboard back so it lands in the editor");
+	});
+});
+
+test("another tab, a narrow terminal, or alt+p again give the keyboard back", async () => {
+	const { factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		const shortcut = () => loaded.type("alt+p");
+		shortcut();
+		loaded.clickTab("1:MAIN");
+		loaded.rows();
+		loaded.type("a");
+		assert.deepEqual(loaded.editor, ["a"], "MAIN took the column");
+		shortcut();
+		loaded.rows();
+		loaded.type("alt+p");
+		loaded.type("b");
+		assert.deepEqual(loaded.editor, ["a", "b"], "alt+p again leaves keyboard mode");
+		shortcut();
+		loaded.terminal.columns = 139;
+		loaded.root[NODE]();
+		loaded.type("c");
+		assert.deepEqual(loaded.editor, ["a", "b", "c"], "no column, no keyboard mode");
+	});
+});
+
+test("below the breakpoint alt+p reaches Pi as before, and the editor keeps its keys", async () => {
+	const loaded = await wide({ columns: 100 });
+	loaded.root[NODE]();
+	loaded.type("alt+p");
+	loaded.type("a");
+	assert.deepEqual(loaded.editor, ["alt+p", "a"]);
+	loaded.terminal.columns = 180;
+	assert.match(loaded.barRows()[0], /\[ 1:MAIN \]/, "the column opens later on MAIN, as before");
+});
+
+test("the tab's own pop-up keeps the keyboard with the tab; anything else taking Pi's focus gives it back", async () => {
+	const popup = { id: "picker" };
+	const { seen, factory } = keyTab("prof");
+	const withPopup = (host) => ({ ...factory(host), keyOverlay: () => popup });
+	await withTab("prof", withPopup, async () => {
+		const loaded = await wide();
+		loaded.tui.focusedComponent = { id: "editor" };
+		loaded.type("alt+p");
+		loaded.rows();
+		loaded.tui.focusedComponent = popup;
+		loaded.type("g");
+		assert.deepEqual(seen.keys, ["g"], "the picker's keys come through the tab");
+		loaded.tui.focusedComponent = { id: "a dialog" };
+		loaded.type("y");
+		assert.deepEqual(loaded.editor, ["y"], "the dialog gets its key");
+		assert.equal(loaded.rows()[0].trim(), "idle");
+	});
 });

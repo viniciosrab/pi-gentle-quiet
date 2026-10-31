@@ -1,5 +1,5 @@
 // gentle-pi's agent-model profiles for the PROF tab, read at runtime and read-only: the profile list, which
-// one is in effect in this session (◉), by default (★) and in this repository (⌂), and the routing of the
+// one is in effect in this session (◉), by default (●) and in this repository (⌂), and the routing of the
 // one in effect. The readers are gentle-pi's own (lib/agent-profiles.ts, agent-profile-pin.ts,
 // session-profile-binding.ts, agent-home.ts), imported the way gentle-quiet imports its command palette;
 // a reader gentle-pi no longer exports is replaced by a read of the same file. Only the repository's root
