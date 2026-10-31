@@ -174,16 +174,24 @@ test("the auto scrollbar gets a column of its own, so it never paints over a too
 	assert.equal(new ScrollView({}, { scrollbar: "auto" }).getContentWidth(1), 1);
 });
 
-test("the scrollbar hugs the right edge, in line with the editor's rules, instead of the cell's middle", async () => {
+test("the scrollbar thumb sits centered on its thin track", async () => {
 	await load();
 	const { ScrollView } = await import("@earendil-works/pi-tui");
+	// Each glyph's horizontal span in eighths of the cell.
+	const span = { "▕": [7, 8], "▐": [4, 8], "\u{1FB75}": [6, 7], "\u{1FB88}": [5, 8] };
 	for (const options of [{}, { scrollbarTrackStyle: (text) => `<${text}>`, scrollbarThumbStyle: (text) => `[${text}]` }]) {
 		const view = new ScrollView({}, { scrollbar: "auto", ...options });
 		view.getContentWidth(80); // Pi asks it on every render, before it paints the scrollbar
 		view.getContentWidth(80);
 		const custom = !!options.scrollbarTrackStyle;
-		assert.equal(plain(view.scrollbarTrackStyle("│")), custom ? "<▕>" : "▕", "the track is the right eighth block, styled once");
-		assert.equal(plain(view.scrollbarThumbStyle("┃")), custom ? "[▐]" : "▐", "the idle thumb is the right half block");
-		assert.equal(plain(view.scrollbarThumbStyle("█")), custom ? "[█]" : "█", "the dragged thumb stays a full block");
+		assert.equal(plain(view.scrollbarTrackStyle("│")), custom ? "<\u{1FB75}>" : "\u{1FB75}", "the track is one eighth in from the edge, styled once");
+		assert.equal(plain(view.scrollbarThumbStyle("┃")), custom ? "[\u{1FB75}]" : "\u{1FB75}", "the idle thumb is the track's own eighth, in the thumb's color");
+		assert.equal(plain(view.scrollbarThumbStyle("█")), custom ? "[\u{1FB88}]" : "\u{1FB88}", "the hovered or dragged thumb grows to the right three eighths");
+		const [t0, t1] = span[plain(view.scrollbarTrackStyle("│")).replace(/[<>]/g, "")];
+		const [i0, i1] = span[plain(view.scrollbarThumbStyle("┃")).replace(/[[\]]/g, "")];
+		const [h0, h1] = span[plain(view.scrollbarThumbStyle("█")).replace(/[[\]]/g, "")];
+		assert.equal((i0 + i1) / 2, (t0 + t1) / 2, "the idle thumb's center is the track's center");
+		assert.equal((h0 + h1) / 2, (t0 + t1) / 2, "and so is the hovered thumb's");
+		assert.ok(h1 - h0 > i1 - i0, "the hovered thumb is wider than the idle one");
 	}
 });

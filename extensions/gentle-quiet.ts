@@ -885,16 +885,22 @@ for (const [name, framed] of Object.entries(ownFraming)) {
 // tool box or of a user message bar. Like "always", it gets a column of its own, at the right edge.
 const SCROLLBAR_COLUMN_ORIGINAL = Symbol.for("gentle-quiet.scrollbarColumn.original");
 // Pi draws the scrollbar with "│" and "┃", centered in their cell, so it sits half a column inside the
-// editor's rules. Their right-aligned blocks put it on the right edge; a dragged "█" fills the cell anyway.
+// editor's rules. These blocks move it to the right, with the thumb centered on its thin track. A wider
+// thumb cannot be centered on a track flush with the edge without leaving the cell, so the track sits one
+// eighth in: U+1FB75 (vertical one eighth block-7) and U+1FB88 (right three eighths block) share a center.
+// Three eighths is the widest thumb centered there, so the idle thumb is the track's eighth in the thumb's
+// color and Pi's hovered or dragged "█" grows to the three eighths, instead of filling the cell leftwards.
 const SCROLLBAR_EDGE = Symbol.for("gentle-quiet.scrollbarEdge");
-const EDGE_GLYPHS = { "│": "▕", "┃": "▐" };
+// Pi's own style functions, saved the first time, so /reload wraps them again instead of stacking wrappers.
+const SCROLLBAR_STYLES = Symbol.for("gentle-quiet.scrollbarStyles");
+const EDGE_GLYPHS = { "│": "\u{1FB75}", "┃": "\u{1FB75}", "█": "\u{1FB88}" };
 function hugRightEdge(view) {
-	if (view[SCROLLBAR_EDGE] || typeof view.scrollbarTrackStyle !== "function" || typeof view.scrollbarThumbStyle !== "function") return;
-	const track = view.scrollbarTrackStyle;
-	const thumb = view.scrollbarThumbStyle;
+	if (view[SCROLLBAR_EDGE] === EDGE_GLYPHS || typeof view.scrollbarTrackStyle !== "function" || typeof view.scrollbarThumbStyle !== "function") return;
+	// The chat view outlives /reload: a view a previous load wrapped gets this load's glyphs.
+	const { track, thumb } = (view[SCROLLBAR_STYLES] ??= { track: view.scrollbarTrackStyle, thumb: view.scrollbarThumbStyle });
 	view.scrollbarTrackStyle = (text) => track(EDGE_GLYPHS[text] ?? text);
 	view.scrollbarThumbStyle = (text) => thumb(EDGE_GLYPHS[text] ?? text);
-	view[SCROLLBAR_EDGE] = true;
+	view[SCROLLBAR_EDGE] = EDGE_GLYPHS;
 }
 const scrollProto = PiTui.ScrollView?.prototype;
 // Installed again on every load, so /reload brings a changed patch in: it always wraps Pi's own
