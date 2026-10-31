@@ -7,7 +7,7 @@
 // file in the editor tab, as a click did before.
 //
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
-// theme), without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
+// theme) but with code blocks framed instead of fenced and "•" bullets, without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
 // footer). Where this Pi cannot render Markdown, the source is shown and there is no m.
 //
 // Given text instead of a file (a memory from the MEM tab, ./mem.ts) shows the same way: "Read-only — <label>",
@@ -129,15 +129,74 @@ function highlighted(file, lines) {
 	}
 }
 
-// The file rendered as Markdown at `width`, trailing blank rows dropped; undefined when this Pi cannot.
-function renderedMarkdown(lines, width) {
+// Mark the rows Pi draws for a code block's fence lines and code lines, so the block can be redrawn framed.
+// Control characters, which Pi measures as zero columns wide.
+const FENCE = "\u0000\u0001";
+const CODE = "\u0000\u0002";
+
+// Pi's Markdown theme at `width`, minus the syntax Pi still shows: a code block's fence lines (Pi 1.4.0 draws
+// them as "```lang" and "```") become rows marked FENCE, and its lines, without Pi's indent, rows marked CODE
+// that are cut with "…" to fit the frame, so Pi does not wrap them. A list item's "- " marker becomes "• " of
+// the same width, so wrapped and nested items stay aligned. Ordered numbers stay.
+function previewTheme(theme, width) {
+	const room = Math.max(1, width - 4 - visibleWidth(CODE));
+	const code = (line) => CODE + (visibleWidth(line) > room ? truncateToWidth(line, room, "…") : line);
+	const block = theme.codeBlock ?? ((text) => text);
+	const bullet = theme.listBullet ?? ((text) => text);
+	return {
+		...theme,
+		codeBlockIndent: "",
+		codeBlock: (line) => code(block(line)),
+		...(typeof theme.highlightCode === "function" && { highlightCode: (text, lang) => theme.highlightCode(text, lang).map((line) => code(String(line))) }),
+		codeBlockBorder: (text) => FENCE + String(text).replace(/^`+/, ""),
+		listBullet: (text) => bullet(String(text).replace(/^[-*+] /, "• ")),
+	};
+}
+
+// A code block as a square frame in the border color, as wide as `width`: its language (dim) in the top line,
+// each code row padded (or cut with "…") between "│ " and " │".
+// ┌ sh ─────┐
+// │ npm test │
+// └──────────┘
+function framedCode(language, rows, width, paint) {
+	const inner = Math.max(1, width - 4);
+	const line = (text) => paint("border", text);
+	const fit = (row) => {
+		const cut = visibleWidth(row) > inner ? truncateToWidth(row, inner, "…") : row;
+		return cut + " ".repeat(Math.max(0, inner - visibleWidth(cut)));
+	};
+	const label = visibleWidth(language) > width - 5 ? truncateToWidth(language, Math.max(1, width - 5), "…") : language;
+	const top = label ? `${line("┌ ")}${paint("dim", label)}${line(` ${"─".repeat(Math.max(1, width - visibleWidth(label) - 4))}┐`)}` : line(`┌${"─".repeat(inner + 2)}┐`);
+	return [top, ...rows.map((row) => `${line("│")} ${fit(row)} ${line("│")}`), line(`└${"─".repeat(inner + 2)}┘`)];
+}
+
+// The file rendered as Markdown at `width`, trailing blank rows dropped; undefined when this Pi cannot. Each
+// code block is drawn framed, without its fence lines, colored through `paint(role, text)`.
+function renderedMarkdown(lines, width, paint = (_role, text) => text) {
 	try {
 		const { Markdown } = PiTui;
 		const { getMarkdownTheme } = PiCodingAgent;
 		if (typeof Markdown !== "function" || typeof getMarkdownTheme !== "function") return undefined;
-		const rows = new Markdown(lines.join("\n"), 0, 0, getMarkdownTheme()).render(width);
+		const rows = new Markdown(lines.join("\n"), 0, 0, previewTheme(getMarkdownTheme(), width)).render(width);
 		if (!Array.isArray(rows)) return undefined;
-		const out = rows.map(String);
+		const out = [];
+		let block; // { prefix, language, rows } of the code block being read
+		const close = () => {
+			out.push(...framedCode(block.language, block.rows, width - visibleWidth(block.prefix), paint).map((row) => block.prefix + row));
+			block = undefined;
+		};
+		for (const row of rows.map(String)) {
+			const fence = row.indexOf(FENCE);
+			if (fence >= 0) {
+				if (block) close();
+				else block = { prefix: row.slice(0, fence), language: row.slice(fence + FENCE.length).replace(/\x1b\[[0-9;:]*m/g, "").trim(), rows: [] };
+			} else if (block) {
+				// A code row, or the rest of one Pi wrapped anyway (in a narrower list item or quote).
+				const at = row.indexOf(CODE);
+				block.rows.push((at >= 0 ? row.slice(at + CODE.length) : row).replace(/ +$/, ""));
+			} else out.push(row);
+		}
+		if (block) close();
 		while (out.length && !out.at(-1).trim()) out.pop();
 		return out.length ? out : undefined;
 	} catch {
@@ -234,7 +293,7 @@ class FilePreview {
 	markdownRows(width) {
 		if (!this.markdown || !this.content?.lines) return undefined;
 		if (this.rendered?.width !== width) {
-			const rows = renderedMarkdown(this.content.lines, width);
+			const rows = renderedMarkdown(this.content.lines, width, (role, text) => this.paint(role, text));
 			if (!rows) {
 				this.markdown = this.canRender = false;
 				return undefined;
