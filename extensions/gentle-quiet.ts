@@ -885,9 +885,10 @@ for (const [name, framed] of Object.entries(ownFraming)) {
 // tool box or of a user message bar. Like "always", it gets a column of its own, at the right edge.
 const SCROLLBAR_COLUMN_ORIGINAL = Symbol.for("gentle-quiet.scrollbarColumn.original");
 // Pi draws the scrollbar with "│" and "┃", centered in their cell, so it sits half a column inside the
-// editor's rules. Their right-aligned blocks put it on the right edge; a dragged "█" fills the cell anyway.
+// editor's rules. The right half block puts it on the right edge; the track takes the same block as the
+// thumb (only its color tells them apart), so the thumb sits right on the track. A dragged "█" fills the cell.
 const SCROLLBAR_EDGE = Symbol.for("gentle-quiet.scrollbarEdge");
-const EDGE_GLYPHS = { "│": "▕", "┃": "▐" };
+const EDGE_GLYPHS = { "│": "▐", "┃": "▐" };
 function hugRightEdge(view) {
 	if (view[SCROLLBAR_EDGE] || typeof view.scrollbarTrackStyle !== "function" || typeof view.scrollbarThumbStyle !== "function") return;
 	const track = view.scrollbarTrackStyle;

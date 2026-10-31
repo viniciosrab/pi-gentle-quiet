@@ -182,7 +182,7 @@ test("the scrollbar hugs the right edge, in line with the editor's rules, instea
 		view.getContentWidth(80); // Pi asks it on every render, before it paints the scrollbar
 		view.getContentWidth(80);
 		const custom = !!options.scrollbarTrackStyle;
-		assert.equal(plain(view.scrollbarTrackStyle("│")), custom ? "<▕>" : "▕", "the track is the right eighth block, styled once");
+		assert.equal(plain(view.scrollbarTrackStyle("│")), custom ? "<▐>" : "▐", "the track is the thumb's right half block, so the thumb sits right on it");
 		assert.equal(plain(view.scrollbarThumbStyle("┃")), custom ? "[▐]" : "▐", "the idle thumb is the right half block");
 		assert.equal(plain(view.scrollbarThumbStyle("█")), custom ? "[█]" : "█", "the dragged thumb stays a full block");
 	}

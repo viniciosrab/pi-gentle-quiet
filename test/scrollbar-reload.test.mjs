@@ -13,7 +13,7 @@ test("/reload installs the new scrollbar patch over the one a previous load left
 	await import("../extensions/gentle-quiet.ts");
 	const view = new ScrollView({}, { scrollbar: "auto" });
 	assert.equal(view.getContentWidth(80), 79, "the scrollbar keeps its own column");
-	assert.equal(plain(view.scrollbarTrackStyle("│")), "▕", "and hugs the right edge without restarting Pi");
+	assert.equal(plain(view.scrollbarTrackStyle("│")), "▐", "and hugs the right edge without restarting Pi");
 	assert.equal(new ScrollView({}, { scrollbar: "always" }).getContentWidth(80), 79);
 	assert.equal(new ScrollView({}, { scrollbar: "hidden" }).getContentWidth(80), 80);
 });
