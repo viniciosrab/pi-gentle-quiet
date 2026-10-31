@@ -59,7 +59,7 @@ test("the status line is a Status card and a Context card on top of the column, 
 	assert.match(out[5], /^│ Model {2,}\S/u, "the model under the branch");
 	assert.ok(out[6].startsWith("└") && out[7].startsWith("┌"), "the Context card right under it");
 	assert.equal(out[8], "│ Context");
-	assert.match(out[10], /^│ .*tokens +\S 28%$/u);
+	assert.match(out[10], /^│ .*tokens +28%$/u);
 	assert.ok(status.render(60).every((row) => [...plain(row)].length <= 60));
 });
 

@@ -2793,7 +2793,9 @@ function statusCardRows(t, footerData, width, options) {
 	// Sections are split by blank rows.
 	const status = [...title("Status"), ...sections.flatMap((rows, index) => [...(index ? [""] : []), ...rows.map(row)])];
 
-	const { percent, used, window, percentText } = p.context;
+	// The percent alone on the right: the bar under it is the card's gauge, so no ring before it.
+	const { percent, used, window } = p.context;
+	const percentText = fg(t, "text", percent === null ? "?%" : `${Math.round(percent)}%`);
 	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
 	const filled = percent === null ? 0 : Math.round((Math.max(0, Math.min(100, percent)) / 100) * inner);
 	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");

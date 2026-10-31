@@ -67,10 +67,10 @@ test("the Status card keeps Project, Branch and the statuses; the context moves 
 	assert.deepEqual(context.slice(0, 2), ["Context", ""], "a title row like the other cards");
 });
 
-test("the Context card: tokens in use and the gauge, a bar across the card, tokens spent and the cost", async () => {
+test("the Context card: tokens in use and the percent, a bar across the card, tokens spent and the cost", async () => {
 	const { cards, raw } = await wide({ session: { entries: spent } });
 	const [, context] = cards();
-	assert.match(context[2], /^56k \/ 200k tokens +\S 28%$/u, "ctx's numbers, the gauge and percent on the right");
+	assert.match(context[2], /^56k \/ 200k tokens +28%$/u, "ctx's numbers and the percent on the right, no gauge ring (the bar under it is the gauge)");
 	assert.equal([...context[2]].length, 55, "the inner width of the column's cards");
 	assert.equal(context[3], `${"■".repeat(15)}${"□".repeat(40)}`, "28% of 55 cells");
 	assert.match(context[4], /^R40k W2\.0k CH\d+\.\d% +cost \$1\.75$/, "the tokens setting decides the figures");
@@ -116,7 +116,7 @@ test("an unknown context keeps its first row, without the bar; rows whose data i
 	const { cards } = await wide({ session: { usage: undefined } });
 	const [, context] = cards();
 	assert.equal(context.length, 3, "title, blank, the tokens row");
-	assert.match(context[2], /^\? tokens +\S \?%$/u, "the status line's unknown context");
+	assert.match(context[2], /^\? tokens +\?%$/u, "an unknown context: ?%, no ring");
 });
 
 test("the Status and Context cards are there even when nothing else is", async () => {
