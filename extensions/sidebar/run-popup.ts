@@ -353,9 +353,11 @@ export function threadLines(thread, theme, width, lib) {
 
 // A subagent's own session (./run-data.ts SessionLog), drawn as the main conversation draws its messages: each
 // user message folded to its first line (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
-// call by `drawTool(item, theme, width)` (gentle-quiet's quiet rows), a blank row between them.
+// call by `drawTool(item, theme, width)` (gentle-quiet's quiet rows), a blank row between them. Every row starts at
+// the pop-up's own edge, the header's column: the conversation's one-column margin is taken off the tool rows.
 
-const margin = (rows) => rows.map((row) => ` ${row}`);
+// A row without its first column when that is a space, past the escapes before it.
+const outdent = (row) => row.replace(/^((?:\x1b\[[0-9;:]*m)*) /, "$1");
 
 // Assistant text as Pi renders it (pi-tui's Markdown with Pi's Markdown theme), else wrapped as it is.
 function markdownRows(text, width) {
@@ -381,25 +383,25 @@ function folded(text) {
 }
 
 function sessionItem(item, theme, width, drawTool) {
-	const room = Math.max(1, width - 1);
 	switch (item.kind) {
 		case "user":
-			return [` ${paint(theme, "dim", truncateToWidth(`› ${folded(item.text)}`, room, "…"))}`];
+			return [paint(theme, "dim", truncateToWidth(`› ${folded(item.text)}`, width, "…"))];
 		case "thinking":
 			// Folded as the main conversation shows hidden thinking: one dim italic row, not the text.
-			return margin([paint(theme, "dim", "\x1b[3mThinking...\x1b[23m")]);
+			return [paint(theme, "dim", "\x1b[3mThinking...\x1b[23m")];
 		case "text":
-			return margin(markdownRows(String(item.text).trim(), room));
+			return markdownRows(String(item.text).trim(), width);
 		case "tool":
 			try {
 				if (typeof drawTool === "function") {
-					const rows = drawTool(item, theme, width);
-					if (Array.isArray(rows)) return rows.map(String);
+					// Drawn a column wider, as the conversation draws it, then that column's margin taken off.
+					const rows = drawTool(item, theme, width + 1);
+					if (Array.isArray(rows)) return rows.map((row) => outdent(String(row)));
 				}
 			} catch {
 				// the plain rows below
 			}
-			return [` ${paint(theme, "toolTitle", item.name)}`, ` ${paint(theme, item.isError ? "error" : "dim", `└ ${item.result ? (item.isError ? "error" : "done") : "running…"}`)}`];
+			return [paint(theme, "toolTitle", item.name), paint(theme, item.isError ? "error" : "dim", `└ ${item.result ? (item.isError ? "error" : "done") : "running…"}`)];
 		default:
 			return [];
 	}
