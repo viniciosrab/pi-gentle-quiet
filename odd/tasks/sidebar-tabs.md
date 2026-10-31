@@ -68,7 +68,7 @@ Branch `feat/sidebar-tabs`, stacked on `feat/sidebar-cards` (7969775).
 | T24 | S5 (L24) | worker: PROF edits profiles in the column (switch, model, effort) without gentle-pi's screen | 0aa794e |
 | T25 | S5 (L25) | worker: PROF buttons [ Use in this session ] [ Make default ] [ Save ] as gentle-pi's screen; edits staged until Save | 4cf6eae |
 | T27 | S14 (L27) | parent (pr-data.ts, tests) + worker mvvoludg-1-jdbd (pr.ts): PR tab as a stack with verdicts, accordion detail, Fix with agent, one GraphQL call | 354f8a8 |
-| T28 | S14 (L28) | worker: CI chip with the passed/total count on every PR row | |
+| T28 | S14 (L28) | worker mvvpcqjx-1-x7al: CI chip with the passed/total count on every PR row | 705cc6c |
 | T7 | S3 (L5) | worker: drop the AGENTS tab; Agents card inline above the editor even with the side column | 495a501 |
 
 ## Log
