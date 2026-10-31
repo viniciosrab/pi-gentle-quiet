@@ -72,7 +72,11 @@ same; only how it is drawn changes.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
-  **Icons**). Without the side column the status line keeps `⠋ N jobs`.
+  **Icons**). Without the side column the status line keeps `⠋ N jobs`. A running job's row ends with `↗`:
+  a click on it opens the same live pop-up as a subagent's, with the job's label and id, running or finished with
+  its exit code, the elapsed time, and the tail of its output as it is written (like `tail -f`; the log gentle-pi
+  keeps for the job, found among the files Pi holds open on Linux). Elsewhere, or when that log cannot be found,
+  the click opens gentle-pi's `/gentle:jobs` list.
 - **One status line** with your folder, branch, changed lines, context, cost and plan usage. The
   model and its effort stay at the bottom right above the editor at all times, dimmed: at the end
   of the `Working` row while Pi works, and on that same row when it is idle.

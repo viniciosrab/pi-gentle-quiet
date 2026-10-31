@@ -94,8 +94,8 @@ test("with Gentle Shell off, running jobs get their own card on top of the side 
 	assert.equal(top, 0, "the Jobs card comes first under the Status card");
 	assert.match(out[1], /^│ ⧗ Jobs ▾ Collapse {2}2 jobs/u, "a still icon on the title: only running jobs spin");
 	assert.equal(out[2], "│", "a blank row under the title");
-	assert.match(out[3], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm test +3s$/u, "newest first, one space after the glyph, elapsed on the right");
-	assert.match(out[4], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm run build +12s$/u);
+	assert.match(out[3], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm test +3s ?↗$/u, "newest first, one space after the glyph, elapsed on the right, then the popup's ↗");
+	assert.match(out[4], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm run build +12s ?↗$/u);
 	assert.ok(out[5].startsWith("└"));
 	assert.ok(out.slice(2).every((row) => !row.includes("⧗")), "the rows spin with Pi's Working spinner");
 });
@@ -203,7 +203,8 @@ test("clicking the Jobs title in the column collapses the card; the wheel still 
 	const { publish, layout, rows } = await wide();
 	publish([build, tests]);
 	const mouse = (type, y, extra = {}) => layout().rail.handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 100, screenY: y, ...extra });
-	assert.equal(mouse("click", 3)?.handled, undefined, "a job row is not the control");
+	assert.equal(mouse("click", 3)?.handled, true, "a running job row's click is handled (its popup or /gentle:jobs)");
+	assert.match(rows()[1], /Jobs ▾ Collapse/, "a job row is not the collapse control: the card stays expanded");
 	assert.equal(mouse("wheel", 1, { wheelDelta: 3 })?.handled, undefined, "the card leaves the wheel to the column");
 	assert.equal(mouse("click", 1)?.handled, true);
 	assert.match(rows()[1], /Jobs ▸ Expand/);

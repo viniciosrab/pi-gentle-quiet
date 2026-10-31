@@ -152,3 +152,131 @@ export function rowTask(text, tasks) {
 	const labelled = working.filter((task) => shown(row, task.label));
 	return (labelled.length ? labelled : working).sort(newest)[0]?.id;
 }
+
+// ---------------------------------------------------------------------------
+// Jobs: gentle-pi writes a background job's output to <tmp>/gentle-jobs-XXXX/<id>.log through a stream the Pi process
+// holds open while the job runs. The folder is not published, so it is found in /proc/self/fd (Linux only).
+// ---------------------------------------------------------------------------
+
+const JOB_LOG = /^(.*\/gentle-jobs-[^/]+)\/([^/]+)\.log$/;
+
+/** Every gentle-pi job log this process holds open: id -> path. Empty off Linux or when /proc cannot be read. */
+export function scanJobLogs({ readdir = fs.readdirSync, readlink = fs.readlinkSync, platform = process.platform, dir = "/proc/self/fd" } = {}) {
+	const logs = new Map();
+	if (platform !== "linux") return logs;
+	let entries;
+	try {
+		entries = readdir(dir);
+	} catch {
+		return logs;
+	}
+	for (const fd of entries) {
+		let target;
+		try {
+			target = String(readlink(path.join(dir, String(fd))));
+		} catch {
+			continue; // closed since the listing, or not ours to read
+		}
+		const match = JOB_LOG.exec(target);
+		if (match) logs.set(match[2], target);
+	}
+	return logs;
+}
+
+/** The log of job `id` among the files this process holds open, matched on the whole id (job-1 is not job-10). */
+export function findJobLog(id, options) {
+	return scanJobLogs(options).get(String(id));
+}
+
+/**
+ * Job logs found in /proc and remembered: a job whose stream has closed (it finished) keeps the path seen while it
+ * ran, and a job never seen open is looked for in the gentle-jobs folders seen so far.
+ */
+export class JobLogs {
+	constructor(options = {}) {
+		this.options = options;
+		this.exists = options.exists ?? fs.existsSync;
+		this.paths = new Map();
+		this.dirs = new Set();
+	}
+
+	find(id) {
+		const key = String(id);
+		for (const [seen, file] of scanJobLogs(this.options)) {
+			this.paths.set(seen, file);
+			this.dirs.add(path.dirname(file));
+		}
+		if (this.paths.has(key)) return this.paths.get(key);
+		if (key.includes("/")) return undefined;
+		for (const dir of this.dirs) {
+			const file = path.join(dir, `${key}.log`);
+			try {
+				if (this.exists(file)) return file;
+			} catch {
+				// unreadable: the next folder
+			}
+		}
+		return undefined;
+	}
+}
+
+// A line of a job's output as the pop-up can draw it: no escape sequences (colors, links, cursor moves), a carriage
+// return's overwrite kept as its last state, tabs as spaces, no other control characters.
+const ESCAPES = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+function logLine(line) {
+	const text = line.replace(ESCAPES, "").replace(/\r+$/, "");
+	return text.slice(text.lastIndexOf("\r") + 1).replace(/\t/g, "    ").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+export const TAIL_BYTES = 256 * 1024;
+
+/** The last `maxBytes` of a log as lines: { lines, cut, stamp }, cut when the start was left out; { error } when it cannot. */
+export function readTail(file, maxBytes = TAIL_BYTES, files = fs) {
+	let fd;
+	try {
+		fd = files.openSync(file, "r");
+		const size = files.fstatSync(fd).size;
+		const start = Math.max(0, size - maxBytes);
+		const buffer = Buffer.alloc(size - start);
+		let read = 0;
+		while (read < buffer.length) {
+			const bytes = files.readSync(fd, buffer, read, buffer.length - read, start + read);
+			if (!bytes) break;
+			read += bytes;
+		}
+		const lines = buffer.subarray(0, read).toString("utf8").split("\n");
+		if (start > 0) lines.shift(); // the line the cut went through
+		if (lines.at(-1) === "") lines.pop();
+		return { lines: lines.map(logLine), cut: start > 0, stamp: `${size}` };
+	} catch (error) {
+		return { error: error?.code ?? error?.message ?? String(error) };
+	} finally {
+		if (fd !== undefined) {
+			try {
+				files.closeSync(fd);
+			} catch {
+				// already closed
+			}
+		}
+	}
+}
+
+// The Jobs card marks a running job with gentle-pi's hourglass, which gentle-quiet draws as Pi's Working spinner.
+const JOB_RUNNING = new Set(["⧗", "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
+
+/**
+ * The running job each row of the Jobs card (its plain texts) shows, or undefined: a row with the running glyph
+ * whose label is a running job's, the newest first, each job on one row only.
+ */
+export function jobRows(texts, jobs) {
+	const running = (Array.isArray(jobs) ? jobs : []).filter((job) => job?.status === undefined && typeof job.id === "string").sort((a, b) => b.startedAt - a.startedAt);
+	const used = new Set();
+	return texts.map((text) => {
+		const match = LEAD.exec(String(text));
+		if (!match || !JOB_RUNNING.has(match[1])) return undefined;
+		const job = running.find((candidate) => !used.has(candidate.id) && shown(match[2], candidate.label));
+		if (!job) return undefined;
+		used.add(job.id);
+		return job.id;
+	});
+}

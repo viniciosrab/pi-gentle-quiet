@@ -1,5 +1,5 @@
 // A live pop-up over Pi for one piece of running work, opened from a ↗ on its row: the Agents card's subagents
-// (openAgentPopup, below) and, later, the Jobs card's jobs. The same outline as the file preview (./tree-preview.ts)
+// (openAgentPopup, below) and the Jobs card's jobs (openJobPopup, at the end). The same outline as the file preview (./tree-preview.ts)
 // around a title row, a muted subtitle, then the body and the footer "Esc close · ↑↓ PgUp/PgDn Home/End · following".
 // The body comes from a source that the pop-up asks again every `interval` ms (500 by default) while it is open; a
 // change redraws it. It follows the end while the user has not scrolled up; ↑↓ a row, PgUp/PgDn a page, Home/End
@@ -12,11 +12,14 @@
 // gentle-pi's own renderThreadItem, as the alt+k window draws it, after "… N earlier items not kept" when gentle-pi
 // dropped some. When the task leaves the file (it finished) the last thread stays, under the status "finished".
 // Without gentle-pi's renderer or header the same rows are drawn here.
+//
+// A job's pop-up shows "label · id", its status ("running · 12s", "finished · exit 1 · 1m02s") and the tail of
+// its log, like tail -f: the last 256 KiB, without escape sequences, each line cut to the width.
 // @ts-nocheck
 
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { readActivity } from "./run-data.ts";
+import { readActivity, readTail } from "./run-data.ts";
 import { previewWidthFor } from "./tree-preview.ts";
 
 const CHROME = 6; // top, title, subtitle, blank row, footer, bottom
@@ -385,4 +388,48 @@ export function openAgentPopup(ctx, { file, taskId, lib, interval }) {
 	if (!first) return false;
 	let shown = false;
 	return openLivePopup(ctx, { load: () => (shown ? load() : ((shown = true), first)), interval });
+}
+
+// ---------------------------------------------------------------------------
+// A background job's output
+// ---------------------------------------------------------------------------
+
+// The status row of a job: "running · 12s", or "finished · exit 1 · 1m02s" once the Jobs card's event has its end.
+function jobStatus(job, now) {
+	const end = job.status === undefined ? now : job.endedAt ?? now;
+	const elapsed = typeof job.startedAt === "number" ? formatElapsed(end - job.startedAt) : "";
+	const exit = job.status !== undefined && typeof job.exitCode === "number" ? `exit ${job.exitCode}` : "";
+	return [job.status === undefined ? "running" : "finished", exit, elapsed].filter(Boolean).join(" · ");
+}
+
+/**
+ * The source of a job's pop-up: the tail of its log `file` (./run-data.ts readTail), under "label · id" and its
+ * status. `job()` gives the job as the Jobs card last heard of it; once the card drops it, the last one stays. A log
+ * that cannot be read for a moment keeps the lines last read.
+ */
+export function jobSource({ file, id, job, read = readTail, now = Date.now }) {
+	let known;
+	let tail = { lines: [], stamp: undefined };
+	return () => {
+		try {
+			known = job?.() ?? known;
+		} catch {
+			// the card's trouble: keep what was known
+		}
+		const next = read(file);
+		if (!next.error) tail = next;
+		const shown = tail;
+		return {
+			title: `${known?.label || id} · ${id}`,
+			subtitle: known ? jobStatus(known, now()) : "",
+			key: `${shown.stamp}`,
+			lines: (width, theme) => (shown.lines.length ? shown.lines.map((line) => (visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line)) : [paint(theme, "dim", "(no output yet)")]),
+		};
+	};
+}
+
+/** Opens the live pop-up of job `id` on its log `file`. Returns false, having opened nothing, without an overlay UI. */
+export function openJobPopup(ctx, { file, id, job, interval }) {
+	if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
+	return openLivePopup(ctx, { load: jobSource({ file, id, job }), interval });
 }

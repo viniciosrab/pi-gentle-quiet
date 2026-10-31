@@ -46,8 +46,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { activeRowStatus, findActivityFile, presenceDir, readActivity, rowTask } from "./sidebar/run-data.ts";
-import { openAgentPopup } from "./sidebar/run-popup.ts";
+import { activeRowStatus, findActivityFile, JobLogs, jobRows, presenceDir, readActivity, rowTask } from "./sidebar/run-data.ts";
+import { openAgentPopup, openJobPopup } from "./sidebar/run-popup.ts";
 import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
@@ -529,13 +529,13 @@ function drawBlock(target, width, options, t, rail = {}) {
 	const panel = rail.hang ? raw.filter((row) => !SCROLL_ROW.test(row.replace(SGR, ""))) : raw;
 	let rows = trimBlankEdges(flatten(panel, { ...options(), margin: false })).map(inProgressIcon);
 	if (rail.agents) rows = rows.map(agentGap);
-	if (rail.runs) rows = markRuns(rows, inner, t ?? theme, rail.runs, 1); // under the outline's top row
 	// Each Todos row loses its own indent: one row gentle-pi draws further left (a task's note) would
 	// otherwise shrink the shared indent flatten() removes and leave every other row padded.
 	if (rail.hang) rows = hangRows(rows.map((row) => row.replace(LEADING_SPACE, "$1")), inner, t ?? theme);
 	// In the column the Todos title leaves out gentle-pi's shortcut hint; "▾ Collapse" stays.
 	if (rail.hang && rail.spaced && rows.length) rows = [quietTitle(rows[0]), ...rows.slice(1)];
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
+	if (rail.runs) rows = markRuns(rows, inner, t ?? theme, rail.runs, 1); // under the outline's top row
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
 const STACK_WIDTH = 120;
@@ -572,16 +572,17 @@ function blockComponent(component, options, t, key) {
 	if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
 	// The Agents card's rows with a ↗, by the row the card drew them on: a left click there opens the subagent.
 	const hits = key === "gentle-agents" ? new Map() : undefined;
+	const marked = hits && { hits, match: agentRows };
 	return new Proxy(component, {
 		get(target, prop) {
 			if (prop === "render") {
 				return (width) => {
 					if (sidebar.active && !inline) return [];
 					if (hits) scheduleRuns();
-					return drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo", runs: hits });
+					return drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
 				};
 			}
-			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits) ?? target.handleMouse?.(event, ...rest);
+			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? target.handleMouse?.(event, ...rest);
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -1787,6 +1788,7 @@ async function openPalette(pi, palette, ctx) {
 // side column's outline; without the column the status line keeps its "⠋ N jobs".
 const JOBS_CARD = "jobs"; // its railBlocks key
 let jobsCard; // { list, collapsed, key, drawn } while gentle-pi's jobs files load
+const jobLogs = new JobLogs(); // the jobs' log paths seen in /proc, kept after a job's stream closes
 
 async function loadJobsCard() {
 	if (!gentleShellOff()) return undefined; // Gentle Shell draws its own card
@@ -1829,11 +1831,26 @@ async function registerJobsCard(pi) {
 		card.session = value.sessionId;
 		sidebar.tui?.requestRender?.();
 	});
-	// The column only hands a card the clicks on its title row, so any left click is the collapse control;
-	// the wheel goes back to the column.
+	// A snapshot of the session that was open before a switch is not drawn.
+	const jobs = () => (card.session === liveCtx?.sessionManager?.getSessionId?.() ? card.list : []);
+	// A running job's row ends with ↗ and a left click on it opens the job's live output (./sidebar/run-popup.ts),
+	// read from the log the Pi process holds open (./sidebar/run-data.ts JobLogs); with no log found, or off
+	// Linux, gentle-pi's /gentle:jobs list opens instead.
+	const marked = { hits: new Map(), match: (texts) => jobRows(texts, jobs()) };
+	const openJob = (id) => {
+		try {
+			const file = jobLogs.find(id);
+			const job = () => card.list.find((candidate) => candidate?.id === id);
+			if (file && openJobPopup(liveCtx, { file, id, job })) return;
+		} catch {
+			// gentle-pi's list below
+		}
+		piApi?.sendUserMessage?.("/gentle:jobs", { expandPromptTemplates: true });
+	};
+	// The column hands the card the clicks on its title row, so a left click there is the collapse control;
+	// the rows with a ↗ take theirs through `click`. The wheel goes back to the column.
 	const component = {
-		// A snapshot of the session that was open before a switch is not drawn.
-		render: (width) => jobsGlyphs(lib.renderJobsCard(card.session === liveCtx?.sessionManager?.getSessionId?.() ? card.list : [], theme, width, Date.now(), { collapsed: card.collapsed, collapseKey: card.key, collapseControl: true })),
+		render: (width) => jobsGlyphs(lib.renderJobsCard(jobs(), theme, width, Date.now(), { collapsed: card.collapsed, collapseKey: card.key, collapseControl: true })),
 		handleMouse(event) {
 			if (event?.type !== "click" || event.button !== "left") return undefined;
 			toggle();
@@ -1843,8 +1860,9 @@ async function registerJobsCard(pi) {
 	};
 	railBlocks.set(JOBS_CARD, {
 		component,
+		click: (event) => runClick(event, marked.hits, openJob),
 		draw: (width) => {
-			const rows = drawBlock(component, width, blockOptions("jobs"), theme, { spaced: true, agents: true });
+			const rows = drawBlock(component, width, blockOptions("jobs"), theme, { spaced: true, agents: true, runs: marked });
 			card.drawn = rows.length > 0;
 			return rows;
 		},
@@ -1928,17 +1946,22 @@ function refreshRuns() {
 	}
 }
 
-// The card's rows with the ↗ on each working task, and `hits` filled with their row (past `offset` rows of outline)
-// and task id (null without a file). The title row (0) and the "… N more" row have no status glyph.
-function markRuns(rows, room, t, hits, offset) {
+// The Agents card's task id on each row (null without a file): its working rows; undefined before the first read.
+// The "… N more" row has no status glyph.
+function agentRows(texts) {
+	if (runs.available === undefined) return undefined;
+	return texts.map((text) => (!activeRowStatus(text) ? undefined : runs.available ? rowTask(text, runs.tasks) : null));
+}
+
+// A card's rows with the ↗ on each row `match` names (from their plain texts), and `hits` filled with their row
+// (past `offset` rows of outline) and id. The title row (0) never gets one.
+function markRuns(rows, room, t, { hits, match }, offset) {
 	hits.clear();
-	if (runs.available === undefined) return rows;
+	const ids = match(rows.map((row) => row.replace(SGR, "")));
+	if (!ids) return rows;
 	return rows.map((row, index) => {
-		if (index === 0) return row;
-		const text = row.replace(SGR, "");
-		if (!activeRowStatus(text)) return row;
-		const id = runs.available ? rowTask(text, runs.tasks) : null;
-		if (id === undefined) return row;
+		const id = ids[index];
+		if (index === 0 || id === undefined) return row;
 		hits.set(index + offset, id);
 		return withRunMark(row, room, t);
 	});
@@ -1953,11 +1976,11 @@ function withRunMark(row, room, t) {
 	return `${truncateToWidth(row, Math.max(0, room - 1), "…")}${mark}`;
 }
 
-// A left click on a row with a ↗ opens its subagent; its press and release go nowhere either. Anything else is
-// gentle-pi's (undefined).
-function runClick(event, hits) {
+// A left click on a row with a ↗ opens what it shows (`open(id)`); its press and release go nowhere either.
+// Anything else is the card's own (undefined).
+function runClick(event, hits, open) {
 	if (event?.button !== "left" || !["press", "release", "click"].includes(event.type) || !hits.has(event.y)) return undefined;
-	if (event.type === "click") openRun(hits.get(event.y));
+	if (event.type === "click") open(hits.get(event.y));
 	return { handled: true };
 }
 
@@ -2888,7 +2911,7 @@ function railRows(width, keys = [JOBS_CARD, "gentle-todo"]) {
 		const block = railBlocks.get(key);
 		const section = block?.draw(width);
 		if (!section?.length) continue;
-		hits.push({ component: block.component, start: rows.length, height: section.length });
+		hits.push({ component: block.component, click: block.click, start: rows.length, height: section.length });
 		rows.push(...section);
 	}
 	return { rows, hits };
@@ -2905,6 +2928,9 @@ function railMouse(event, hits, scrollTop) {
 	if (!hit || typeof hit.component?.handleMouse !== "function") return undefined;
 	const local = { ...event, x: Math.max(0, event.x - 2), height: hit.height, width: Math.max(1, event.width - 4) };
 	if (event.type === "wheel") return hit.component.handleMouse({ ...local, y: y - hit.start });
+	// A card's own rows that take clicks (a running job's ↗).
+	const own = hit.click?.({ ...local, y: y - hit.start });
+	if (own) return own;
 	if (event.type !== "click" || y - hit.start !== 1) return undefined;
 	for (const row of TITLE_ROWS) {
 		const result = hit.component.handleMouse({ ...local, y: row });

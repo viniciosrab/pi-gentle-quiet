@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { configFile, load, painted, plain, theme } from "./helpers.mjs";
-import { findActivityFile, parseActivity, presenceDir, readActivity, rowTask, sessionHash } from "../extensions/sidebar/run-data.ts";
-import { fallbackThreadItem, openAgentPopup } from "../extensions/sidebar/run-popup.ts";
+import { findActivityFile, findJobLog, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, rowTask, sessionHash } from "../extensions/sidebar/run-data.ts";
+import { fallbackThreadItem, openAgentPopup, openJobPopup } from "../extensions/sidebar/run-popup.ts";
 
 const KEYS = { up: "\x1b[A", down: "\x1b[B", pageUp: "\x1b[5~", pageDown: "\x1b[6~", home: "\x1b[H", end: "\x1b[F", escape: "\x1b" };
 const hash = (id) => createHash("sha256").update(id).digest("hex");
@@ -475,4 +475,241 @@ test("without an overlay UI a click on a ↗ row opens gentle-pi's list", async 
 	const { mouse, sent } = await agentsCard("card-noui", { custom: null });
 	mouse("click", 2);
 	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]]);
+});
+
+// ---------------------------------------------------------------------------
+// Jobs (T31): the job's log found through /proc, its popup, the ↗ on the Jobs card
+// ---------------------------------------------------------------------------
+
+// A /proc/self/fd listing: fd -> link target, or an Error for a link that cannot be read.
+function fds(links) {
+	return {
+		readdir: () => Object.keys(links),
+		readlink: (file) => {
+			const target = links[path.basename(file)];
+			if (target instanceof Error) throw target;
+			return target;
+		},
+	};
+}
+
+test("the fd scan picks the log of the exact job id; other links, unreadable fds and other systems give nothing", () => {
+	const proc = fds({
+		0: "/dev/pts/3",
+		3: "socket:[12345]",
+		4: "/tmp/gentle-jobs-Ab12/job-10.log",
+		5: new Error("EACCES"),
+		6: "/tmp/gentle-jobs-Ab12/job-1.log",
+		7: "/tmp/other/job-2.log",
+		8: "/tmp/gentle-jobs-Ab12/job-3.log (deleted)",
+	});
+	assert.equal(findJobLog("job-1", proc), "/tmp/gentle-jobs-Ab12/job-1.log", "job-1, not job-10");
+	assert.equal(findJobLog("job-10", proc), "/tmp/gentle-jobs-Ab12/job-10.log");
+	assert.equal(findJobLog("job-2", proc), undefined, "outside a gentle-jobs folder");
+	assert.equal(findJobLog("job-3", proc), undefined, "a deleted file");
+	assert.equal(findJobLog("job-1", { ...proc, platform: "darwin" }), undefined, "no /proc off Linux");
+	assert.equal(findJobLog("job-1", { readdir: () => { throw new Error("ENOENT"); }, readlink: () => "" }), undefined);
+	assert.equal(findJobLog("job.1", fds({ 4: "/tmp/gentle-jobs-Ab12/jobx1.log" })), undefined, "the id is matched literally");
+});
+
+test("a job's log path is remembered once seen, and its folder serves jobs whose stream has closed", () => {
+	const links = { 4: "/tmp/gentle-jobs-Ab12/job-1.log" };
+	const existing = new Set(["/tmp/gentle-jobs-Ab12/job-1.log", "/tmp/gentle-jobs-Ab12/job-5.log"]);
+	const logs = new JobLogs({ ...fds(links), exists: (file) => existing.has(file) });
+	assert.equal(logs.find("job-1"), "/tmp/gentle-jobs-Ab12/job-1.log");
+	delete links[4]; // the job finished: gentle-pi closed its stream
+	assert.equal(logs.find("job-1"), "/tmp/gentle-jobs-Ab12/job-1.log", "the remembered path");
+	assert.equal(logs.find("job-5"), "/tmp/gentle-jobs-Ab12/job-5.log", "a log in the remembered folder");
+	assert.equal(logs.find("job-6"), undefined, "no such log there");
+	assert.equal(new JobLogs({ ...fds({}), exists: () => true }).find("job-1"), undefined, "nothing seen yet");
+});
+
+test("the log tail reads only the end of a big file, drops its cut first line and every escape sequence", () => {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "gq-tail-"));
+	const file = path.join(dir, "job-1.log");
+	writeFileSync(file, "\x1b[32mgreen\x1b[39m done\n\ttabbed\nprogress 10%\rprogress 100%\n\x1b]8;;http://x\x07link\x1b]8;;\x07 bell\x07\n");
+	const tail = readTail(file);
+	assert.deepEqual(tail.lines, ["green done", "    tabbed", "progress 100%", "link bell"]);
+	assert.equal(tail.cut, false);
+	assert.ok(tail.stamp);
+	writeFileSync(file, Array.from({ length: 100 }, (_, i) => `line ${String(i + 1).padStart(3, "0")}`).join("\n") + "\n");
+	const cut = readTail(file, 95); // the last 95 bytes: part of a line, then the last ten
+	assert.equal(cut.cut, true);
+	assert.deepEqual(cut.lines, Array.from({ length: 10 }, (_, i) => `line ${String(91 + i).padStart(3, "0")}`), "the partial first line is dropped");
+	assert.ok(readTail(path.join(dir, "missing.log")).error);
+	writeFileSync(file, "");
+	assert.deepEqual(readTail(file).lines, []);
+});
+
+test("job rows are matched to running jobs by label, the newest first, each job once", () => {
+	const jobs = [
+		{ id: "job-1", label: "npm run build", startedAt: now - 12_000 },
+		{ id: "job-2", label: "npm test", startedAt: now - 3_000 },
+		{ id: "job-3", label: "npm test", startedAt: now - 1_000 },
+		{ id: "job-4", label: "done", startedAt: now - 9_000, status: "exited", endedAt: now - 1000, exitCode: 0 },
+	];
+	assert.deepEqual(jobRows(["⧗ Jobs ▾ Collapse  4 jobs", "", "⠋ npm test   1s", "⠙ npm test   3s", "⠹ npm run build   12s", "✓ done   8s", "… 1 more"], jobs), [undefined, undefined, "job-3", "job-2", "job-1", undefined, undefined]);
+	assert.deepEqual(jobRows(["⧗ Jobs", "⠋ npm run b…   12s"], jobs), [undefined, "job-1"], "a label cut by the card");
+	assert.deepEqual(jobRows(["⧗ Jobs", "⠋ npm lint   12s"], jobs), [undefined, undefined], "a job that is not running");
+});
+
+function jobPopup({ job, log = "first\nsecond\n", rows = 30 } = {}) {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "gentle-jobs-"));
+	const file = path.join(dir, `${job.id}.log`);
+	writeFileSync(file, log);
+	let current = job;
+	const fake = fakeCtx(rows);
+	const opened = openJobPopup(fake.ctx, { file, id: job.id, job: () => current, interval: 60_000 });
+	const component = opened ? fake.component() : undefined;
+	const text = (width = 80) => component.render(width).map(plain);
+	const body = (width = 80) => text(width).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	return { ...fake, opened, component, file, text, body, set: (next) => (current = next) };
+}
+
+test("the job popup shows label · id, running and the elapsed time, and the log's tail", () => {
+	const { opened, calls, text, body, component } = jobPopup({ job: { id: "job-2", label: "npm test", startedAt: now - 3_000 } });
+	assert.equal(opened, true);
+	assert.deepEqual(calls.custom[0].options.overlayOptions().width, 78, "sized like the other pop-ups");
+	const out = text(80);
+	assert.ok(out.every((row) => [...row].length === 80));
+	assert.match(out[1], /^▏ npm test · job-2 +▕$/);
+	assert.match(out[2], /^▏ running · [34]s +▕$/);
+	assert.deepEqual(body(), ["first", "second"]);
+	assert.match(out.at(-2), /Esc close · ↑↓ PgUp\/PgDn Home\/End · following/);
+	assert.ok(painted(component.render(80)[1], "toolTitle"));
+});
+
+test("the job popup follows the log as it grows, scrolls, and shows finished with the exit code", () => {
+	const lines = Array.from({ length: 40 }, (_, i) => `out ${i + 1}`).join("\n") + "\n";
+	const job = { id: "job-1", label: "npm run build", startedAt: now - 12_000 };
+	const { component, body, text, file, set } = jobPopup({ job, log: lines });
+	assert.equal(body().at(-1), "out 40", "the end of the log");
+	writeFileSync(file, `${lines}out 41\n`);
+	component.refresh();
+	assert.equal(body().at(-1), "out 41", "the new line, followed");
+	component.handleInput(KEYS.pageUp);
+	assert.match(text().at(-2), /f follow/);
+	component.handleInput("f");
+	assert.equal(body().at(-1), "out 41");
+	set({ ...job, status: "failed", endedAt: now - 2_000, exitCode: 1 });
+	component.refresh();
+	assert.match(text()[2], /^▏ finished · exit 1 · 10s +▕$/);
+	set(undefined); // the card dropped the finished job
+	component.refresh();
+	assert.match(text()[2], /finished · exit 1 · 10s/, "the last known state stays");
+	component.handleInput("\x1b");
+	assert.equal(component.closed, true);
+});
+
+test("a long log line is cut to the popup's width; an empty log says so", () => {
+	const { text } = jobPopup({ job: { id: "job-1", label: "x", startedAt: now }, log: `${"y".repeat(300)}\n` });
+	assert.match(text(80)[4], /^▏ y+… ▕$/);
+	const empty = jobPopup({ job: { id: "job-1", label: "x", startedAt: now }, log: "" });
+	assert.deepEqual(empty.body(), ["(no output yet)"]);
+});
+
+// The side column with the Jobs card, as jobs-card.test.mjs builds it: gentle-pi's jobs files stand-ins and
+// Gentle Shell off in settings.json.
+writeFileSync(path.join(lib, "jobs-sidebar-state.ts"), `
+export const JOBS_SIDEBAR_EVENT = "gentle-ai:jobs-sidebar";
+export const jobsCollapseKey = () => "ctrl+shift+j";
+export const isJobsSidebarSnapshot = (value) => Array.isArray(value?.jobs);
+`);
+writeFileSync(path.join(lib, "jobs-widget.ts"), `
+export function renderJobsCard(jobs, theme, width, now, options) {
+	const running = jobs.filter((job) => job.status === undefined).sort((a, b) => b.startedAt - a.startedAt);
+	const shown = [...running, ...jobs.filter((job) => job.status !== undefined)];
+	if (shown.length === 0) return [];
+	const mark = (job) => (job.status === undefined ? theme.fg("accent", "⧗") : job.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗"));
+	const row = (job) => {
+		const elapsed = Math.round(((job.status === undefined ? now : job.endedAt) - job.startedAt) / 1000) + "s";
+		const head = "⧗  " + job.label;
+		return "   " + mark(job) + head.slice(1) + " ".repeat(Math.max(1, width - 5 - head.length - elapsed.length)) + theme.fg("dim", elapsed);
+	};
+	const listed = options.collapsed ? [shown[0]] : shown;
+	const control = options.collapseControl ? (options.collapsed ? " ▸ Expand" : " ▾ Collapse") : "";
+	return ["   ⧗ Jobs" + control + "  " + shown.length + " jobs", ...listed.map(row)];
+}
+`);
+writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:gentle-pi", extensions: ["-extensions/gentle-shell.ts"] }] }));
+
+const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
+async function jobsColumn(custom) {
+	const opened = [];
+	const loaded = await load({ mode: "tui", session: { id: "jobs-session", cwd: "/srv/app" }, custom: custom !== undefined ? custom : (factory, options) => (opened.push({ factory, options }), new Promise(() => {})) });
+	const native = { type: "vstack", entries: [] };
+	const root = { render: () => [], [NODE]: () => native };
+	const tui = { terminal: { columns: 180, rows: 40 }, mode: "fullscreen", layoutRoot: root, requestRender() {} };
+	loaded.footer()?.(tui, theme, { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
+	const todoClicks = [];
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => ["   ❀ Todos  0 of 1", "   ○ Test it"].map((row) => row.padEnd(width)), handleMouse: (event) => (event.type === "click" ? (todoClicks.push(event.y), { handled: true }) : undefined) }));
+	loaded.widgets["gentle-todo"](tui, theme);
+	const rail = () => root[NODE]().entries?.[1]?.component?.[NODE]?.().entries?.[2]?.component;
+	const rows = () => rail()?.render(60).map(plain) ?? [];
+	const mouse = (type, y) => rail().handleMouse({ type, button: "left", x: 10, y, width: 60, height: 30, screenX: 130, screenY: y });
+	const publish = (jobs) => loaded.events.emit("gentle-ai:jobs-sidebar", { sessionId: "jobs-session", snapshot: { jobs } });
+	return { ...loaded, rows, mouse, publish, opened, todoClicks, tui };
+}
+
+// A real gentle-jobs folder with the job's log held open by this process, as gentle-pi's WriteStream holds it.
+function runningLog(id, text) {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "gentle-jobs-"));
+	const file = path.join(dir, `${id}.log`);
+	writeFileSync(file, text);
+	return { file, fd: openSync(file, "a") };
+}
+
+test("running job rows of the Jobs card end with ↗ without widening them; the title, a blank row and finished rows do not", async () => {
+	const { publish, rows } = await jobsColumn();
+	publish([{ id: "job-7", label: "npm run build", startedAt: now - 12_000 }, { id: "job-8", label: "npm test", startedAt: now - 9_000, status: "exited", endedAt: now - 1_000, exitCode: 0 }]);
+	const out = rows();
+	assert.ok(out.slice(0, 6).every((row) => [...row].length === [...out[0]].length), "every row as wide as the card");
+	assert.match(out[1], /^│ ⧗ Jobs ▾ Collapse {2}2 jobs +│$/u);
+	assert.doesNotMatch(out[1], /↗/);
+	assert.match(out[3], /^│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] npm run build +12s ?↗ │$/u, "in the padding past the elapsed time");
+	assert.match(out[4], /^│ ✓ npm test +8s +│$/u, "a finished job keeps its row");
+	assert.doesNotMatch(out[4], /↗/);
+	assert.equal(out[3].indexOf("12s"), out[4].indexOf("8s") - 1, "the elapsed column does not move");
+});
+
+test("a click on a running job row opens its popup; the title still collapses; the Todos card still gets its clicks", async (t) => {
+	const { file, fd } = runningLog("job-21", "compiling\nlinking\n");
+	t.after(() => closeSync(fd));
+	const { publish, rows, mouse, opened, sent, todoClicks } = await jobsColumn();
+	publish([{ id: "job-21", label: "npm run build", startedAt: now - 12_000 }, { id: "job-22", label: "done", startedAt: now - 9_000, status: "exited", endedAt: now - 1_000, exitCode: 0 }]);
+	rows();
+	for (const type of ["press", "release", "click"]) assert.equal(mouse(type, 3)?.handled, true, type);
+	assert.equal(opened.length, 1, "one popup");
+	assert.deepEqual(sent, []);
+	const popupRows = opened[0].factory({ terminal: { rows: 30, columns: 120 }, requestRender() {} }, theme, {}, () => {}).render(80).map(plain);
+	assert.match(popupRows[1], /npm run build · job-21/);
+	assert.match(popupRows[2], /running · 1\ds/);
+	assert.ok(popupRows.some((row) => row.includes("linking")), `the log of ${file}`);
+	assert.match(rows()[1], /Jobs ▾ Collapse/, "a row click is not the collapse control");
+	assert.equal(mouse("click", 4)?.handled, undefined, "a finished row does nothing");
+	assert.equal(opened.length, 1);
+	const todoTitle = rows().findIndex((row) => row.includes("Todos"));
+	assert.equal(mouse("click", todoTitle)?.handled, true, "the Todos title");
+	assert.equal(todoClicks.length, 1);
+	assert.equal(mouse("click", 1)?.handled, true);
+	assert.match(rows()[1], /Jobs ▸ Expand/, "the title still collapses the card");
+});
+
+test("a running job without a log the Pi process holds opens gentle-pi's jobs list", async () => {
+	const { publish, rows, mouse, opened, sent } = await jobsColumn();
+	publish([{ id: "job-404", label: "npm run lint", startedAt: now - 2_000 }]);
+	rows();
+	assert.equal(mouse("click", 3)?.handled, true);
+	assert.equal(opened.length, 0);
+	assert.deepEqual(sent, [["/gentle:jobs", { expandPromptTemplates: true }]]);
+});
+
+test("without an overlay UI a running job row opens gentle-pi's jobs list", async (t) => {
+	const { fd } = runningLog("job-31", "x\n");
+	t.after(() => closeSync(fd));
+	const { publish, rows, mouse, sent } = await jobsColumn(null);
+	publish([{ id: "job-31", label: "npm run build", startedAt: now - 2_000 }]);
+	rows();
+	mouse("click", 3);
+	assert.deepEqual(sent, [["/gentle:jobs", { expandPromptTemplates: true }]]);
 });
