@@ -34,7 +34,7 @@ same; only how it is drawn changes.
   with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` saves and opens `/gentle:profiles`, where
   gentle-pi keeps its Make default; the Profiles title opens that editor too, and so does every click with Gentle Shell on or
   a gentle-pi without these functions; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
-  some are pending), the last session handoff folded to one row (a click shows it whole), and the memories
+  some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
