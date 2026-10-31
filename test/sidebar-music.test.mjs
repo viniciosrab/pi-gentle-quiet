@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, plain, theme } from "./helpers.mjs";
+import { load, painted, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 import { formatTime, musicDeps, musicTiming, parseStatus } from "../extensions/sidebar/music.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
@@ -170,7 +170,7 @@ test("with cliamp playing MAIN draws a Music card under Context: the category, t
 	assert.deepEqual(calls[3], READ_FAVORITES, "and favorites.toml's paths, which say what is a favorite");
 	await settle();
 	const out = rows().map((row) => row.replace(/ +│$/, ""));
-	const top = out.findIndex((row) => row === "│ Music");
+	const top = out.findIndex((row) => row === "│ Music ▾");
 	assert.equal(top, 1, `the first card under Status and Context:\n${out.join("\n")}`);
 	assert.equal(out[top + 1], "│", "a blank row under the title");
 	assert.equal(out[top + 2], `│ ${LIST} Lofi · 120 tracks ▾`, "the current category, from the track's path, with how many tracks it has");
@@ -702,7 +702,7 @@ test("with cliamp installed and no player the card offers to start it; nothing s
 	const { rows, raw, calls } = await column(t, stopped().reply);
 	await settle();
 	const out = rows().map((row) => row.replace(/ +│$/, ""));
-	assert.equal(out[1], "│ Music", out.join("\n"));
+	assert.equal(out[1], "│ Music ▾", out.join("\n"));
 	assert.equal(out[3], START);
 	assert.ok(painted(raw()[3], "accent", "▶ Start cliamp"));
 	assert.equal(calls.filter((args) => args[0] === "--version").length, 1, "installed is asked once");
@@ -778,4 +778,90 @@ test("a stale pid file is never signalled; the card says why", async (t) => {
 		assert.ok(!calls.some((args) => args[0] === "kill"), JSON.stringify(options));
 		assert.ok(rows().some((row) => row.startsWith("│ HoliznaCC0 · Shimmer")), "the player is still shown");
 	}
+});
+
+// The compact card: the setting starts as `saved` in gentle-quiet.json, which the test resets afterwards.
+async function compactColumn(t, reply, saved) {
+	writeConfig(saved === undefined ? {} : { sidebar: { musicCompact: saved } });
+	t.after(() => writeConfig({}));
+	return column(t, reply);
+}
+const trimmed = (rows) => rows.map((row) => row.replace(/ +│$/, ""));
+const playing = (args) => (args[0] === "status" ? status() : args[0] === "remote" && args[2] === "seek.absolute" ? loaded() : args[0] === "remote" ? playlists() : "");
+
+test("a click on the Music title folds the card to the track, its previous, play/pause and next, and the bar; again unfolds it; the choice is saved", async (t) => {
+	const { rows, raw, mouse } = await compactColumn(t, playing);
+	await settle();
+	const top = trimmed(rows()).indexOf("│ Music ▾");
+	assert.equal(top, 1, rows().join("\n"));
+	assert.ok(painted(raw()[top], "toolTitle", theme.bold("Music")) && painted(raw()[top], "dim", "▾"), "the bold title, then a dim ▾");
+	assert.equal(mouse("click", top, 3)?.handled, true);
+	const out = trimmed(rows());
+	assert.equal(out[top], "│ Music ▸");
+	assert.ok(painted(raw()[top], "dim", "▸"));
+	assert.match(out[top + 1], new RegExp(`^│ HoliznaCC0 · Shimmer \\( LoFi , Chill \\) +${PREV}  ${PAUSE}  ${NEXT}$`, "u"), out.join("\n"));
+	assert.match(out[top + 2], /^│ ━+●─+$/, "the seek bar");
+	assert.match(out[top + 3], /^└─+┘$/, "nothing else: no category, time, shuffle, repeat, ♥ or ⏻");
+	assert.ok(!out.some((row) => row.includes(LIST) || row.includes(POWER) || row.includes(SHUFFLE) || row.includes(SEQUENCE) || row.includes(UNLOVED) || /\d:\d\d \//.test(row)));
+	assert.ok(painted(raw()[top + 1], "muted", "HoliznaCC0 · ") && painted(raw()[top + 1], "accent", PAUSE));
+	assert.equal(readConfig().sidebar.musicCompact, true, "saved in gentle-quiet.json");
+	assert.equal(mouse("click", top, 4)?.handled, true);
+	assert.equal(trimmed(rows())[top], "│ Music ▾");
+	assert.equal(trimmed(rows())[top + 1], "│", "the blank row back");
+	assert.ok(rows().some((row) => row.includes(POWER)), "the open card back");
+	assert.equal(readConfig().sidebar.musicCompact, false);
+});
+
+test("a card that is long, folded, keeps the controls and cuts the track with …", async (t) => {
+	const title = "Tranquil Mindscape ( Lofi , Happy , Reflection ) and a very long remix name";
+	const { rows } = await compactColumn(t, (args) => (args[0] === "status" ? status({ track: { title, artist: "Somebody", path: "https://radio.cliamp.stream/lofi/tracks/9" } }) : playlists()), true);
+	await settle();
+	const row = trimmed(rows()).find((line) => line.includes(PAUSE));
+	assert.match(row, new RegExp(`^│ Somebody · Tranquil.*…  +${PREV}  ${PAUSE}  ${NEXT}$`, "u"), row);
+});
+
+test("folded, previous, play/pause and next run their command and flash; the bar seeks; the track opens its category", async (t) => {
+	const saved = { ...musicTiming };
+	Object.assign(musicTiming, { pressMs: 60 });
+	t.after(() => Object.assign(musicTiming, saved));
+	const { rows, raw, mouse, calls, popup } = await compactColumn(t, playing, true);
+	await settle();
+	const out = rows();
+	assert.equal(trimmed(out)[1], "│ Music ▸", "a fresh load starts folded when it was saved so");
+	const y = out.findIndex((row) => row.includes(PAUSE));
+	for (const [glyph, command] of [[PREV, "prev"], [PAUSE, "toggle"], [NEXT, "next"]]) {
+		const before = calls.length;
+		assert.equal(mouse("click", y, [...rows()[y]].indexOf(glyph))?.handled, true, command);
+		assert.match(raw()[y], new RegExp(`\\x1b\\[7m(?:\\x1b\\[[0-9;]*m)*${glyph}`, "u"), `${glyph} flashes`);
+		await settle();
+		assert.deepEqual(calls[before], [command]);
+		assert.ok(calls.slice(before + 1).some((args) => args[0] === "status"));
+		assert.equal(popup.custom.length, 0, "a control is not the track");
+	}
+	const bar = y + 1;
+	const before = calls.length;
+	assert.equal(mouse("click", bar, 2)?.handled, true);
+	await settle();
+	assert.deepEqual(calls[before], ["remote", "call", "seek.absolute", "--params", JSON.stringify({ value: 0 }), "--wait"]);
+	await new Promise((resolve) => setTimeout(resolve, 80));
+	const opened = calls.length;
+	assert.equal(mouse("click", y, 4)?.handled, true, "the track");
+	await settle();
+	assert.equal(popup.custom.length, 1);
+	const picker = popup.component();
+	await settle();
+	assert.ok(plain(picker.render(50)[1]).includes("cliamp · Lofi"), "the tracks of the category playing");
+	assert.ok(!calls.slice(opened).some((args) => ["prev", "toggle", "next"].includes(args[0])));
+});
+
+test("folded with no player: the title, then Start cliamp", async (t) => {
+	quick(t);
+	const { rows, mouse, calls } = await compactColumn(t, stopped().reply, true);
+	await settle();
+	const out = trimmed(rows());
+	assert.equal(out[1], "│ Music ▸", out.join("\n"));
+	assert.equal(out[2], START);
+	assert.equal(mouse("click", 2, 3)?.handled, true);
+	assert.deepEqual(calls.find((args) => args[0] === "spawn"), ["spawn", "cliamp", ["--daemon"], { detached: true, stdio: "ignore" }]);
+	assert.ok(trimmed(rows()).some((row) => row === "│ Starting…"), rows().join("\n"));
 });

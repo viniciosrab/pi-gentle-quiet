@@ -55,7 +55,9 @@ same; only how it is drawn changes.
   `▶ Start cliamp`: a click starts `cliamp --daemon`, cliamp with no window of its own, detached from Pi, then
   draws the card and opens the categories; it keeps playing after Pi closes. Nothing starts it by itself, and
   without cliamp installed the card is left out. cliamp is one player per user, so every Pi window shows and
-  controls the same one. Jobs and Todos scroll under them. The Todos card shows every
+  controls the same one. A click on the card's title (`Music ▾`) folds it to `Music ▸`: just the track with
+  previous, play/pause and next on its row, and the seek bar; another click opens it again, and the choice is
+  kept in `gentle-quiet.json`. Jobs and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
   The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):

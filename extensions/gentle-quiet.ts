@@ -99,6 +99,7 @@ const DEFAULTS = {
 	// (the terminal's Nerd Font glyphs as Neo-tree draws them in LazyVim); an older "symbols" reads as "nerd".
 	// treeHidden (not written until changed): true lists TREE's hidden entries (dotfiles, git-ignored, build folders).
 	// tabOrder (not written until changed, read through tabOrder()): the tab ids in the order the tab bar shows them.
+	// musicCompact (not written until changed): true folds the Music card to the track, its controls and the bar.
 	sidebar: { enabled: true, minColumns: 140 },
 	prompt: { icon: "❯", editor: true, userMessage: true },
 };
@@ -2023,9 +2024,12 @@ function jobsGlyphs(rows) {
 // MAIN's Music card (./sidebar/music.ts): the cliamp player under Status and Context; with no player answering,
 // a "▶ Start cliamp" row when cliamp is installed, else left out. A click on Start starts cliamp headless, one on
 // its ♥, previous, play/pause, next or ⏻ control runs it, one on its category, track or artist
-// row opens the picker over Pi (liveCtx's ui.custom, placed by the click's screen cell); its rows start under the
-// title and the blank row, past the outline's top row.
+// row opens the picker over Pi (liveCtx's ui.custom, placed by the click's screen cell). A click on its title,
+// "Music ▾", folds it to "Music ▸": the track with previous, play/pause and next, and the bar, with no blank row
+// under the title; config.sidebar.musicCompact keeps the choice. Its rows start under the title (and the blank
+// row of the open card), past the outline's top row.
 const MUSIC_CARD = "music"; // its railBlocks key
+const musicCompact = () => config.sidebar.musicCompact === true;
 function registerMusicCard() {
 	railBlocks.get(MUSIC_CARD)?.dispose?.();
 	const music = createMusic({ paint: (role, text) => fg(theme, role, text), requestRender: () => sidebar.tui?.requestRender?.(), ctx: () => liveCtx });
@@ -2034,14 +2038,25 @@ function registerMusicCard() {
 		component: { handleMouse: () => undefined, invalidate() {} },
 		dispose: () => music.dispose(),
 		draw: (width) => {
-			const rows = music.rows(outlined(width) ? width - BOX_CHROME : width - 1);
-			return rows.length ? railCard("Music", rows, width, theme) : [];
+			const compact = musicCompact();
+			const rows = music.rows(outlined(width) ? width - BOX_CHROME : width - 1, { compact });
+			return rows.length ? railCard("Music", rows, width, theme, { fold: compact ? "▸" : "▾", gap: !compact }) : [];
 		},
 		// railMouse hands the column from the outline's left edge plus two, the card's row from its top.
 		click: (event) => {
 			if (event.type !== "click" || event.button !== "left") return undefined;
 			const open = outlined(event.width + 4);
-			return music.click(event.y - (open ? 3 : 2), event.x + (open ? 0 : 1), event) ? { handled: true, render: true } : undefined;
+			const title = open ? 1 : 0;
+			if (event.y === title) {
+				config.sidebar.musicCompact = !musicCompact();
+				try {
+					saveConfig();
+				} catch {
+					// the choice still holds for this session
+				}
+				return { handled: true, render: true };
+			}
+			return music.click(event.y - title - (musicCompact() ? 1 : 2), event.x + (open ? 0 : 1), event) ? { handled: true, render: true } : undefined;
 		},
 	});
 }
@@ -3196,9 +3211,11 @@ function railMouse(event, hits, scrollTop) {
 }
 
 // A card drawn like the Status card: the title bold in toolTitle, a blank row, the rows, in the square outline.
-function railCard(title, rows, width, t) {
+// `fold` (▾ or ▸) follows the title dim, as the Todos card's toggle; `gap: false` leaves the blank row out.
+function railCard(title, rows, width, t, { fold, gap = true } = {}) {
 	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
-	const card = [fg(t, "toolTitle", bold(t, title)), ...(rows.length ? ["", ...rows] : [])];
+	const head = fg(t, "toolTitle", bold(t, title)) + (fold ? ` ${fg(t, "dim", fold)}` : "");
+	const card = [head, ...(rows.length ? [...(gap ? [""] : []), ...rows] : [])];
 	return outlined ? boxed(card, width, t) : card.map((line) => ` ${truncateToWidth(line, Math.max(1, width - 1), "…")}`);
 }
 
