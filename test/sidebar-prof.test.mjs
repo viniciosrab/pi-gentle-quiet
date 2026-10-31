@@ -159,7 +159,7 @@ const boxed = (rows, width) => {
 };
 
 /** A stand-in for gentle-quiet's tab host. */
-function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40 } = {}) {
+function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40, selectedBg = true } = {}) {
 	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [], focuses: [], focused: undefined };
 	// Pi's overlay UI, recording what it is asked to show; component() builds it like Pi does.
 	const tui = {
@@ -188,7 +188,8 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 	};
 	calls.component = () => calls.custom.at(-1).factory(tui, theme, {}, (value) => calls.done.push(value));
 	const h = {
-		theme,
+		// Pi's theme, with its selection background unless a test takes it away (Pi's bg() throws on an unknown color).
+		theme: selectedBg ? { ...theme, bg: (name, text) => (name === "selectedBg" ? `${SELECTED}${text}\x1b[49m` : assert.fail(`no bg ${name}`)) } : theme,
 		fg: (name, text) => theme.fg(name, text),
 		bold: (text) => theme.bold(text),
 		card: (title, rows, width) => boxed([theme.fg("toolTitle", theme.bold(title)), ...(rows.length ? ["", ...rows] : [])], width),
@@ -992,11 +993,15 @@ test("without gentle-pi's writers, or with Gentle Shell on, every click runs /ge
 
 const KEY = { left: "\x1b[D", right: "\x1b[C", up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", ctrlS: "\x13" };
 const INVERSE = "\x1b[7m";
-/** The roster row the keyboard has selected (the one in reverse video), plain, or undefined. */
+// The test theme's selectedBg (host() above).
+const SELECTED = "\x1b[48;5;240m";
+/** The roster row the keyboard has selected (the one on the selection background), plain, or undefined. */
 const marked = (draw) => {
-	const row = draw().find((line) => line.includes(INVERSE));
+	const row = draw().find((line) => line.includes(SELECTED));
 	return row === undefined ? undefined : plain(row).replace(/ +│$/, "");
 };
+/** A card row's content between the outline's "│ " and " │". */
+const content = (line) => line.slice(line.indexOf("│") + 1 + "\x1b[39m ".length, line.lastIndexOf(theme.fg("border", "│")) - 1);
 const HINT = /←→ profile · ↑↓ agent/;
 
 test("a left click anywhere on the Profiles card gives the tab the keyboard; the click still does its own", async () => {
@@ -1019,17 +1024,26 @@ test("unfocused, the card is as today: no selected row, no hint, and keys are no
 	const { rows, draw } = await opened(env);
 	assert.equal(marked(draw), undefined);
 	assert.ok(!rows().some((row) => HINT.test(row)));
-	assert.ok(!draw().some((row) => row.includes(INVERSE)));
+	assert.ok(!draw().some((row) => row.includes(INVERSE) || row.includes(SELECTED)));
 });
 
-test("focused: the selected row is in reverse video, the text where it was, ↑↓ move it over the orchestrator and the agents, and a dim hint fits the card", async () => {
+test("focused: the selected row is on the selection background, the text where it was, ↑↓ move it over the orchestrator and the agents, and a dim hint fits the card", async () => {
 	const env = install({ lib: EDIT_LIB });
 	const { tab, rows, draw, calls } = await opened(env);
 	calls.focused = "prof";
 	assert.match(marked(draw), /^│ orchestrator +claude-opus-5-5 \(high\)/, "the orchestrator first, nothing moved");
+	const unfocused = (calls.focused = undefined, draw());
+	calls.focused = "prof";
 	const raw = draw();
-	const at = raw.findIndex((row) => row.includes(INVERSE));
-	assert.ok(raw[at].includes(`${INVERSE}${theme.bold(theme.fg("accent", "orchestrator"))}`), "the same text in reverse video, accent bold");
+	const at = raw.findIndex((row) => row.includes(SELECTED));
+	const text = plain(content(unfocused[at]));
+	assert.equal([...text].length, 55, "the card's inner width");
+	assert.match(text, /^orchestrator +claude-opus-5-5 \(high\)$/);
+	assert.equal(content(raw[at]), `${SELECTED}${theme.fg("text", text)}\x1b[49m`, "the whole row, name, model and effort, plain text on selectedBg");
+	assert.equal(raw.filter((row) => row.includes(SELECTED)).length, 1, "one row");
+	const above = (rows) => rows.slice(0, rows.findIndex((row) => HINT.test(plain(row))));
+	above(raw).forEach((row, index) => index === at || assert.equal(row, unfocused[index], `row ${index} untouched`));
+	assert.ok(!raw.some((row) => row.includes(INVERSE)), "no reverse video");
 	assert.ok(!rows().some((row) => row.includes("▸")), "no glyph");
 	const hint = rows().findIndex((row) => HINT.test(row));
 	assert.ok(hint > rowIndex(rows(), /\[ Save \]/), `under the buttons:\n${rows().join("\n")}`);
@@ -1181,4 +1195,36 @@ test("without gentle-pi's writers the keys do what the clicks do: /gentle:profil
 	assert.equal(calls.sent.length, 6);
 	assert.ok(calls.sent.every(([text]) => text === "/gentle:profiles"));
 	assert.equal(calls.custom.length, 0);
+});
+
+test("a selected entry that wraps is on the selection background on both of its rows", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, draw, calls } = await opened(env, {}, 34);
+	const unfocused = draw();
+	calls.focused = "prof";
+	tab.handleKey(KEY.down);
+	tab.handleKey(KEY.down);
+	const raw = draw();
+	const at = raw.map((row, index) => (row.includes(SELECTED) ? index : -1)).filter((index) => index >= 0);
+	assert.equal(at.length, 2, raw.map(plain).join("\n"));
+	assert.equal(at[1], at[0] + 1);
+	assert.match(plain(content(raw[at[0]])), /^gentle-ai-explore +$/);
+	assert.match(plain(content(raw[at[1]])), /^ +claude-sonnet-5-5 \(medium\) *$/);
+	for (const index of at) {
+		const text = plain(content(unfocused[index]));
+		assert.equal([...text].length, 30);
+		assert.equal(content(raw[index]), `${SELECTED}${theme.fg("text", text)}\x1b[49m`);
+	}
+	raw.slice(0, raw.findIndex((row) => HINT.test(plain(row)))).forEach((row, index) => at.includes(index) || assert.equal(row, unfocused[index], `row ${index} untouched`));
+});
+
+test("a theme without selectedBg: the selected name in reverse video and accent bold, as before", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { draw, calls } = await opened(env, { selectedBg: false });
+	calls.focused = "prof";
+	const raw = draw();
+	const at = raw.findIndex((row) => row.includes(INVERSE));
+	assert.ok(raw[at].includes(`${INVERSE}${theme.bold(theme.fg("accent", "orchestrator"))}`), "the same text in reverse video, accent bold");
+	assert.match(plain(raw[at]), /^│ orchestrator +claude-opus-5-5 \(high\)/);
+	assert.ok(!raw.some((row) => row.includes(SELECTED)));
 });

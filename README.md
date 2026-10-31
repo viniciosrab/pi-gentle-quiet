@@ -35,7 +35,8 @@ same; only how it is drawn changes.
   gentle-pi keeps its Make default; the Profiles title opens that editor too, and so does every click with Gentle Shell on or
   a gentle-pi without these functions. PROF also takes the keyboard, with the keys of gentle-pi's screen: `alt+p` opens
   PROF with the keyboard on it, and so does a click on the Profiles card (the click still does its own). The selected row
-  is drawn in reverse video, its text where it was, and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
+  is drawn as gentle-pi's screen draws it: plain text on the theme's selection background across the whole row (name,
+  model and effort, and its wrapped row), its text where it was (reverse video on a theme without one), and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
   click does: `s` save and switch, `d` discard, `esc` stay), `↑` `↓` the orchestrator and the agents, `enter` its model
   (the picker's own keys then; `esc` closes it first), `e` its effort, `s` or `ctrl+s` Save, `u` Use in this session,
   `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF

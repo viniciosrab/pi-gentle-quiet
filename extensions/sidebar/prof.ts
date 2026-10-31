@@ -298,11 +298,25 @@ export function createTab(host: SidebarHost): SidebarTab {
 		targets = [];
 		cursor = Math.max(0, Math.min(cursor, view.rows.length));
 		const focused = keyed();
-		// The keyboard's row: the same name in reverse video and accent bold, so nothing moves.
-		const label = (text) => (focused && targets.length === cursor ? `${INVERSE}${host.bold(fg("accent", strip(text)))}${INVERSE_OFF}` : text);
+		const selecting = () => focused && targets.length === cursor;
+		// The keyboard's rows, as gentle-pi's screen draws them: plain text on the theme's selection background,
+		// filled to the card's width; undefined when the theme has no selectedBg.
+		const highlight = (text) => {
+			try {
+				const plainText = strip(text);
+				return host.theme.bg("selectedBg", fg("text", plainText + " ".repeat(Math.max(0, inner - visibleWidth(plainText)))));
+			} catch {
+				return undefined;
+			}
+		};
+		const selectedBg = focused && highlight("") !== undefined;
+		// Without it, the same name in reverse video and accent bold, so nothing moves.
+		const label = (text) => (selecting() && !selectedBg ? `${INVERSE}${host.bold(fg("accent", strip(text)))}${INVERSE_OFF}` : text);
 		const row = (left, parts) => {
+			const selected = selecting() && selectedBg;
 			targets.push({ model: parts.find((part) => part.action === "model"), effort: parts.find((part) => part.action === "effort") });
-			return spreadParts(left, parts, inner);
+			const rows = spreadParts(left, parts, inner);
+			return selected ? rows.map((line) => (typeof line === "string" ? highlight(line) : { ...line, text: highlight(line.text) })) : rows;
 		};
 		const rows = row(
 			label(host.bold("orchestrator")),
