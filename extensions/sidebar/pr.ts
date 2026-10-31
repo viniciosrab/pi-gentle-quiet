@@ -3,7 +3,9 @@
 //
 // - The title counts the open PRs ("⇄ Pull requests · 4"). Every PR is one row: "#19 <title>" and flush right
 //   its verdict, the most serious of ✗ conflicts, ✗ CI, ✗ changes, ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review,
-//   ⊘ blocked, ↓ behind, else ✓ ready. The current branch's PR is marked ◉ before it.
+//   ⊘ blocked, ↓ behind, else ✓ ready. Before the verdict a PR with checks shows its CI chip, the passed checks
+//   of those that count (skipped ones left out): "✓ CI 10/10", "⧗ CI 5/10", "✗ CI 9/10"; it stands for a ✗ CI
+//   or ⧗ CI verdict, which is not drawn as well. The current branch's PR is marked ◉ before them.
 // - The rows follow the stack: a PR whose base is another open PR's head sits under it ("├ #19", "└ #20").
 //   No branch names anywhere.
 // - One PR at a time is expanded (▾, the others ▸), the current branch's PR to begin with. Its detail sits
@@ -23,7 +25,7 @@
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
-import { ciPrompt, loadPr, prDeps, prTiming, stackOf, threadsPrompt, verdictOf } from "./pr-data.ts";
+import { checksSummary, ciPrompt, loadPr, prDeps, prTiming, stackOf, threadsPrompt, verdictOf } from "./pr-data.ts";
 
 const TITLE = "⇄ Pull requests";
 const MERGES = {
@@ -47,6 +49,7 @@ const VERDICTS = {
 	behind: ["warning", "↓ behind"],
 	ready: ["success", "✓ ready"],
 };
+const CHIPS = { passed: ["success", "✓"], failed: ["error", "✗"], running: ["warning", "⧗"] };
 const MAX_THREADS = 8;
 
 export function createTab(host: SidebarHost): SidebarTab {
@@ -151,12 +154,29 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return current;
 	};
 
-	const verdictBadge = (pr) => {
-		const verdict = verdictOf(pr);
+	// The CI chip, "⧗ CI 5/10": passed of the checks that count; none without such checks.
+	const ciChip = (pr) => {
+		const summary = checksSummary(pr.checks);
+		if (!summary) return "";
+		const counted = pr.checks.filter((check) => check.state !== "skipped");
+		const passed = counted.filter((check) => check.state === "passed").length;
+		const [role, icon] = CHIPS[summary];
+		return c(role, `${icon} CI ${passed}/${counted.length}`);
+	};
+
+	const verdictText = (verdict) => {
 		if (verdict.kind !== "threads") return badge(VERDICTS[verdict.kind]);
 		if (!verdict.count) return c("warning", "⚠ threads?");
 		const many = verdict.count !== 1 || verdict.partial;
 		return c("warning", `⚠ ${verdict.count}${verdict.partial ? "+" : ""} ${many ? "threads" : "thread"}`);
+	};
+
+	// The CI chip then the verdict, the chip alone when the verdict is about CI.
+	const verdictBadge = (pr) => {
+		const verdict = verdictOf(pr);
+		const chip = ciChip(pr);
+		if (chip && (verdict.kind === "ci-failed" || verdict.kind === "ci-running")) return chip;
+		return [chip, verdictText(verdict)].filter(Boolean).join(" ");
 	};
 
 	// Pi's editor, when this session has one an extension may fill.

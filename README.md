@@ -40,8 +40,9 @@ same; only how it is drawn changes.
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
-  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready); a click on a PR expands its detail (mergeability, review,
-  each check, each unresolved thread), the current branch's PR (◉) to begin with, and a check or a thread
+  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
+  ⧗ CI 5/10, ✗ CI 9/10; skipped ones left out) that stands for a ✗ CI or ⧗ CI verdict; a click on a PR
+  expands its detail (mergeability, review, each check, each unresolved thread), the current branch's PR (◉) to begin with, and a check or a thread
   opens in the browser. On the current branch's PR, [ Fix N threads with agent ] and [ Fix CI ] put the
   threads or the failed checks in Pi's editor for you to send. Files open in your editor (`e` in the preview) in a herdr tab
   inside herdr, else in a new terminal. Narrower terminals keep everything as it is. **Blocks** → Tab order

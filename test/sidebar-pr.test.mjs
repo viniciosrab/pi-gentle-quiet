@@ -234,11 +234,11 @@ test("each row: number in accent, the title cut with …, and flush right its ve
 	assert.ok(painted(row("#18"), "accent", "#18"));
 	assert.match(plain(row("#18")), /│ ▸ #18 feat\(sidebar\): PR tab, .*… ⚠ 4 threads │$/);
 	assert.ok(painted(row("#18"), "warning", "⚠ 4 threads"), "unresolved threads, the resolved one not counted");
-	assert.match(plain(row("#19")), /│ └ ▸ #19 .*… ✓ ready │$/);
+	assert.match(plain(row("#19")), /│ └ ▸ #19 .*… ✓ CI 1\/1 ✓ ready │$/);
 	assert.ok(painted(row("#19"), "success", "✓ ready"));
-	assert.match(plain(row("#15")), /│ ▸ #15 chore: bump pi-tui +✗ CI │$/);
-	assert.ok(painted(row("#15"), "error", "✗ CI"), "a failed check wins over a running one");
-	assert.match(plain(row("#20 ")), /│ ├ ▾ #20 .*… ◉ ✗ CI │$/, "the current branch's PR is marked ◉");
+	assert.match(plain(row("#15")), /│ ▸ #15 chore: bump pi-tui +✗ CI 0\/2 │$/);
+	assert.ok(painted(row("#15"), "error", "✗ CI 0/2"), "a failed check wins over a running one");
+	assert.match(plain(row("#20 ")), /│ ├ ▾ #20 .*… ◉ ✗ CI 1\/3 │$/, "the current branch's PR is marked ◉");
 	assert.ok(painted(row("#20 "), "accent", "◉"));
 	assert.ok(rows().every((line) => [...line].length <= 59));
 });
@@ -281,10 +281,10 @@ test("every verdict as the row draws it", async () => {
 	const { row } = await open({ gh: answer(nodes), git: stubGit({ branch: "other\n" }).git });
 	for (const [n, role, text] of [
 		[9, "error", "✗ conflicts"],
-		[8, "error", "✗ CI"],
+		[8, "error", "✗ CI 0/1"],
 		[7, "error", "✗ changes"],
 		[6, "warning", "⚠ 1 thread"],
-		[5, "warning", "⧗ CI"],
+		[5, "warning", "⧗ CI 0/1"],
 		[4, "dim", "◌ draft"],
 		[3, "warning", "⧗ review"],
 		[2, "warning", "⊘ blocked"],
@@ -293,6 +293,40 @@ test("every verdict as the row draws it", async () => {
 		assert.ok(plain(row(`#${n} `)).trimEnd().endsWith(`${text} │`), `#${n}: ${text}`);
 		assert.ok(painted(row(`#${n} `), role, text), `#${n}: ${role}`);
 	}
+});
+
+test("the CI chip: passed / checks that count, before the verdict, standing for a CI verdict", async () => {
+	const many = (n, status, conclusion = "") => Array.from({ length: n }, () => run(`c${status}${conclusion}`, status, conclusion));
+	const passed = (n) => many(n, "COMPLETED", "SUCCESS");
+	const nodes = [
+		node({ number: 9, title: "all", head: "all", checks: passed(10) }),
+		node({ number: 8, title: "half", head: "half", checks: [...passed(5), ...many(5, "IN_PROGRESS")] }),
+		node({ number: 7, title: "one", head: "one", checks: [...passed(9), ...many(1, "COMPLETED", "FAILURE")] }),
+		node({ number: 6, title: "talk", head: "talk", checks: [...passed(5), ...many(5, "QUEUED")], threads: [thread("a"), thread("b")] }),
+		node({ number: 5, title: "skip", head: "skip", checks: [...passed(1), run("docs", "COMPLETED", "SKIPPED")] }),
+		node({ number: 4, title: "skipped", head: "skipped", checks: [run("docs", "COMPLETED", "SKIPPED")] }),
+		node({ number: 3, title: "none", head: "none" }),
+		node({ number: 2, title: "clash", head: "clash", mergeable: "CONFLICTING", merge: "DIRTY", checks: [...passed(1), ...many(1, "COMPLETED", "FAILURE")] }),
+		node({ number: 1, title: "mine", head: "mine", checks: [...passed(1), ...many(1, "IN_PROGRESS")], threads: [thread("x")] }),
+	];
+	const { row, draw } = await open({ gh: answer(nodes), git: stubGit({ branch: "mine\n" }).git });
+	const right = (n) => plain(row(`#${n} `)).replace(/^│ [▸▾] #\d+ \w+ +/, "").replace(/ │$/, "");
+	assert.equal(right(9), "✓ CI 10/10 ✓ ready");
+	assert.ok(painted(row("#9 "), "success", "✓ CI 10/10"));
+	assert.equal(right(8), "⧗ CI 5/10", "the chip stands for a running CI");
+	assert.ok(painted(row("#8 "), "warning", "⧗ CI 5/10"));
+	assert.equal(right(7), "✗ CI 9/10", "the chip stands for a failed CI");
+	assert.ok(painted(row("#7 "), "error", "✗ CI 9/10"));
+	assert.equal(right(6), "⧗ CI 5/10 ⚠ 2 threads", "a running CI no longer hides behind threads");
+	assert.ok(painted(row("#6 "), "warning", "⧗ CI 5/10") && painted(row("#6 "), "warning", "⚠ 2 threads"));
+	assert.equal(right(5), "✓ CI 1/1 ✓ ready", "skipped checks do not count");
+	assert.equal(right(4), "✓ ready", "only skipped checks: no chip");
+	assert.equal(right(3), "✓ ready", "no checks: no chip");
+	assert.equal(right(2), "✗ CI 1/2 ✗ conflicts");
+	assert.ok(painted(row("#2 "), "error", "✗ CI 1/2") && painted(row("#2 "), "error", "✗ conflicts"));
+	assert.equal(right(1), "◉ ⧗ CI 1/2 ⚠ 1 thread");
+	for (const line of draw().map(plain)) assert.ok(!/CI.*CI/.test(line), `CI drawn once: ${line}`);
+	assert.ok(draw().every((line) => visibleWidth(line) <= 59), "within the column");
 });
 
 test("the current branch's PR starts expanded with its detail; the others are collapsed", async () => {
@@ -357,7 +391,7 @@ test("a branch change goes back to the new branch's PR", async () => {
 	await settle();
 	await settle();
 	const out = rows();
-	assert.match(out.find((line) => line.includes("#19")), /▾ #19 .*◉ ✓ ready/);
+	assert.match(out.find((line) => line.includes("#19")), /▾ #19 .*◉ ✓ CI 1\/1 ✓ ready/);
 	assert.ok(!out.some((line) => line.includes("Current PR can disappear")));
 });
 
