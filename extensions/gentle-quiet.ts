@@ -883,14 +883,29 @@ for (const [name, framed] of Object.entries(ownFraming)) {
 }
 // Pi's "auto" scrollbar shows while scrolling and paints over the content's last column, the end of a
 // tool box or of a user message bar. Like "always", it gets a column of its own, at the right edge.
-const SCROLLBAR_COLUMN_PATCHED = Symbol.for("gentle-quiet.scrollbarColumn");
+const SCROLLBAR_COLUMN_ORIGINAL = Symbol.for("gentle-quiet.scrollbarColumn.original");
+// Pi draws the scrollbar with "│" and "┃", centered in their cell, so it sits half a column inside the
+// editor's rules. Their right-aligned blocks put it on the right edge; a dragged "█" fills the cell anyway.
+const SCROLLBAR_EDGE = Symbol.for("gentle-quiet.scrollbarEdge");
+const EDGE_GLYPHS = { "│": "▕", "┃": "▐" };
+function hugRightEdge(view) {
+	if (view[SCROLLBAR_EDGE] || typeof view.scrollbarTrackStyle !== "function" || typeof view.scrollbarThumbStyle !== "function") return;
+	const track = view.scrollbarTrackStyle;
+	const thumb = view.scrollbarThumbStyle;
+	view.scrollbarTrackStyle = (text) => track(EDGE_GLYPHS[text] ?? text);
+	view.scrollbarThumbStyle = (text) => thumb(EDGE_GLYPHS[text] ?? text);
+	view[SCROLLBAR_EDGE] = true;
+}
 const scrollProto = PiTui.ScrollView?.prototype;
-if (typeof scrollProto?.getContentWidth === "function" && !scrollProto[SCROLLBAR_COLUMN_PATCHED]) {
-	const contentWidth = scrollProto.getContentWidth;
+// Installed again on every load, so /reload brings a changed patch in: it always wraps Pi's own
+// getContentWidth, kept on the prototype, never the previous load's wrapper.
+if (typeof scrollProto?.getContentWidth === "function") {
+	const contentWidth = scrollProto[SCROLLBAR_COLUMN_ORIGINAL] ?? scrollProto.getContentWidth;
+	scrollProto[SCROLLBAR_COLUMN_ORIGINAL] = contentWidth;
 	scrollProto.getContentWidth = function (width) {
+		hugRightEdge(this);
 		return this.scrollbar === "auto" && width > 1 ? width - 1 : contentWidth.call(this, width);
 	};
-	scrollProto[SCROLLBAR_COLUMN_PATCHED] = true;
 }
 let previousEditor;
 let installedOn; // the UI our editor was last installed on, for hosts without getEditorComponent
@@ -1234,10 +1249,10 @@ function quietCall(toolName, args = {}, t) {
 				: "";
 			return `${title("read")} ${accent(shortPath(args.path ?? args.file_path))}${range}`;
 		}
-		case "bash": // regular weight, like Claude Code's "$ command" row
-			return tones.command(`$ ${firstLine(args.command)}`);
+		case "bash": // regular weight, like Claude Code's "$ command" row; commandRow fits it to the width
+			return tones.command(`$ ${firstLine(args.command, Infinity)}`);
 		case "bash_background":
-			return join(tones.command(`$ ${firstLine(args.command)}`), dim("· background"));
+			return join(tones.command(`$ ${firstLine(args.command, Infinity)}`), dim("· background"));
 		case "monitor":
 			return join(title("monitor"), accent(firstLine(args.label ?? args.command ?? "")));
 		case "job_stop":
@@ -1739,11 +1754,62 @@ function popupToolRows(item, t, width) {
 	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1).render(width)];
 }
 
+// Claude Code's "$ command" row: the full width, wrapped to two rows under the command and cut with "…".
+const COMMAND_ROWS = 2;
+function commandRow(text) {
+	return {
+		render(width) {
+			const inner = Math.max(1, width - 1);
+			if (visibleWidth(text) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return [` ${truncateToWidth(text, inner, "…")}`];
+			const [first, ...rest] = PiTui.wrapTextWithAnsi(text, inner);
+			const hang = Math.max(1, inner - 2);
+			const more = PiTui.wrapTextWithAnsi(rest.join(" "), hang);
+			const shown = more.slice(0, COMMAND_ROWS - 1);
+			if (more.length > shown.length) shown[shown.length - 1] = truncateToWidth(`${shown[shown.length - 1]} ${more[shown.length]}`, hang, "…");
+			return [` ${first}`, ...shown.map((line) => `   ${line}`)];
+		},
+		invalidate() {},
+	};
+}
+
+// The read row: a path has no spaces, so a word wrap would put it alone under "read". It starts on
+// the tool's row instead and is split where the row ends, going on under the path, past "read ".
+const READ_HANG = "read ".length;
+function readRow(text) {
+	return {
+		render(width) {
+			const inner = Math.max(1, width - 1);
+			if (visibleWidth(text) <= inner) return [` ${text}`];
+			const rows = [""];
+			let used = 0;
+			let styles = ""; // every escape so far, replayed at the start of each new row
+			for (const tok of tokens(text)) {
+				if (tok.esc) {
+					rows[rows.length - 1] += tok.esc;
+					styles += tok.esc;
+					continue;
+				}
+				const w = visibleWidth(tok.ch);
+				if (used + w > (rows.length === 1 ? inner : Math.max(1, inner - READ_HANG))) {
+					rows.push(styles);
+					used = 0;
+				}
+				rows[rows.length - 1] += tok.ch;
+				used += w;
+			}
+			return rows.map((row, i) => `${" ".repeat(i ? 1 + READ_HANG : 1)}${row}`);
+		},
+		invalidate() {},
+	};
+}
+
 function quietRenderers(toolName, renderers) {
 	return {
 		...renderers,
 		renderShell: "self", // no tool background box; the rows carry Pi's margin themselves
 		renderCall(args, t) {
+			if (toolName === "bash" || toolName === "bash_background") return commandRow(quietCall(toolName, args, t));
+			if (toolName === "read") return readRow(quietCall(toolName, args, t));
 			return new Text(quietCall(toolName, args, t), 1, 0);
 		},
 		renderResult(result, options = {}, t, context = {}) {
