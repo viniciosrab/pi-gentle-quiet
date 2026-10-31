@@ -3,6 +3,11 @@
 // user, behind ~/.config/cliamp/cliamp.sock: every Pi window shows and controls the same player, and closing a
 // Pi window leaves it playing.
 //
+// Folded (gentle-quiet's config.sidebar.musicCompact, toggled by a click on the card's title), rows(inner,
+// { compact: true }) is two rows: the track, or a notice, cut with … to leave room for previous, play/pause and
+// next on its right (the same hit areas and flash), then the seek bar. The Start row and its notices stay as they
+// are; the category, the time, shuffle, repeat, the ♥ and ⏻ wait for the card to open again.
+//
 // With cliamp installed (`cliamp --version`, asked once) and no player answering, the card is one row, "▶ Start
 // cliamp"; without cliamp it is left out. Nothing starts by itself: a click runs `cliamp --daemon`, cliamp with
 // no window of its own, detached from Pi (its own session, no stdio), so it keeps playing after Pi closes. The
@@ -178,7 +183,8 @@ const remote = (method, params) => ["remote", "call", method, "--params", JSON.s
 /**
  * The Music card's controller. `paint(role, text)`, `requestRender()` and `ctx()` (Pi's, for the picker) come
  * from gentle-quiet.
- * rows(inner): the card's rows under its title, [] while no player answers.
+ * rows(inner, { compact }): the card's rows under its title, [] while no player answers; compact, the track with
+ * previous, play/pause and next on its right, then the bar.
  * click(line, x, at): a left click on row `line` of rows() at column `x` (`at`: its screenX/screenY, to place
  * the picker); true when it hit a control or opened the picker.
  */
@@ -415,7 +421,7 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 	};
 
 	return {
-		rows(inner) {
+		rows(inner, { compact = false } = {}) {
 			state.drawnAt = Date.now();
 			if (!state.readAt) read();
 			keepReading();
@@ -436,6 +442,50 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 				return [paint("accent", cut("▶ Start cliamp"))];
 			}
 			const rows = [];
+			// The artist, then the title, on one row: cut with … at the end, never a second row.
+			const title = status.title || (status.state === "stopped" ? "Stopped" : "Unknown track");
+			const lead = status.artist ? `${status.artist} · ` : "";
+			const line = cut(`${lead}${title}`);
+			const at = position(status);
+			const bar = () => {
+				if (status.duration) {
+					// cliamp's own seek bar (ui/model/view.go renderSeekBar): played ━ and the head ● in accent, the rest ─ dim.
+					state.lines.bar = { line: rows.length, width: inner };
+					const filled = Math.min(inner, Math.floor((Math.min(at, status.duration) / status.duration) * inner));
+					rows.push(filled >= inner ? paint("accent", "━".repeat(inner)) : [filled && paint("accent", "━".repeat(filled)), paint("accent", "●"), filled < inner - 1 && paint("dim", "─".repeat(inner - filled - 1))].filter(Boolean).join(""));
+				} else {
+					// No duration yet (a new track loading): cliamp's buffering bar, all ─ dim, so the card does not jump.
+					rows.push(paint("dim", "─".repeat(inner)));
+				}
+			};
+			const middle = status.state === "playing" ? PAUSE : PLAY;
+			// The buttons as drawn, the one clicked last flashing inverse for musicTiming.pressMs so the click is
+			// felt, with their hit areas on row `line` from column `start`.
+			const controlsOf = (buttons, line, start) => {
+				const pressed = state.pressed && Date.now() < state.pressed.until ? state.pressed.index : -1;
+				state.controls = { line, hits: buttons.map((button, index) => ({ ...button, from: start + index * 3, to: start + index * 3 + 1 })) };
+				return buttons.map((button, index) => (index === pressed ? `\x1b[7m${paint(button.role, button.glyph)}\x1b[27m` : paint(button.role, button.glyph))).join("  ");
+			};
+			const playback = [{ glyph: PREV, role: "text", command: "prev" }, { glyph: middle, role: "accent", command: "toggle" }, { glyph: NEXT, role: "text", command: "next" }];
+			if (compact) {
+				// Folded: the track (or a notice) cut to leave room for previous, play/pause and next, then the bar.
+				const width = playback.length * 3 - 2;
+				const room = inner - width - 2;
+				const notice = state.notice && Date.now() < state.notice.until ? state.notice.text : undefined;
+				if (!notice) state.notice = undefined;
+				let left = "";
+				if (room >= 1) {
+					const text = notice ?? `${lead}${title}`;
+					const fit = visibleWidth(text) <= room ? text : truncateToWidth(text, room, "…");
+					left = notice ? paint("dim", fit) : fit.length > lead.length && fit.startsWith(lead) ? `${lead ? paint("muted", lead) : ""}${paint("text", fit.slice(lead.length))}` : paint("muted", fit);
+					left += " ".repeat(Math.max(0, inner - width - visibleWidth(fit)));
+				} else left = " ".repeat(Math.max(0, inner - width));
+				state.lines = { track: [0] };
+				const start = Math.max(0, inner - width);
+				rows.push(`${left}${controlsOf(playback, 0, start)}`);
+				bar();
+				return rows;
+			}
 			// The category with how many tracks it has: "󰲸 Lofi · 120 tracks ▾"; the count gives way first.
 			const playing = state.playlists?.find((playlist) => playlist.id === status.playlist);
 			const name = playing?.name ?? "Playlists";
@@ -445,38 +495,21 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 			const label = cut(`${LIST} ${name}${shown} ▾`);
 			state.lines = { category: rows.length, track: [] };
 			rows.push(label.endsWith(" ▾") ? `${LIST} ${paint("text", label.slice(LIST.length + 1, label.length - 2 - shown.length))}${shown ? paint("muted", shown) : ""}${paint("dim", " ▾")}` : paint("text", label));
-			// The artist, then the title, on one row: cut with … at the end, never a second row.
 			state.lines.track.push(rows.length);
-			const title = status.title || (status.state === "stopped" ? "Stopped" : "Unknown track");
-			const lead = status.artist ? `${status.artist} · ` : "";
-			const line = cut(`${lead}${title}`);
 			rows.push(line.length > lead.length && line.startsWith(lead) ? `${lead ? paint("muted", lead) : ""}${paint("text", line.slice(lead.length))}` : paint("muted", line));
-			const at = position(status);
-			if (status.duration) {
-				// cliamp's own seek bar (ui/model/view.go renderSeekBar): played ━ and the head ● in accent, the rest ─ dim.
-				state.lines.bar = { line: rows.length, width: inner };
-				const filled = Math.min(inner, Math.floor((Math.min(at, status.duration) / status.duration) * inner));
-				rows.push(filled >= inner ? paint("accent", "━".repeat(inner)) : [filled && paint("accent", "━".repeat(filled)), paint("accent", "●"), filled < inner - 1 && paint("dim", "─".repeat(inner - filled - 1))].filter(Boolean).join(""));
-			} else {
-				// No duration yet (a new track loading): cliamp's buffering bar, all ─ dim, so the card does not jump.
-				rows.push(paint("dim", "─".repeat(inner)));
-			}
+			bar();
 			const time = status.duration ? `${formatTime(at)} / ${formatTime(status.duration)}` : formatTime(at);
-			const middle = status.state === "playing" ? PAUSE : PLAY;
 			// The ♥ only when the track's category is known.
 			const loved = state.loved.has(status.path);
 			const heart = status.playlist && status.track ? (loved ? LOVED : UNLOVED) : undefined;
 			const shuffle = { glyph: status.shuffle ? SHUFFLE : SEQUENCE, role: status.shuffle ? "accent" : "dim", shuffle: true };
 			const repeat = { glyph: REPEAT[status.repeat] ?? REPEAT.off, role: status.repeat && status.repeat !== "off" ? "accent" : "dim", repeat: true };
-			const buttons = [shuffle, repeat, ...(heart ? [{ glyph: heart, role: loved ? "error" : "dim", heart: true }] : []), { glyph: PREV, role: "text", command: "prev" }, { glyph: middle, role: "accent", command: "toggle" }, { glyph: NEXT, role: "text", command: "next" }, { glyph: POWER, role: "dim", power: true }];
+			const buttons = [shuffle, repeat, ...(heart ? [{ glyph: heart, role: loved ? "error" : "dim", heart: true }] : []), ...playback, { glyph: POWER, role: "dim", power: true }];
 			const controls = buttons.map((button) => button.glyph).join("  ");
 			const gap = inner - visibleWidth(time) - visibleWidth(controls);
 			const timeText = paint("muted", time);
-			// The control clicked last flashes inverse for musicTiming.pressMs, so the click is felt.
-			const pressed = state.pressed && Date.now() < state.pressed.until ? state.pressed.index : -1;
-			const controlsText = buttons.map((button, index) => (index === pressed ? `\x1b[7m${paint(button.role, button.glyph)}\x1b[27m` : paint(button.role, button.glyph))).join("  ");
 			const start = gap >= 2 ? inner - visibleWidth(controls) : 0;
-			state.controls = { line: rows.length, hits: buttons.map((button, index) => ({ ...button, from: start + index * 3, to: start + index * 3 + 1 })) };
+			const controlsText = controlsOf(buttons, rows.length, start);
 			rows.push(gap >= 2 ? `${timeText}${" ".repeat(gap)}${controlsText}` : controlsText);
 			if (state.notice && Date.now() < state.notice.until) rows.push(paint("dim", cut(state.notice.text)));
 			else state.notice = undefined;
@@ -490,7 +523,10 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 				void start(at).catch(() => undefined);
 				return true;
 			}
-			if (lines && (line === lines.category || lines.track.includes(line))) {
+			// The controls first: folded, they share the track's row.
+			const controls = state.controls;
+			const hit = controls && line === controls.line ? controls.hits.find((candidate) => x >= candidate.from - 1 && x <= candidate.to) : undefined;
+			if (!hit && lines && (line === lines.category || lines.track.includes(line))) {
 				if (!state.playlists?.length) {
 					askPlaylists();
 					return false;
@@ -507,9 +543,6 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 				void ask(remote("seek.absolute", { value })).then(read);
 				return true;
 			}
-			const controls = state.controls;
-			if (!controls || line !== controls.line) return false;
-			const hit = controls.hits.find((candidate) => x >= candidate.from - 1 && x <= candidate.to);
 			if (!hit) return false;
 			state.pressed = { index: controls.hits.indexOf(hit), until: Date.now() + musicTiming.pressMs };
 			requestRender();

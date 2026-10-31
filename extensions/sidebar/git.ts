@@ -8,7 +8,9 @@
 //   "Diff · <branch>", with [ ✕ ] to close it.
 //
 // A left click on a file opens its read-only preview over Pi (./tree-preview.ts; e there opens the editor:
-// $VISUAL, $EDITOR, nvim). No diff opens in a tab of its own: the preview is where a file is looked at. The
+// $VISUAL, $EDITOR, nvim), with the file's changes inline: its uncommitted ones (git diff HEAD) in the working
+// tree, the branch's in the inspector; Markdown as its source. No diff opens in a tab of its own: the preview is
+// where a file is looked at. The
 // editor opens in a herdr tab inside herdr, else in a detached terminal (./git-launch.ts). A click on a card's
 // title folds it to one summary row. The wheel scrolls a card whose rows do not fit its half.
 // @ts-nocheck
@@ -145,7 +147,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			left: `${fileIcon(file.path.slice(slash + 1))} ${name}`,
 			narrow: name,
 			right: width ? `${shown}${pad}  ${c(role, letter)}` : c(role, letter),
-			hit: { kind: "file", path: file.path },
+			hit: { kind: "file", path: file.path, untracked: file.status === "untracked" },
 		};
 	};
 
@@ -317,10 +319,14 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 		if (hit.kind === "file" && root) {
 			if (button !== "left") return false;
-			// The read-only preview pop-up, as in TREE; e there, or a Pi without overlays, opens the editor.
+			// The read-only preview pop-up, as in TREE, with the changes the card lists; e there, or a Pi without
+			// overlays, opens the editor. git runs only once the pop-up opens.
 			const file = path.join(root, hit.path);
 			const edit = () => openInEditor(file, root);
-			if (!openPreview(host.ctx?.(), { file, relPath: hit.path, onEdit: edit })) edit();
+			const ctx = host.ctx?.();
+			const range = state.selected ? (data.diff(host.cwd(), snapshot().repo?.branch, state.selected)?.direct ? ["HEAD", state.selected] : [`HEAD...${state.selected}`]) : undefined;
+			const changes = ctx?.hasUI ? (hit.untracked && !range ? { untracked: true } : { diff: data.fileDiff(root, hit.path, range) }) : undefined;
+			if (!openPreview(ctx, { file, relPath: hit.path, onEdit: edit, changes })) edit();
 			return true;
 		}
 		return false;

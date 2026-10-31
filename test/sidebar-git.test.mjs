@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
@@ -66,6 +69,7 @@ function repo(overrides = {}) {
 		if (/^diff HEAD\.\.\.\S+ --name-status/.test(line)) return pick("diff...names");
 		if (/^diff HEAD \S+ --numstat/.test(line)) return pick("diff..numstat");
 		if (/^diff HEAD \S+ --name-status/.test(line)) return pick("diff..names");
+		if (/ diff .* -U\d+ -- /.test(line)) return pick("filediff");
 		return undefined;
 	};
 }
@@ -604,5 +608,84 @@ test("with Pi's overlay UI a file click opens the read-only preview, and e there
 	} finally {
 		launches.restore();
 	}
+});
+
+const A_DIFF = ["diff --git a/src/a.ts b/src/a.ts", "--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1,3 +1,3 @@", " keep", "-old", "+new", " end", ""].join("\n");
+const FULL = "-U1000000";
+
+// The tab with Pi's overlay UI: `preview(pattern)` clicks a file row and builds the pop-up it opened.
+async function withOverlay(options = {}) {
+	const overlays = [];
+	const ctx = { hasUI: true, ui: { custom: (factory) => (overlays.push(factory), new Promise(() => {})) } };
+	const opened = await open({ ...options, ctx });
+	const preview = async (pattern) => {
+		assert.equal(opened.click(pattern), true);
+		const component = overlays.at(-1)({ terminal: { columns: 120, rows: 30 }, requestRender() {} }, theme, {}, () => {});
+		await component.ready;
+		return { component, text: () => component.render(80).map(plain) };
+	};
+	return { ...opened, preview, overlays };
+}
+
+test("a changed file opens with its uncommitted changes inline, from git diff HEAD with the whole file as context", async () => {
+	const { preview, calls } = await withOverlay({ git: repo({ filediff: A_DIFF }) });
+	const { text } = await preview(/src\/a\.ts/);
+	assert.ok(calls.some(([args, dir]) => args === `-c core.quotePath=false diff HEAD --no-color --no-ext-diff ${FULL} -- src/a.ts` && dir === "/repo"), "one diff of that file");
+	const out = text();
+	assert.match(out[1], /Read-only — TypeScript · changes/);
+	assert.match(out[4], /^▏ 1 1   keep /);
+	assert.match(out[5], /^▏ 2   − old /);
+	assert.match(out[6], /^▏   2 \+ new /);
+	assert.match(out.at(-2), /n\/N change · \+1 −1/);
+});
+
+test("an untracked file opens all added, without asking git for a diff", async () => {
+	const root = mkdtempSync(path.join(os.tmpdir(), "gq-git-"));
+	writeFileSync(path.join(root, "new.txt"), "hello\nworld\n");
+	const { preview, calls } = await withOverlay({ git: repo({ toplevel: `${root}\n` }) });
+	const { text } = await preview(/new\.txt/);
+	assert.ok(!calls.some(([args]) => args.includes(FULL)));
+	assert.match(text()[4], /^▏   1 \+ hello /);
+	assert.match(text()[5], /^▏   2 \+ world /);
+});
+
+test("a changed Markdown file from the GIT tab is its source with the diff, and m does nothing", async () => {
+	const md = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1,2 +1,2 @@", " # Title", "-*old*", "+**new**", ""].join("\n");
+	const { preview } = await withOverlay({ git: repo({ status: " M README.md\n", numstat: "1\t1\tREADME.md\n", filediff: md }) });
+	const { component, text } = await preview(/README\.md/);
+	assert.match(text()[1], /Read-only — Markdown · changes/);
+	assert.match(text()[4], /^▏ 1 1   # Title /);
+	assert.match(text()[6], /^▏   2 \+ \*\*new\*\* /);
+	assert.equal(component.handleInput("m"), false);
+	assert.match(text()[4], /^▏ 1 1   # Title /);
+});
+
+test("when git cannot diff the file the pop-up is the plain preview", async () => {
+	const root = mkdtempSync(path.join(os.tmpdir(), "gq-git-"));
+	mkdirSync(path.join(root, "src"));
+	writeFileSync(path.join(root, "src", "a.ts"), "const a = 1;\n");
+	const { preview } = await withOverlay({ git: repo({ toplevel: `${root}\n`, filediff: undefined }) });
+	const { text } = await preview(/src\/a\.ts/);
+	assert.match(text()[1], /^▏ Read-only — TypeScript +▕$/);
+	assert.match(text()[4], /^▏ 1 const a = 1; +▕$/);
+});
+
+test("in the branch diff inspector a file opens with the branch's changes against its base", async () => {
+	const { preview, calls, click } = await withOverlay({ git: repo({ filediff: A_DIFF }) });
+	click(/Graph \| Branches/, { at: "Branches" });
+	await settle();
+	click(/● feature/);
+	await settle();
+	const { text } = await preview(/src\/new\.ts/);
+	assert.ok(calls.some(([args]) => args === `-c core.quotePath=false diff HEAD...feature --no-color --no-ext-diff ${FULL} -- src/new.ts`));
+	assert.match(text()[1], /· changes/);
+
+	const direct = await withOverlay({ git: repo({ "diff...numstat": "", "diff..numstat": "4\t4\tREADME.md\n", "diff..names": "M\tREADME.md\n", filediff: A_DIFF }) });
+	direct.click(/Graph \| Branches/, { at: "Branches" });
+	await settle();
+	direct.click(/● feature/);
+	await settle();
+	await direct.preview(/README\.md/);
+	assert.ok(direct.calls.some(([args]) => args === `-c core.quotePath=false diff HEAD feature --no-color --no-ext-diff ${FULL} -- README.md`), "the direct diff when there is no merge base");
 });
 
