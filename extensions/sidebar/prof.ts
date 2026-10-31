@@ -2,13 +2,14 @@
 // profiles card (src/profiles/profiles-card.ts) filled with gentle-pi's own profiles instead of
 // pi-sdd-profiles, and gentle-quiet's plan usage instead of CLIProxyAPI's quotas. Two cards:
 //
-//   Profiles     one button per saved profile, "[★ 2: Max]", wrapped at most three rows deep with cute's
-//                [▼]/[▲] toggle for the rest; gentle-pi's marks: ◉ this session, ★ default for new
+//   Profiles     one button per saved profile, "[● 2: Max]", wrapped at most three rows deep with cute's
+//                [▼]/[▲] toggle for the rest; gentle-pi's marks: ◉ this session, ● default for new
 //                sessions, ⌂ this repository; the selected profile in accent bold, "•" in warning when it
 //                has unsaved edits. Under a rule, its routing: the orchestrator first, then each subagent
-//                with its model and effort (an unsaved value in warning). Under the routing, gentle-pi's
-//                screen's buttons "[ Use in this session ]  [ Make default ]  [ Save ]" (wrapped when the
-//                column is narrow; Save dim with nothing to save), and "● N unsaved" when there are edits.
+//                (no glyph before the names, agents in their family's color) with its model and effort (an
+//                unsaved value in warning). Under the routing, gentle-pi's screen's buttons
+//                "[ Use in this session ]  [ Make default ]  [ Save ]" (wrapped when the column is narrow; Save
+//                dim with nothing to save), and "● N unsaved" when there are edits.
 //   Plan usage   each window of the plan usage the Context card shows as cute's quota gauge: the label,
 //                the percent used and the reset on one row, a bar across the card under it.
 //
@@ -23,12 +24,18 @@
 // models.json diff, the repository pin, rollback) and exports no way to run it from here. A click on the
 // Profiles title opens gentle-pi's full editor, and so does every click when this gentle-pi does not export the
 // writers or Gentle Shell is on. The wheel is left to the column.
+// The keyboard, as gentle-pi's screen's keys: alt+p (gentle-quiet.ts) or a left click on the Profiles card gives
+// the tab the keyboard (host.focus). Then the selected roster row is drawn in reverse video, the same text in
+// accent bold, and a dim hint closes the card; ←→ show the previous or next profile (a chip click, the
+// unsaved-edits question included, answered by s, d or esc), ↑↓ move the selected row over the orchestrator and
+// the agents, enter opens its model picker (whose keys come through here; esc closes it first), e steps its
+// effort, s or ctrl+s Save, u Use in this session, d Make default. An esc the tab does not use gives the keyboard back to Pi's editor.
 // The data is read in ./prof-data.ts when the tab is shown, never while it draws.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { changeCount, loadProfiles, PROF_TIMEOUTS, profileEditor, stageEdit, thinkingSupport } from "./prof-data.ts";
-import { openPicker } from "./prof-picker.ts";
+import { openPicker, pressed } from "./prof-picker.ts";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 
 export { PROF_TIMEOUTS, thinkingSupport };
@@ -70,6 +77,10 @@ const COMMAND = "/gentle:profiles";
 // gentle-pi's screen's button labels (ROUTING_TABLE_BUTTONS).
 const BUTTONS = { use: "Use in this session", default: "Make default", save: "Save", "switch-save": "Save and switch", "switch-discard": "Discard", "switch-stay": "Stay" };
 const plural = (count) => `${count} unsaved change${count === 1 ? "" : "s"}`;
+const INVERSE = "\x1b[7m";
+const INVERSE_OFF = "\x1b[27m";
+const HINT = "←→ profile · ↑↓ agent · enter model · e effort · s save · u use · d default · esc";
+const LEAVING_HINT = "s save and switch · d discard · esc stay";
 
 export function createTab(host: SidebarHost): SidebarTab {
 	const fg = (role, text) => host.fg(role, text);
@@ -84,6 +95,18 @@ export function createTab(host: SidebarHost): SidebarTab {
 	let selected; // the profile shown in the card; undefined is the one in effect
 	let draft; // { name, config }: staged edits, written by Save
 	let leaving; // the profile a click asked for while the shown one has unsaved edits
+	let cursor = 0; // the roster row the keyboard has selected: 0 the orchestrator, then the agents
+	let targets = []; // each roster row's model and effort, as a click on them: { model, effort }
+	let lastInner = 55; // the room render() last had, to read the rows' targets between frames
+	let profileLines = 0; // the Profiles card's rows: a left click on them gives the tab the keyboard
+	let picker; // the model picker open over Pi, whose keys come through handleKey
+	const keyed = () => {
+		try {
+			return host.focused?.() === "prof";
+		} catch {
+			return false;
+		}
+	};
 
 	const refresh = () => {
 		if (loading) {
@@ -127,7 +150,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		const marks = (name) =>
 			[
 				[data.session, "◉", "success"],
-				[data.default, "★", "accent"],
+				[data.default, "●", "accent"],
 				[data.repo, "⌂", "warning"],
 			].filter(([owner]) => owner === name);
 		const shown = current();
@@ -272,21 +295,41 @@ export function createTab(host: SidebarHost): SidebarTab {
 		};
 		const view = data.view ? data.view(config) : { orchestrator: data.orchestrator, rows: data.rows };
 		const orchestrator = view.orchestrator;
-		const head = `${fg("accent", "◆")} ${host.bold("orchestrator")}`;
-		const rows = spreadParts(
-			head,
+		targets = [];
+		cursor = Math.max(0, Math.min(cursor, view.rows.length));
+		const focused = keyed();
+		const selecting = () => focused && targets.length === cursor;
+		// The keyboard's rows, as gentle-pi's screen draws them: plain text on the theme's selection background,
+		// filled to the card's width; undefined when the theme has no selectedBg.
+		const highlight = (text) => {
+			try {
+				const plainText = strip(text);
+				return host.theme.bg("selectedBg", fg("text", plainText + " ".repeat(Math.max(0, inner - visibleWidth(plainText)))));
+			} catch {
+				return undefined;
+			}
+		};
+		const selectedBg = focused && highlight("") !== undefined;
+		// Without it, the same name in reverse video and accent bold, so nothing moves.
+		const label = (text) => (selecting() && !selectedBg ? `${INVERSE}${host.bold(fg("accent", strip(text)))}${INVERSE_OFF}` : text);
+		const row = (left, parts) => {
+			const selected = selecting() && selectedBg;
+			targets.push({ model: parts.find((part) => part.action === "model"), effort: parts.find((part) => part.action === "effort") });
+			const rows = spreadParts(left, parts, inner);
+			return selected ? rows.map((line) => (typeof line === "string" ? highlight(line) : { ...line, text: highlight(line.text) })) : rows;
+		};
+		const rows = row(
+			label(host.bold("orchestrator")),
 			orchestrator?.model
 				? [modelPart(ORCHESTRATOR, orchestrator.model), effortPart(ORCHESTRATOR, orchestrator.model, orchestrator.thinking)]
 				: [modelPart(ORCHESTRATOR, undefined, UNTOUCHED)],
-			inner,
 		);
 		rows.push("");
 		if (!view.rows.length) rows.push(fg("dim", "no subagents routed"));
 		for (const entry of view.rows) {
 			const family = FAMILIES.find(([prefix]) => entry.agent.startsWith(prefix))?.[1];
-			const left = `${fg(family ?? "muted", "•")} ${fg(family ?? "text", entry.agent)}`;
 			const model = entry.model === INHERIT ? undefined : entry.model;
-			rows.push(...spreadParts(left, [modelPart(entry.agent, model), effortPart(entry.agent, model, entry.thinking)], inner));
+			rows.push(...row(label(fg(family ?? "text", entry.agent)), [modelPart(entry.agent, model), effortPart(entry.agent, model, entry.thinking)]));
 		}
 		return rows;
 	};
@@ -312,6 +355,11 @@ export function createTab(host: SidebarHost): SidebarTab {
 	};
 
 	const openEditor = () => {
+		try {
+			host.blur?.(); // gentle-pi's screen takes the keyboard
+		} catch {
+			// a host without the column's keyboard
+		}
 		try {
 			host.pi?.sendUserMessage?.(COMMAND, { expandPromptTemplates: true });
 		} catch {
@@ -405,6 +453,46 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 	};
 
+	// gentle-pi's tabs: leaving a profile with unsaved edits asks first; nothing is lost in silence.
+	const choose = (name) => {
+		if (name === current()) leaving = undefined;
+		else if (unsaved(current())) leaving = name;
+		else selected = name;
+		host.requestRender();
+		return true;
+	};
+
+	// A click (or a key) on a roster row's model or effort: the effort steps, the model opens the picker by the row
+	// (`at`, the click's place; centred without one).
+	const edit = (hit, at) => {
+		leaving = undefined; // an edit answers the question with Stay
+		const profile = current();
+		if (hit.action === "effort") {
+			nextEffort(profile, hit);
+			return true;
+		}
+		const untouched = hit.agent === ORCHESTRATOR ? UNTOUCHED : INHERIT;
+		const ctx = (() => {
+			try {
+				return host.ctx();
+			} catch {
+				return undefined;
+			}
+		})();
+		editor.models().then((models) => {
+			const opened = openPicker(ctx, {
+				title: `Model · ${hit.agent} · ${profile}`,
+				choices: [untouched, ...models],
+				current: hit.model ?? untouched,
+				at,
+				onPick: (choice) => stage(profile, hit.agent, { model: choice === untouched ? undefined : choice }),
+				onOpen: (opened) => (picker = opened),
+			});
+			if (!opened) openEditor(); // no overlay UI here: gentle-pi's screen instead
+		});
+		return true;
+	};
+
 	// A card with its rows' hitboxes moved to where the card puts them: rows start two under the title.
 	const card = (title, rows, width, titleAction) => {
 		const lines = host.card(title, rows.map((row) => (typeof row === "string" ? row : row.text)), width);
@@ -423,11 +511,14 @@ export function createTab(host: SidebarHost): SidebarTab {
 		render(width) {
 			if (!loading && (!data || Date.now() - loadedAt > STALE_MS)) refresh();
 			const inner = Math.max(1, host.inner(width));
+			lastInner = inner;
 			let rows;
 			if (!data) rows = [fg("muted", "Loading gentle-pi's profiles…")];
 			else if (data.state !== "ok") rows = [fg("muted", data.message)];
 			else rows = [...buttonRows(inner), ...(leaving ? leavingRows(inner) : []), fg("border", "─".repeat(inner)), ...rosterRows(inner), "", ...footerRows(inner)];
+			if (keyed()) rows.push(fg("dim", truncateToWidth(leaving ? LEAVING_HINT : HINT, inner, "…")));
 			const profiles = card(TITLE, rows, width, "profiles");
+			profileLines = profiles.lines.length;
 			const usage = card(USAGE_TITLE, usageRows(inner), width);
 			const lines = [...profiles.lines, ...usage.lines];
 			hitboxes = profiles.spans;
@@ -435,6 +526,13 @@ export function createTab(host: SidebarHost): SidebarTab {
 		},
 		handleClick(line, button, x, event) {
 			if (button !== "left") return false;
+			if (line >= 0 && line < profileLines) {
+				try {
+					host.focus?.("prof"); // a click on the card gives it the keyboard too
+				} catch {
+					// a host without the column's keyboard
+				}
+			}
 			const hit = hitboxes.find((box) => box.line === line && x >= box.startX && x < box.endX);
 			if (!hit) return false;
 			if (hit.action === "toggle") {
@@ -443,40 +541,44 @@ export function createTab(host: SidebarHost): SidebarTab {
 				return true;
 			}
 			if (hit.action === "profiles" || !editor || data?.state !== "ok") return openEditor();
-			if (hit.action === "select") {
-				// gentle-pi's tabs: leaving a profile with unsaved edits asks first; nothing is lost in silence.
-				if (hit.name === current()) leaving = undefined;
-				else if (unsaved(current())) leaving = hit.name;
-				else selected = hit.name;
+			if (hit.action === "select") return choose(hit.name);
+			if (hit.action in BUTTONS) return done(press(hit.action));
+			return edit(hit, event && { screenX: event.screenX, screenY: event.screenY, x: event.x ?? x });
+		},
+		handleKey(key) {
+			if (picker && !picker.closed) {
+				picker.handleInput(key); // the picker's keys, Esc closing it first
+				return true;
+			}
+			const editing = editor && data?.state === "ok";
+			if (data?.state === "ok") rosterRows(lastInner); // the rows' targets as the data is now, drawn or not
+			if (leaving) {
+				// gentle-pi's question: s (or enter) Save and switch, d Discard, esc Stay.
+				const answer = pressed(key, "escape") ? "switch-stay" : pressed(key, "s") || pressed(key, "enter") ? "switch-save" : pressed(key, "d") ? "switch-discard" : undefined;
+				return answer ? done(press(answer)) : false;
+			}
+			if (pressed(key, "up") || pressed(key, "down")) {
+				cursor = Math.max(0, Math.min(Math.max(0, targets.length - 1), cursor + (pressed(key, "up") ? -1 : 1)));
 				host.requestRender();
 				return true;
 			}
-			if (hit.action in BUTTONS) return done(press(hit.action));
-			leaving = undefined; // an edit answers the question with Stay
-			const profile = current();
-			if (hit.action === "effort") {
-				nextEffort(profile, hit);
-				return true;
+			const step = pressed(key, "left") ? -1 : pressed(key, "right") ? 1 : 0;
+			const button = pressed(key, "s") || pressed(key, "ctrl+s") ? "save" : pressed(key, "u") ? "use" : pressed(key, "d") ? "default" : undefined;
+			const model = pressed(key, "enter");
+			const effort = pressed(key, "e");
+			if (!step && !button && !model && !effort) return false;
+			if (!editing) return openEditor(); // as a click: gentle-pi's screen
+			if (step) {
+				const names = data.names;
+				const next = names[Math.max(0, Math.min(names.length - 1, names.indexOf(current()) + step))];
+				return next === current() ? true : choose(next);
 			}
-			const untouched = hit.agent === ORCHESTRATOR ? UNTOUCHED : INHERIT;
-			const ctx = (() => {
-				try {
-					return host.ctx();
-				} catch {
-					return undefined;
-				}
-			})();
-			editor.models().then((models) => {
-				const opened = openPicker(ctx, {
-					title: `Model · ${hit.agent} · ${profile}`,
-					choices: [untouched, ...models],
-					current: hit.model ?? untouched,
-					at: event && { screenX: event.screenX, screenY: event.screenY, x: event.x ?? x },
-					onPick: (choice) => stage(profile, hit.agent, { model: choice === untouched ? undefined : choice }),
-				});
-				if (!opened) openEditor(); // no overlay UI here: gentle-pi's screen instead
-			});
-			return true;
+			if (button) return done(press(button));
+			const target = targets[cursor]?.[model ? "model" : "effort"];
+			return target ? edit(target) : true;
+		},
+		keyOverlay() {
+			return picker && !picker.closed ? picker : undefined;
 		},
 		handleWheel() {
 			return false;

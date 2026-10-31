@@ -159,8 +159,8 @@ const boxed = (rows, width) => {
 };
 
 /** A stand-in for gentle-quiet's tab host. */
-function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40 } = {}) {
-	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [] };
+function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", noPi = false, shellOff = true, models = MODELS, columns = 180, rows = 40, selectedBg = true } = {}) {
+	const calls = { git: [], sent: [], renders: 0, usage: 0, custom: [], done: [], notices: [], setModel: [], thinking: [], focuses: [], focused: undefined };
 	// Pi's overlay UI, recording what it is asked to show; component() builds it like Pi does.
 	const tui = {
 		terminal: { columns, rows },
@@ -188,7 +188,8 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 	};
 	calls.component = () => calls.custom.at(-1).factory(tui, theme, {}, (value) => calls.done.push(value));
 	const h = {
-		theme,
+		// Pi's theme, with its selection background unless a test takes it away (Pi's bg() throws on an unknown color).
+		theme: selectedBg ? { ...theme, bg: (name, text) => (name === "selectedBg" ? `${SELECTED}${text}\x1b[49m` : assert.fail(`no bg ${name}`)) } : theme,
 		fg: (name, text) => theme.fg(name, text),
 		bold: (text) => theme.bold(text),
 		card: (title, rows, width) => boxed([theme.fg("toolTitle", theme.bold(title)), ...(rows.length ? ["", ...rows] : [])], width),
@@ -220,6 +221,16 @@ function host(env, { git, usage = { name: "", windows: [] }, sessionId = "s1", n
 		},
 		gauge: (percent) => theme.fg("accent", `◔${percent}`),
 		icons: {},
+		// The column's keyboard, as gentle-quiet hands it to a tab.
+		// Recorded; held only when a test grants it (calls.keyboard), so the other tests see the card unfocused.
+		focus: (id) => {
+			calls.focuses.push(id);
+			if (calls.keyboard) calls.focused = id;
+		},
+		blur: () => {
+			calls.focused = undefined;
+		},
+		focused: () => calls.focused,
 	};
 	return { host: h, calls };
 }
@@ -277,10 +288,10 @@ test("the Profiles card: one button per profile with gentle-pi's marks, the show
 		const out = rows();
 		assert.equal(out[1], "│ Profiles");
 		assert.equal(out[2], "│");
-		assert.equal(out[3], "│ [◉ 1: Balanced] [★ 2: Max] [⌂ 3: Low]");
+		assert.equal(out[3], "│ [◉ 1: Balanced] [● 2: Max] [⌂ 3: Low]");
 		const raw = draw();
 		assert.ok(raw[3].includes(role("accent")) && raw[3].includes(theme.bold("[◉ 1: Balanced]")), "the session's profile is the one shown");
-		assert.ok(painted(raw[3], "muted", "Max") && painted(raw[3], "accent", "★"), "others muted, marks in their tones");
+		assert.ok(painted(raw[3], "muted", "Max") && painted(raw[3], "accent", "●"), "others muted, marks in their tones");
 		assert.ok(painted(raw[3], "warning", "⌂"));
 		assert.match(out[4], /^│ ─+$/, "a rule under the profiles");
 		assert.ok(painted(raw[4], "border"));
@@ -293,19 +304,21 @@ test("the roster of the shown profile: the orchestrator first, then each subagen
 	const env = install();
 	const { rows, draw } = await opened(env);
 	const out = rows();
-	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]", "no session, no pin: the default is shown");
+	assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]", "no session, no pin: the default is shown");
 	const orchestrator = rowIndex(out, /orchestrator/);
-	assert.match(out[orchestrator], /^│ ◆ orchestrator +claude-opus-5-5 \(high\)$/);
+	assert.match(out[orchestrator], /^│ orchestrator +claude-opus-5-5 \(high\)$/);
 	assert.equal(out[orchestrator + 1], "│");
 	const roster = out.slice(orchestrator + 2, orchestrator + 6);
-	[/^│ • custom +inherit \(inherit\)$/, /^│ • gentle-ai-explore +claude-sonnet-5-5 \(medium\)$/, /^│ • jd-judge-a +claude-opus-5-5 \(high\)$/, /^│ • review-risk +grok-4\.7 \(inherit\)$/].forEach((pattern, i) =>
+	[/^│ custom +inherit \(inherit\)$/, /^│ gentle-ai-explore +claude-sonnet-5-5 \(medium\)$/, /^│ jd-judge-a +claude-opus-5-5 \(high\)$/, /^│ review-risk +grok-4\.7 \(inherit\)$/].forEach((pattern, i) =>
 		assert.match(roster[i], pattern),
 	);
 	assert.ok(roster.every((row) => [...row].length === 57), "the model and effort flush with the card's edge");
 	const raw = draw();
-	assert.ok(painted(raw[orchestrator + 3], "accent", "•"), "gentle-ai- agents in accent");
-	assert.ok(painted(raw[orchestrator + 4], "warning", "•"), "jd- agents in warning");
-	assert.ok(painted(raw[orchestrator + 5], "success", "•"), "review- agents in success");
+	assert.ok(raw[orchestrator].includes(theme.bold("orchestrator")), "the orchestrator bold");
+	assert.ok(painted(raw[orchestrator + 3], "accent", "gentle-ai-explore"), "gentle-ai- agents in accent");
+	assert.ok(painted(raw[orchestrator + 4], "warning", "jd-judge-a"), "jd- agents in warning");
+	assert.ok(painted(raw[orchestrator + 5], "success", "review-risk"), "review- agents in success");
+	assert.ok(!raw.some((row) => /[◆•▸]/.test(row)), "no glyph before the names");
 	assert.ok(painted(raw[orchestrator + 3], "dim", "(medium)"), "the effort dim");
 	assert.ok(out.every((row) => [...row].length <= 59));
 });
@@ -315,14 +328,14 @@ test("a roster row too long for the card puts the model on its own row", async (
 	const { rows } = await opened(env, {}, 50);
 	const out = rows();
 	const at = rowIndex(out, /gentle-ai-a-very-long/);
-	assert.match(out[at], /^│ • gentle-ai-a-very-long-agent-name-here$/);
+	assert.match(out[at], /^│ gentle-ai-a-very-long-agent-name-here$/);
 	assert.match(out[at + 1], /^│ {3}a-very-long-model-name-for-sure \(xhigh\)$/);
 });
 
 test("a profile with no subagents and no orchestrator says so", async () => {
 	const env = install({ store: { ...STORE, active: "Low" } });
 	const out = (await opened(env)).rows();
-	assert.ok(out.some((row) => /◆ orchestrator +leave untouched/.test(row)));
+	assert.ok(out.some((row) => /^│ orchestrator +leave untouched/.test(row)));
 	assert.ok(out.some((row) => row === "│ no subagents routed"));
 });
 
@@ -372,8 +385,8 @@ test("gentle-pi without the reader exports: the same files are read directly", a
 	const env = install({ lib: { "agent-profiles.ts": "export const nothing = 1;\n" } });
 	env.pin("repo", "Low");
 	const out = (await opened(env)).rows();
-	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [⌂ 3: Low]");
-	assert.ok(out.some((row) => /^│ ◆ orchestrator +leave untouched$/.test(row)), "the pinned profile is shown");
+	assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [⌂ 3: Low]");
+	assert.ok(out.some((row) => /^│ orchestrator +leave untouched$/.test(row)), "the pinned profile is shown");
 });
 
 test("a reader that throws degrades to a one-line message", async () => {
@@ -387,7 +400,7 @@ test("no repository, a missing git binary or a git that throws: no ⌂, the rest
 		const env = install();
 		env.pin("local", "Low");
 		const out = (await opened(env, { git })).rows();
-		assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]");
+		assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]");
 	}
 });
 
@@ -398,7 +411,7 @@ test("a git that never answers times out: the profiles show without the reposito
 		const env = install();
 		env.pin("local", "Low");
 		const out = (await opened(env, { git: () => new Promise(() => {}) })).rows();
-		assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]");
+		assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]");
 	} finally {
 		Object.assign(PROF_TIMEOUTS, saved);
 	}
@@ -420,12 +433,12 @@ test("a load that never finishes times out to a short message", async () => {
 test("onShow reloads: a profile made default elsewhere shows on the next visit", async () => {
 	const env = install();
 	const { tab, rows, calls } = await opened(env);
-	assert.equal(rows()[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]");
+	assert.equal(rows()[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]");
 	env.writeStore({ ...STORE, active: "Balanced" });
 	const before = calls.renders;
 	tab.onShow();
 	await settle();
-	assert.equal(rows()[3], "│ [★ 1: Balanced] [○ 2: Max] [○ 3: Low]");
+	assert.equal(rows()[3], "│ [● 1: Balanced] [○ 2: Max] [○ 3: Low]");
 	assert.ok(calls.renders > before);
 });
 
@@ -513,7 +526,7 @@ test("in gentle-quiet's column: a click on a profile selects it, Use binds it; t
 	await settle();
 	let out = content().render(60).map(plain);
 	assert.match(out[1], /^│ Profiles/);
-	const at = rowIndex(out, /\[★ 2: Max\]/);
+	const at = rowIndex(out, /\[● 2: Max\]/);
 	assert.ok(at > 0, out.join("\n"));
 	const click = (y, x) => content().handleMouse({ type: "click", button: "left", x, y, width: 60, height: 38, screenX: 120 + x, screenY: y + 2 });
 	assert.equal(click(at, out[at].indexOf("Balanced"))?.handled, true);
@@ -573,7 +586,7 @@ test("a click on a profile selects the one shown in the card: nothing is bound o
 	assert.deepEqual(calls.sent, [], "gentle-pi's screen is not opened");
 	assert.deepEqual(calls.setModel, []);
 	const out = rows();
-	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]", "the marks stay where they are");
+	assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]", "the marks stay where they are");
 	const raw = draw();
 	assert.ok(raw[3].includes(theme.bold("[○ 1: Balanced]")) && painted(raw[3], "muted", "Max"), "the selected chip in accent bold");
 	assert.ok(out.some((row) => /gentle-ai-worker +gpt-5\.5 \(medium\)/.test(row)), "the roster is the selected profile's");
@@ -636,7 +649,7 @@ test("model and effort edits are staged: nothing is written until Save, which wr
 	assert.ok(out.some((row) => /jd-judge-a +claude-opus-5-5 \(inherit\)$/.test(row)), out.join("\n"));
 	assert.equal(storeText(env), before, "still nothing written");
 	assert.equal(writes(), startWrites);
-	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max •] [○ 3: Low]", "the chip says it has unsaved edits");
+	assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max •] [○ 3: Low]", "the chip says it has unsaved edits");
 	assert.ok(out.some((row) => /● 2 unsaved/.test(row)), "the count, as gentle-pi's footer");
 	let raw = draw();
 	const explore = rowIndex(out, /gentle-ai-explore/);
@@ -653,7 +666,7 @@ test("model and effort edits are staged: nothing is written until Save, which wr
 	assert.deepEqual(file.profiles.Balanced, STORE.profiles.Balanced, "the other profiles untouched");
 	assert.equal(file.active, "Max");
 	out = rows();
-	assert.equal(out[3], "│ [○ 1: Balanced] [★ 2: Max] [○ 3: Low]", "no unsaved mark");
+	assert.equal(out[3], "│ [○ 1: Balanced] [● 2: Max] [○ 3: Low]", "no unsaved mark");
 	assert.ok(!out.some((row) => /unsaved/.test(row)));
 	raw = draw();
 	assert.ok(painted(raw[rowIndex(out, /\[ Save \]/)], "dim", "[ Save ]"), "dim again");
@@ -685,7 +698,7 @@ test("Use in this session binds the selected profile and moves the session to it
 	assert.equal(bindings().get("s1")?.name, "Balanced");
 	assert.deepEqual(bindings().get("s1").modelProfiles, STORE.profiles.Balanced, "the profile's routing, as a snapshot");
 	assert.deepEqual(calls.setModel, [], "no orchestrator in Balanced: this session keeps its model");
-	assert.equal(rows()[3], "│ [◉ 1: Balanced] [★ 2: Max] [○ 3: Low]", "◉ follows, read again from gentle-pi");
+	assert.equal(rows()[3], "│ [◉ 1: Balanced] [● 2: Max] [○ 3: Low]", "◉ follows, read again from gentle-pi");
 	tab.handleClick(3, "left", rows()[3].indexOf("Max"));
 	await settle();
 	press(tab, rows, "[ Use in this session ]");
@@ -693,7 +706,7 @@ test("Use in this session binds the selected profile and moves the session to it
 	assert.equal(bindings().get("s1")?.name, "Max");
 	assert.deepEqual(calls.setModel.map((model) => `${model.provider}/${model.id}`), ["claude-bridge/claude-opus-5-5"]);
 	assert.deepEqual(calls.thinking, ["high"]);
-	assert.equal(rows()[3], "│ [○ 1: Balanced] [◉★ 2: Max] [○ 3: Low]");
+	assert.equal(rows()[3], "│ [○ 1: Balanced] [◉● 2: Max] [○ 3: Low]");
 	assert.equal(storeText(env), before, "nothing shared is written");
 	assert.deepEqual(calls.sent, []);
 	bindings().delete("s1");
@@ -772,7 +785,7 @@ test("switching profiles with staged edits asks as gentle-pi's screen: Save and 
 	assert.equal(writes(), startWrites + 1);
 	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
 	out = rows();
-	assert.ok(out.some((row) => /◆ orchestrator +leave untouched$/.test(row)) && out.some((row) => row === "│ no subagents routed"), "Low shown");
+	assert.ok(out.some((row) => /^│ orchestrator +leave untouched$/.test(row)) && out.some((row) => row === "│ no subagents routed"), "Low shown");
 	assert.ok(!out.some((row) => /unsaved/.test(row)));
 });
 
@@ -838,12 +851,12 @@ test("the orchestrator's model picker: the keyboard moves and picks, and leave u
 	picker.handleInput(KEYS.enter);
 	await settle();
 	assert.equal(calls.done.length, 1);
-	assert.ok(rows().some((row) => /◆ orchestrator +leave untouched$/.test(row)));
+	assert.ok(rows().some((row) => /^│ orchestrator +leave untouched$/.test(row)));
 	assert.deepEqual(stored(env).profiles.Max.orchestrator, MAX.orchestrator, "not yet written");
 	press(tab, rows, "[ Save ]");
 	await settle();
 	assert.equal(stored(env).profiles.Max.orchestrator, undefined);
-	assert.ok(rows().some((row) => /◆ orchestrator +leave untouched$/.test(row)));
+	assert.ok(rows().some((row) => /^│ orchestrator +leave untouched$/.test(row)));
 });
 
 test("the picker filters as you type and keeps within the terminal", async () => {
@@ -974,4 +987,244 @@ test("without gentle-pi's writers, or with Gentle Shell on, every click runs /ge
 		assert.equal(storeText(env), before);
 		assert.equal(bindings().get("s1"), undefined);
 	}
+});
+
+// ---- The keyboard, as gentle-pi's /gentle:profiles screen (T26) ----
+
+const KEY = { left: "\x1b[D", right: "\x1b[C", up: "\x1b[A", down: "\x1b[B", enter: "\r", escape: "\x1b", ctrlS: "\x13" };
+const INVERSE = "\x1b[7m";
+// The test theme's selectedBg (host() above).
+const SELECTED = "\x1b[48;5;240m";
+/** The roster row the keyboard has selected (the one on the selection background), plain, or undefined. */
+const marked = (draw) => {
+	const row = draw().find((line) => line.includes(SELECTED));
+	return row === undefined ? undefined : plain(row).replace(/ +│$/, "");
+};
+/** A card row's content between the outline's "│ " and " │". */
+const content = (line) => line.slice(line.indexOf("│") + 1 + "\x1b[39m ".length, line.lastIndexOf(theme.fg("border", "│")) - 1);
+const HINT = /←→ profile · ↑↓ agent/;
+
+test("a left click anywhere on the Profiles card gives the tab the keyboard; the click still does its own", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	const out = rows();
+	assert.equal(tab.handleClick(3, "left", out[3].length + 2), false, "past the last chip: nothing to do");
+	assert.deepEqual(calls.focuses, ["prof"], "but the card has the keyboard");
+	assert.equal(tab.handleClick(3, "left", out[3].indexOf("Balanced")), true);
+	assert.equal(calls.focuses.length, 2);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "the chip still selects");
+	calls.focused = undefined;
+	assert.equal(tab.handleClick(3, "right", 4), false);
+	assert.equal(tab.handleClick(rowIndex(rows(), /Plan usage/) + 2, "left", 4), false);
+	assert.equal(calls.focuses.length, 2, "not a right click, not the Plan usage card");
+});
+
+test("unfocused, the card is as today: no selected row, no hint, and keys are not the tab's", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { rows, draw } = await opened(env);
+	assert.equal(marked(draw), undefined);
+	assert.ok(!rows().some((row) => HINT.test(row)));
+	assert.ok(!draw().some((row) => row.includes(INVERSE) || row.includes(SELECTED)));
+});
+
+test("focused: the selected row is on the selection background, the text where it was, ↑↓ move it over the orchestrator and the agents, and a dim hint fits the card", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, draw, calls } = await opened(env);
+	calls.focused = "prof";
+	assert.match(marked(draw), /^│ orchestrator +claude-opus-5-5 \(high\)/, "the orchestrator first, nothing moved");
+	const unfocused = (calls.focused = undefined, draw());
+	calls.focused = "prof";
+	const raw = draw();
+	const at = raw.findIndex((row) => row.includes(SELECTED));
+	const text = plain(content(unfocused[at]));
+	assert.equal([...text].length, 55, "the card's inner width");
+	assert.match(text, /^orchestrator +claude-opus-5-5 \(high\)$/);
+	assert.equal(content(raw[at]), `${SELECTED}${theme.fg("text", text)}\x1b[49m`, "the whole row, name, model and effort, plain text on selectedBg");
+	assert.equal(raw.filter((row) => row.includes(SELECTED)).length, 1, "one row");
+	const above = (rows) => rows.slice(0, rows.findIndex((row) => HINT.test(plain(row))));
+	above(raw).forEach((row, index) => index === at || assert.equal(row, unfocused[index], `row ${index} untouched`));
+	assert.ok(!raw.some((row) => row.includes(INVERSE)), "no reverse video");
+	assert.ok(!rows().some((row) => row.includes("▸")), "no glyph");
+	const hint = rows().findIndex((row) => HINT.test(row));
+	assert.ok(hint > rowIndex(rows(), /\[ Save \]/), `under the buttons:\n${rows().join("\n")}`);
+	assert.ok(raw[hint].includes(role("dim")));
+	assert.ok(rows().every((row) => [...row].length <= 59));
+	assert.equal(tab.handleKey(KEY.down), true);
+	assert.match(marked(draw), /^│ custom /);
+	for (let i = 0; i < 10; i++) tab.handleKey(KEY.down);
+	assert.match(marked(draw), /^│ review-risk /, "stops at the last agent");
+	tab.handleKey(KEY.up);
+	assert.match(marked(draw), /^│ jd-judge-a /);
+	for (let i = 0; i < 10; i++) tab.handleKey(KEY.up);
+	assert.match(marked(draw), /^│ orchestrator /, "stops at the orchestrator");
+	const wide = tab.render(100, 40).map(plain);
+	assert.ok(wide.some((row) => row.includes("←→ profile · ↑↓ agent · enter model · e effort · s save · u use · d default · esc")), wide.join("\n"));
+	assert.ok(tab.render(30, 40).map(plain).every((row) => [...row].length <= 30), "cut to a narrow column");
+});
+
+test("←→ show the previous or next profile, as a click on its chip, and stop at the ends", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	assert.equal(tab.handleKey(KEY.left), true);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "Balanced");
+	tab.handleKey(KEY.left);
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "still Balanced: the first");
+	tab.handleKey(KEY.right);
+	tab.handleKey(KEY.right);
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "Low");
+	tab.handleKey(KEY.right);
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "still Low: the last");
+	assert.equal(bindings().get("s1"), undefined, "only shown, as a chip click");
+	assert.deepEqual(calls.sent, []);
+});
+
+test("←→ away from unsaved edits ask as a click does; s saves and switches, d discards, esc stays", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const startWrites = writes();
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleKey(KEY.left);
+	assert.ok(rows().some((row) => row === "│ Max has 1 unsaved change."));
+	assert.ok(rows().some((row) => /s save and switch · d discard · esc stay/.test(row)), "the hint follows the question");
+	assert.equal(tab.handleKey(KEY.escape), true, "esc answers Stay; the keyboard stays");
+	await settle();
+	assert.ok(!rows().some((row) => /unsaved change\./.test(row)));
+	assert.ok(rows().some((row) => /● 1 unsaved/.test(row)));
+	tab.handleKey(KEY.left);
+	tab.handleKey("d");
+	await settle();
+	assert.ok(rows().some((row) => /gentle-ai-worker/.test(row)), "Discard: on to Balanced");
+	assert.equal(writes(), startWrites);
+	tab.handleKey(KEY.right);
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	tab.handleKey(KEY.right);
+	tab.handleKey("s");
+	await settle();
+	assert.equal(writes(), startWrites + 1, "Save and switch");
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	assert.ok(rows().some((row) => /no subagents routed/.test(row)), "on to Low");
+});
+
+test("enter opens the model picker on the selected row; while it is open the keys are its own, and esc closes it first", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const before = storeText(env);
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	tab.handleKey(KEY.down);
+	tab.handleKey(KEY.down);
+	assert.equal(tab.handleKey(KEY.enter), true);
+	await settle();
+	assert.equal(calls.custom.length, 1, "one pop-up");
+	const picker = calls.component();
+	assert.ok(pickerRows(picker).some((row) => row.includes("Model · gentle-ai-explore · Max")));
+	assert.ok(pickerRows(picker).some((row) => row.includes("● claude-bridge/claude-sonnet-5-5")));
+	assert.equal(tab.handleKey(KEY.escape), true, "esc goes to the picker");
+	assert.equal(calls.done.length, 1, "and closes it");
+	assert.equal(tab.handleKey(KEY.escape), false, "the next esc is the column's: it gives the keyboard back");
+	assert.equal(storeText(env), before);
+	// enter and the picker's own keys pick a model, staged on that row.
+	tab.handleKey(KEY.enter);
+	await settle();
+	const second = calls.component();
+	for (const char of "grok") assert.equal(tab.handleKey(char), true);
+	tab.handleKey(KEY.enter);
+	await settle();
+	assert.equal(calls.done.length, 2);
+	assert.ok(rows().some((row) => /gentle-ai-explore +grok-4\.7 \(medium\)/.test(row)), rows().join("\n"));
+	assert.ok(second.closed);
+	assert.equal(storeText(env), before, "staged, not written");
+});
+
+test("e steps the selected row's effort, as a click on it", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const saved = { ...thinkingSupport };
+	thinkingSupport.load = async () => {
+		throw new Error("no pi-ai");
+	};
+	try {
+		assert.equal(tab.handleKey("e"), true);
+		await settle();
+		assert.ok(rows().some((row) => /orchestrator +claude-opus-5-5 \(xhigh\)/.test(row)), rows().join("\n"));
+		tab.handleKey(KEY.down);
+		tab.handleKey(KEY.down);
+		tab.handleKey(KEY.down);
+		tab.handleKey("e");
+		await settle();
+		assert.ok(rows().some((row) => /jd-judge-a +claude-opus-5-5 \(xhigh\)/.test(row)));
+	} finally {
+		Object.assign(thinkingSupport, saved);
+	}
+	assert.ok(rows().some((row) => /● 2 unsaved/.test(row)));
+});
+
+test("s and ctrl+s save, u uses in this session, d makes default: the buttons' own actions", async () => {
+	bindings().delete("s1");
+	const env = install({ lib: EDIT_LIB });
+	const { tab, rows, calls } = await opened(env);
+	calls.focused = "prof";
+	const startWrites = writes();
+	assert.equal(tab.handleKey("s"), true);
+	await settle();
+	assert.ok(calls.notices.some(([text]) => text === "Nothing to save."));
+	await pickModel(tab, rows, calls, "custom", "inherit", "xai/grok-4.7");
+	assert.equal(tab.handleKey(KEY.ctrlS), true);
+	await settle();
+	assert.equal(writes(), startWrites + 1);
+	assert.deepEqual(stored(env).profiles.Max.custom, { model: "xai/grok-4.7" });
+	tab.handleKey(KEY.left);
+	assert.equal(tab.handleKey("u"), true);
+	await settle();
+	assert.equal(bindings().get("s1")?.name, "Balanced");
+	assert.equal(tab.handleKey("d"), true);
+	await settle();
+	assert.deepEqual(calls.sent, [["/gentle:profiles", { expandPromptTemplates: true }]]);
+	assert.equal(tab.handleKey("x"), false, "a key it has no use for");
+	bindings().delete("s1");
+});
+
+test("without gentle-pi's writers the keys do what the clicks do: /gentle:profiles", async () => {
+	const env = install();
+	const { tab, calls } = await opened(env);
+	calls.focused = "prof";
+	for (const key of [KEY.right, KEY.enter, "e", "s", "u", "d"]) assert.equal(tab.handleKey(key), true, JSON.stringify(key));
+	await settle();
+	assert.equal(calls.sent.length, 6);
+	assert.ok(calls.sent.every(([text]) => text === "/gentle:profiles"));
+	assert.equal(calls.custom.length, 0);
+});
+
+test("a selected entry that wraps is on the selection background on both of its rows", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { tab, draw, calls } = await opened(env, {}, 34);
+	const unfocused = draw();
+	calls.focused = "prof";
+	tab.handleKey(KEY.down);
+	tab.handleKey(KEY.down);
+	const raw = draw();
+	const at = raw.map((row, index) => (row.includes(SELECTED) ? index : -1)).filter((index) => index >= 0);
+	assert.equal(at.length, 2, raw.map(plain).join("\n"));
+	assert.equal(at[1], at[0] + 1);
+	assert.match(plain(content(raw[at[0]])), /^gentle-ai-explore +$/);
+	assert.match(plain(content(raw[at[1]])), /^ +claude-sonnet-5-5 \(medium\) *$/);
+	for (const index of at) {
+		const text = plain(content(unfocused[index]));
+		assert.equal([...text].length, 30);
+		assert.equal(content(raw[index]), `${SELECTED}${theme.fg("text", text)}\x1b[49m`);
+	}
+	raw.slice(0, raw.findIndex((row) => HINT.test(plain(row)))).forEach((row, index) => at.includes(index) || assert.equal(row, unfocused[index], `row ${index} untouched`));
+});
+
+test("a theme without selectedBg: the selected name in reverse video and accent bold, as before", async () => {
+	const env = install({ lib: EDIT_LIB });
+	const { draw, calls } = await opened(env, { selectedBg: false });
+	calls.focused = "prof";
+	const raw = draw();
+	const at = raw.findIndex((row) => row.includes(INVERSE));
+	assert.ok(raw[at].includes(`${INVERSE}${theme.bold(theme.fg("accent", "orchestrator"))}`), "the same text in reverse video, accent bold");
+	assert.match(plain(raw[at]), /^│ orchestrator +claude-opus-5-5 \(high\)/);
+	assert.ok(!raw.some((row) => row.includes(SELECTED)));
 });
