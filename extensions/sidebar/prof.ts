@@ -2,13 +2,14 @@
 // profiles card (src/profiles/profiles-card.ts) filled with gentle-pi's own profiles instead of
 // pi-sdd-profiles, and gentle-quiet's plan usage instead of CLIProxyAPI's quotas. Two cards:
 //
-//   Profiles     one button per saved profile, "[★ 2: Max]", wrapped at most three rows deep with cute's
-//                [▼]/[▲] toggle for the rest; gentle-pi's marks: ◉ this session, ★ default for new
+//   Profiles     one button per saved profile, "[● 2: Max]", wrapped at most three rows deep with cute's
+//                [▼]/[▲] toggle for the rest; gentle-pi's marks: ◉ this session, ● default for new
 //                sessions, ⌂ this repository; the selected profile in accent bold, "•" in warning when it
 //                has unsaved edits. Under a rule, its routing: the orchestrator first, then each subagent
-//                with its model and effort (an unsaved value in warning). Under the routing, gentle-pi's
-//                screen's buttons "[ Use in this session ]  [ Make default ]  [ Save ]" (wrapped when the
-//                column is narrow; Save dim with nothing to save), and "● N unsaved" when there are edits.
+//                (no glyph before the names, agents in their family's color) with its model and effort (an
+//                unsaved value in warning). Under the routing, gentle-pi's screen's buttons
+//                "[ Use in this session ]  [ Make default ]  [ Save ]" (wrapped when the column is narrow; Save
+//                dim with nothing to save), and "● N unsaved" when there are edits.
 //   Plan usage   each window of the plan usage the Context card shows as cute's quota gauge: the label,
 //                the percent used and the reset on one row, a bar across the card under it.
 //
@@ -24,11 +25,11 @@
 // Profiles title opens gentle-pi's full editor, and so does every click when this gentle-pi does not export the
 // writers or Gentle Shell is on. The wheel is left to the column.
 // The keyboard, as gentle-pi's screen's keys: alt+p (gentle-quiet.ts) or a left click on the Profiles card gives
-// the tab the keyboard (host.focus). Then the selected roster row is marked "▸" in reverse video and a dim hint
-// closes the card; ←→ show the previous or next profile (a chip click, the unsaved-edits question included,
-// answered by s, d or esc), ↑↓ move the selected row over the orchestrator and the agents, enter opens its model
-// picker (whose keys come through here; esc closes it first), e steps its effort, s or ctrl+s Save, u Use in this
-// session, d Make default. An esc the tab does not use gives the keyboard back to Pi's editor.
+// the tab the keyboard (host.focus). Then the selected roster row is drawn in reverse video, the same text in
+// accent bold, and a dim hint closes the card; ←→ show the previous or next profile (a chip click, the
+// unsaved-edits question included, answered by s, d or esc), ↑↓ move the selected row over the orchestrator and
+// the agents, enter opens its model picker (whose keys come through here; esc closes it first), e steps its
+// effort, s or ctrl+s Save, u Use in this session, d Make default. An esc the tab does not use gives the keyboard back to Pi's editor.
 // The data is read in ./prof-data.ts when the tab is shown, never while it draws.
 // @ts-nocheck
 
@@ -149,7 +150,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		const marks = (name) =>
 			[
 				[data.session, "◉", "success"],
-				[data.default, "★", "accent"],
+				[data.default, "●", "accent"],
 				[data.repo, "⌂", "warning"],
 			].filter(([owner]) => owner === name);
 		const shown = current();
@@ -297,14 +298,14 @@ export function createTab(host: SidebarHost): SidebarTab {
 		targets = [];
 		cursor = Math.max(0, Math.min(cursor, view.rows.length));
 		const focused = keyed();
-		// The keyboard's row: "▸" for the glyph, the label in reverse video, so nothing moves.
-		const label = (glyph, text) => (focused && targets.length === cursor ? `${INVERSE}${fg("accent", "▸")} ${host.bold(fg("accent", strip(text)))}${INVERSE_OFF}` : `${glyph} ${text}`);
+		// The keyboard's row: the same name in reverse video and accent bold, so nothing moves.
+		const label = (text) => (focused && targets.length === cursor ? `${INVERSE}${host.bold(fg("accent", strip(text)))}${INVERSE_OFF}` : text);
 		const row = (left, parts) => {
 			targets.push({ model: parts.find((part) => part.action === "model"), effort: parts.find((part) => part.action === "effort") });
 			return spreadParts(left, parts, inner);
 		};
 		const rows = row(
-			label(fg("accent", "◆"), host.bold("orchestrator")),
+			label(host.bold("orchestrator")),
 			orchestrator?.model
 				? [modelPart(ORCHESTRATOR, orchestrator.model), effortPart(ORCHESTRATOR, orchestrator.model, orchestrator.thinking)]
 				: [modelPart(ORCHESTRATOR, undefined, UNTOUCHED)],
@@ -314,7 +315,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		for (const entry of view.rows) {
 			const family = FAMILIES.find(([prefix]) => entry.agent.startsWith(prefix))?.[1];
 			const model = entry.model === INHERIT ? undefined : entry.model;
-			rows.push(...row(label(fg(family ?? "muted", "•"), fg(family ?? "text", entry.agent)), [modelPart(entry.agent, model), effortPart(entry.agent, model, entry.thinking)]));
+			rows.push(...row(label(fg(family ?? "text", entry.agent)), [modelPart(entry.agent, model), effortPart(entry.agent, model, entry.thinking)]));
 		}
 		return rows;
 	};

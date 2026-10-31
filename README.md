@@ -31,11 +31,11 @@ same; only how it is drawn changes.
   selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
   on its effort steps to the next level that model allows; edits stay unsaved (•, ● N unsaved, in warning) until
   `[ Save ]`. `[ Use in this session ]` binds the profile to this session (◉), saving unsaved edits first; leaving a profile
-  with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` saves and opens `/gentle:profiles`, where
+  with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` (the default for new sessions is marked ●) saves and opens `/gentle:profiles`, where
   gentle-pi keeps its Make default; the Profiles title opens that editor too, and so does every click with Gentle Shell on or
   a gentle-pi without these functions. PROF also takes the keyboard, with the keys of gentle-pi's screen: `alt+p` opens
   PROF with the keyboard on it, and so does a click on the Profiles card (the click still does its own). The selected row
-  shows `▸` in reverse video and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
+  is drawn in reverse video, its text where it was, and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
   click does: `s` save and switch, `d` discard, `esc` stay), `↑` `↓` the orchestrator and the agents, `enter` its model
   (the picker's own keys then; `esc` closes it first), `e` its effort, `s` or `ctrl+s` Save, `u` Use in this session,
   `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF
