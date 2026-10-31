@@ -57,7 +57,7 @@ same; only how it is drawn changes.
   `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF
   has the keyboard no key reaches the editor; without the side column `alt+p` reaches Pi as before; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
   some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
-  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
+  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ <name>`) with git badges and `[ ↗ ]`, which opens your editor (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR

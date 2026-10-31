@@ -118,7 +118,7 @@ test("createTab does no I/O: nothing is read until the tab is shown", () => {
 	tab.dispose?.();
 });
 
-test("the header reads '<icon> PROJECT · <project> ══ [ ↗ nvim ]' in the card title style", async (t) => {
+test("the header reads '⌂ <project>   [ ↗ ]' in the card title style, without a rule or the editor's name", async (t) => {
 	const saved = process.env.VISUAL;
 	process.env.VISUAL = "/usr/bin/nvim";
 	t.after(() => (saved === undefined ? delete process.env.VISUAL : (process.env.VISUAL = saved)));
@@ -128,21 +128,21 @@ test("the header reads '<icon> PROJECT · <project> ══ [ ↗ nvim ]' in the 
 	t.after(() => tab.dispose());
 	const out = rows();
 	assert.ok(out[0].startsWith("┌") && out.at(-1).startsWith("└"), "square outline");
-	assert.match(out[1], /^│ ⌂ PROJECT · pkg-name ═+ \[ ↗ nvim \] │$/);
-	assert.ok(painted(raw()[1], "toolTitle", theme.bold("⌂ PROJECT · pkg-name")), "title bold in toolTitle");
-	assert.ok(painted(raw()[1], "border", "═"), "the fill in the border color");
+	assert.match(out[1], /^│ ⌂ pkg-name {2,}\[ ↗ \] │$/);
+	assert.ok(painted(raw()[1], "toolTitle", theme.bold("⌂ pkg-name")), "title bold in toolTitle");
+	assert.ok(!out[1].includes("═"), "no rule between the title and the badge");
 	assert.ok(out.every((row) => [...row].length === 59), "every row as wide as the column");
 	assert.equal(out.length, 30, "the card fills the height");
 });
 
-test("the project name falls back to the folder name, and a narrow column gets the compact badge", async (t) => {
-	const root = project(["a.txt"], "plain-folder");
+test("the project name falls back to the folder name, and a narrow column cuts it", async (t) => {
+	const root = project(["a.txt"], "plain-folder-with-a-long-name");
 	const { tab, rows } = await opened({ cwd: root, git: STATUS("") });
 	t.after(() => tab.dispose());
-	assert.match(rows()[1], /PROJECT · plain-folder ═+ \[ ↗ [^\]]+\] │$/);
-	const narrow = tab.render(36, 12).map(plain);
-	assert.match(narrow[1], /\[ ↗ \] │$/, "compact badge under 38 columns");
-	assert.ok(narrow.every((row) => [...row].length === 36));
+	assert.match(rows()[1], /^│ ⌂ plain-folder-with-a-long-name {2,}\[ ↗ \] │$/);
+	const narrow = tab.render(24, 12).map(plain);
+	assert.match(narrow[1], /^│ ⌂ plain-fold… {2}\[ ↗ \] │$/, "the name cut to leave the badge");
+	assert.ok(narrow.every((row) => [...row].length === 24));
 });
 
 test("the tree: folders first with item counts, guides, ignored folders left out, only src expanded", async (t) => {
@@ -274,6 +274,7 @@ test("with nerd icons each row draws its mini.icons glyph in its theme role and 
 	const { tab, rows, raw } = await opened({ cwd: project(files), git, treeIcons: "nerd", fg: tagged });
 	t.after(() => tab.dispose());
 	const icon = (name, options) => nerdIcon(name, options);
+	assert.match(rows()[1], /^│ \u{EB06}  \S+ {2,}\[ ↗ \] │$/u, "the header takes the codicon house, an outline like ⌂");
 	const body = rows().slice(3, -1).map((row) => row.replace(/^│ /, "").replace(/ *[●M]? │$/, "")).filter(Boolean);
 	assert.deepEqual(body, [
 		"├── \u{E5FF}  docs (1 items)",
@@ -509,7 +510,7 @@ test("with the outline off the rows are indented and clicks still find their row
 	const root = project(FILES);
 	const { tab, rows } = await opened({ cwd: root, git: STATUS(""), border: false });
 	t.after(() => tab.dispose());
-	assert.match(rows()[0], /^ ⌂ PROJECT/);
+	assert.match(rows()[0], /^ ⌂ \S+ {2,}\[ ↗ \]/);
 	const line = rows().findIndex((row) => row.includes("README.md"));
 	tab.handleClick(line, "left", 8);
 	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root]);
