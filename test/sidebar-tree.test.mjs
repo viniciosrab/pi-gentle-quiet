@@ -4,10 +4,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
 import { createTab, treeTiming } from "../extensions/sidebar/tree.ts";
 import { launchDeps, launchEditor } from "../extensions/sidebar/tree-launch.ts";
-import { flattenTree, parseGitStatus, scanTree } from "../extensions/sidebar/tree-scan.ts";
+import { flattenTree, parseGitStatus, parseIgnored, scanTree } from "../extensions/sidebar/tree-scan.ts";
+import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
 
 // A project on disk: `files` are relative paths, a trailing "/" makes an empty folder.
 function project(files, name = "demo-app") {
@@ -40,11 +42,12 @@ function boxed(rows, width) {
 }
 
 // A stand-in for gentle-quiet's SidebarHost; `git` answers by the first git argument after any "-c" pair.
-function fakeHost({ cwd, git = {}, border = true, ctx } = {}) {
-	const calls = { git: [], renders: 0 };
+// `fg` replaces the theme painting; treeHidden is the setting, which setTreeHidden saves (recorded in calls.saved).
+function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = false, fg } = {}) {
+	const calls = { git: [], renders: 0, saved: [] };
 	const host = {
 		theme,
-		fg: (role, text) => theme.fg(role, text),
+		fg: fg ?? ((role, text) => theme.fg(role, text)),
 		bold: (text) => theme.bold(text),
 		inner: (width) => (border ? width - BOX_CHROME : width - 1),
 		box: (rows, width) => (border ? boxed(rows, width) : rows.map((row) => ` ${row}`)),
@@ -64,6 +67,12 @@ function fakeHost({ cwd, git = {}, border = true, ctx } = {}) {
 		usage: () => ({ name: "", windows: [] }),
 		gauge: () => "",
 		icons: {},
+		...(treeIcons ? { treeIcons } : {}),
+		treeHidden,
+		setTreeHidden(value) {
+			calls.saved.push(value);
+			host.treeHidden = value;
+		},
 	};
 	return { host, calls };
 }
@@ -109,7 +118,7 @@ test("createTab does no I/O: nothing is read until the tab is shown", () => {
 	tab.dispose?.();
 });
 
-test("the header reads '<icon> PROYECTO · <project> ══ [ ↗ nvim ]' in the card title style", async (t) => {
+test("the header reads '<icon> PROJECT · <project> ══ [ ↗ nvim ]' in the card title style", async (t) => {
 	const saved = process.env.VISUAL;
 	process.env.VISUAL = "/usr/bin/nvim";
 	t.after(() => (saved === undefined ? delete process.env.VISUAL : (process.env.VISUAL = saved)));
@@ -119,8 +128,8 @@ test("the header reads '<icon> PROYECTO · <project> ══ [ ↗ nvim ]' in the
 	t.after(() => tab.dispose());
 	const out = rows();
 	assert.ok(out[0].startsWith("┌") && out.at(-1).startsWith("└"), "square outline");
-	assert.match(out[1], /^│ ⌂ PROYECTO · pkg-name ═+ \[ ↗ nvim \] │$/);
-	assert.ok(painted(raw()[1], "toolTitle", theme.bold("⌂ PROYECTO · pkg-name")), "title bold in toolTitle");
+	assert.match(out[1], /^│ ⌂ PROJECT · pkg-name ═+ \[ ↗ nvim \] │$/);
+	assert.ok(painted(raw()[1], "toolTitle", theme.bold("⌂ PROJECT · pkg-name")), "title bold in toolTitle");
 	assert.ok(painted(raw()[1], "border", "═"), "the fill in the border color");
 	assert.ok(out.every((row) => [...row].length === 59), "every row as wide as the column");
 	assert.equal(out.length, 30, "the card fills the height");
@@ -130,7 +139,7 @@ test("the project name falls back to the folder name, and a narrow column gets t
 	const root = project(["a.txt"], "plain-folder");
 	const { tab, rows } = await opened({ cwd: root, git: STATUS("") });
 	t.after(() => tab.dispose());
-	assert.match(rows()[1], /PROYECTO · plain-folder ═+ \[ ↗ [^\]]+\] │$/);
+	assert.match(rows()[1], /PROJECT · plain-folder ═+ \[ ↗ [^\]]+\] │$/);
 	const narrow = tab.render(36, 12).map(plain);
 	assert.match(narrow[1], /\[ ↗ \] │$/, "compact badge under 38 columns");
 	assert.ok(narrow.every((row) => [...row].length === 36));
@@ -146,9 +155,163 @@ test("the tree: folders first with item counts, guides, ignored folders left out
 		"│   ├── 📁 lib (2 items)",
 		"│   └── 📄 index.ts",
 		"├── 📄 package.json",
-		"└── 📄 README.md",
+		"├── 📄 README.md",
+		"└── (3 hidden items)",
 	]);
 	assert.ok(!rows().join("").match(/node_modules|dist|\.git\b/), "ignored names");
+});
+
+// Hidden like Neo-tree: dotfiles, git-ignored entries (git ls-files, relative to the session's folder) and the
+// always-skipped names.
+const HIDDEN_FILES = [...FILES, ".env", ".github/workflows/ci.yml", "secret.log", "build-out/x.js", "src/.eslintrc", "src/gen/x.ts"];
+const IGNORED = "secret.log\0build-out/\0src/gen/\0";
+const HIDDEN_GIT = { ...STATUS(""), "ls-files": IGNORED };
+const bodyOf = (rows) => rows.slice(3, -1).map((row) => row.replace(/^│ /, "").replace(/ *│$/, "")).filter(Boolean);
+
+test("dotfiles, git-ignored entries and the always-skipped names are hidden, each level ending with '(n hidden items)'", async (t) => {
+	const { tab, rows, raw, calls } = await opened({ cwd: project(HIDDEN_FILES), git: HIDDEN_GIT });
+	t.after(() => tab.dispose());
+	assert.deepEqual(bodyOf(rows()), [
+		"├── 📁 docs (1 items)",
+		"├── 📂 src (2 items)",
+		"│   ├── 📁 lib (2 items)",
+		"│   ├── 📄 index.ts",
+		"│   └── (2 hidden items)",
+		"├── 📄 package.json",
+		"├── 📄 README.md",
+		"└── (7 hidden items)",
+	]);
+	const ls = calls.git.find((args) => args.includes("ls-files"));
+	assert.ok(ls, "git-ignored entries come from git ls-files");
+	for (const flag of ["-z", "--others", "--ignored", "--exclude-standard", "--directory"]) assert.ok(ls.includes(flag), flag);
+	const row = raw().find((line) => plain(line).includes("(7 hidden items)"));
+	assert.ok(painted(row, "dim", "(7 hidden items)"), "the hidden row is dim");
+});
+
+test("one hidden entry reads '(1 hidden item)', and a level with none has no hidden row", async (t) => {
+	const { tab, rows } = await opened({ cwd: project(["a.txt", ".env", "src/b.ts"]), git: STATUS("") });
+	t.after(() => tab.dispose());
+	assert.deepEqual(bodyOf(rows()), ["├── 📂 src (1 items)", "│   └── 📄 b.ts", "├── 📄 a.txt", "└── (1 hidden item)"]);
+});
+
+test("with Tree hidden items on show, hidden entries are listed dim and counted, with no hidden rows", async (t) => {
+	const { tab, rows, raw } = await opened({ cwd: project(HIDDEN_FILES), git: HIDDEN_GIT, treeHidden: true });
+	t.after(() => tab.dispose());
+	const body = bodyOf(rows());
+	assert.ok(!body.some((row) => row.includes("hidden item")), "no hidden rows");
+	for (const name of [".git", ".github", "build-out", "dist", "node_modules", ".env", "secret.log", ".eslintrc", "gen"]) {
+		assert.ok(body.some((row) => row.endsWith(` ${name}`) || row.includes(` ${name} (`)), `${name} is listed`);
+	}
+	assert.ok(body.includes("├── 📂 src (4 items)"), "the count includes the hidden entries");
+	const dimmed = (name) => painted(raw().find((line) => plain(line).includes(` ${name}`)), "dim", name);
+	assert.ok(dimmed(".env") && dimmed("secret.log") && dimmed("node_modules"), "hidden entries are dim");
+	assert.ok(!dimmed("README.md"), "the others are not");
+});
+
+test("a click on '(n hidden items)' turns Tree hidden items on, saves it and lists them", async (t) => {
+	const { tab, rows, calls } = await opened({ cwd: project(HIDDEN_FILES), git: HIDDEN_GIT });
+	t.after(() => tab.dispose());
+	const line = rows().findIndex((row) => row.includes("(7 hidden items)"));
+	assert.equal(tab.handleClick(line, "left", 6), true);
+	assert.deepEqual(calls.saved, [true]);
+	await until(() => rows().some((row) => row.includes(" .env")), "the hidden entries");
+	assert.ok(!rows().some((row) => row.includes("hidden item")));
+});
+
+test("the setting is read live: turning it off hides the entries again on the next scan", async (t) => {
+	const saved = treeTiming.rescanMs;
+	treeTiming.rescanMs = 20;
+	t.after(() => (treeTiming.rescanMs = saved));
+	const { tab, host, rows } = await opened({ cwd: project(HIDDEN_FILES), git: HIDDEN_GIT, treeHidden: true });
+	t.after(() => tab.dispose());
+	assert.ok(rows().some((row) => row.includes(" .env")));
+	host.treeHidden = false;
+	await until(() => rows().some((row) => row.includes("(7 hidden items)")), "hidden again");
+});
+
+test("scanTree marks hidden entries, counts them per level and leaves them out unless shown", async () => {
+	const root = project(HIDDEN_FILES);
+	const ignored = parseIgnored(IGNORED);
+	assert.deepEqual([...ignored].sort(), ["build-out", "secret.log", "src/gen"]);
+	assert.equal(parseIgnored(undefined).size, 0);
+	const hidden = await scanTree(root, new Set(["src"]), undefined, { ignored });
+	assert.equal(hidden.hiddenCount, 7);
+	assert.deepEqual(hidden.map((node) => node.name), ["docs", "src", "package.json", "README.md"]);
+	const src = hidden.find((node) => node.name === "src");
+	assert.equal(src.children.hiddenCount, 2);
+	assert.equal(src.itemCount, 2);
+	assert.equal(hidden.find((node) => node.name === "docs").itemCount, 1);
+	const shown = await scanTree(root, new Set(["src"]), undefined, { ignored, showHidden: true });
+	assert.equal(shown.hiddenCount, 0);
+	assert.equal(shown.length, 11);
+	assert.deepEqual(shown.filter((node) => node.hidden).map((node) => node.name).sort(), [".env", ".git", ".github", "build-out", "dist", "node_modules", "secret.log"]);
+	assert.equal(shown.find((node) => node.name === "src").itemCount, 4);
+	const rows = flattenTree(hidden, new Set(["src"]));
+	assert.deepEqual(rows.map((row) => [row.prefix, row.node?.name ?? `(${row.hiddenCount})`]), [
+		["├── ", "docs"],
+		["├── ", "src"],
+		["│   ├── ", "lib"],
+		["│   ├── ", "index.ts"],
+		["│   └── ", "(2)"],
+		["├── ", "package.json"],
+		["├── ", "README.md"],
+		["└── ", "(7)"],
+	]);
+	const all = await scanTree(root, undefined, undefined, { ignored, showHidden: true });
+	assert.equal(all.find((node) => node.name === "node_modules").children, undefined, "opening everything does not read hidden folders");
+});
+
+// Paints each theme role with its own 24-bit color, so a test can tell syntaxFunction from accent.
+const ROLE_CODES = new Map();
+const tagged = (role, text) => {
+	if (!ROLE_CODES.has(role)) ROLE_CODES.set(role, ROLE_CODES.size + 1);
+	return `\x1b[38;2;0;0;${ROLE_CODES.get(role)}m${text}\x1b[39m`;
+};
+
+test("with nerd icons each row draws its mini.icons glyph in its theme role and two spaces, so names start where the emoji rows put them", async (t) => {
+	const git = STATUS(" M src/index.ts\n?? docs/guide.md\n");
+	const files = [...FILES, "src/tree.test.ts", "src/empty/", "LICENSE", "Dockerfile"];
+	const { tab, rows, raw } = await opened({ cwd: project(files), git, treeIcons: "nerd", fg: tagged });
+	t.after(() => tab.dispose());
+	const icon = (name, options) => nerdIcon(name, options);
+	const body = rows().slice(3, -1).map((row) => row.replace(/^│ /, "").replace(/ *[●M]? │$/, "")).filter(Boolean);
+	assert.deepEqual(body, [
+		"├── \u{E5FF}  docs (1 items)",
+		"├── \u{E5FE}  src (4 items)",
+		"│   ├── \u{F0256}  empty (0 items)",
+		"│   ├── \u{E5FF}  lib (2 items)",
+		`│   ├── ${icon("index.ts").char}  index.ts`,
+		`│   └── ${icon("tree.test.ts").char}  tree.test.ts`,
+		"├── \u{F0868}  Dockerfile",
+		"├── \u{E60A}  LICENSE",
+		"├── \u{F0626}  package.json",
+		"├── \u{F4ED}  README.md",
+		"└── (3 hidden items)",
+	]);
+	for (const [name, options] of [["docs", { isDirectory: true }], ["src", { isDirectory: true, open: true }], ["empty", { isDirectory: true, empty: true }], ["index.ts"], ["tree.test.ts"], ["Dockerfile"], ["LICENSE"], ["README.md"]]) {
+		const line = raw().find((row) => plain(row).includes(` ${name}`));
+		const want = icon(name, options);
+		assert.ok(line.includes(`${tagged(want.color, want.char)}  `), `${name} painted in ${want.color}`);
+	}
+	assert.ok(raw().find((row) => plain(row).includes(" docs")).includes(tagged("accent", "\u{E5FF}")), "folders in accent");
+	assert.ok(raw().find((row) => plain(row).includes(" index.ts")).includes(tagged("syntaxFunction", "\u{F06E6}")), "ts in syntaxFunction");
+	assert.match(rows().find((row) => row.includes(" index.ts")), /index\.ts +M │$/, "the badge stays on the right edge");
+	assert.match(rows().find((row) => row.includes(" docs")), /docs \(1 items\) +● │$/);
+	assert.ok(rows().every((row) => [...row].length === 59), "every row as wide as the column");
+	assert.ok(rows().every((row) => visibleWidth(row) === 59), "and as many cells");
+	assert.ok(!rows().join("").match(/[📁📂📄]/u), "no emoji left");
+	assert.ok(!raw().join("").match(/[\u{100000}-\u{10FFFF}]/u), "no private glyphs from an extra font");
+});
+
+test("emoji icons stay the default and draw exactly as before", async (t) => {
+	const root = project(FILES);
+	const git = STATUS(" M src/index.ts\n");
+	const plainTab = await opened({ cwd: root, git });
+	const emojiTab = await opened({ cwd: root, git, treeIcons: "emoji" });
+	t.after(() => (plainTab.tab.dispose(), emojiTab.tab.dispose()));
+	assert.deepEqual(emojiTab.raw(), plainTab.raw());
+	assert.ok(plainTab.rows().some((row) => row.includes("📂 src")) && plainTab.rows().some((row) => row.includes("📄 index.ts")));
+	assert.ok(!plainTab.raw().join("").includes("\x1b[38;2;"), "no 24-bit colors");
 });
 
 test("git badges: M and ? on files, ● on folders holding a change, read from git status --porcelain=v1", async (t) => {
@@ -346,7 +509,7 @@ test("with the outline off the rows are indented and clicks still find their row
 	const root = project(FILES);
 	const { tab, rows } = await opened({ cwd: root, git: STATUS(""), border: false });
 	t.after(() => tab.dispose());
-	assert.match(rows()[0], /^ ⌂ PROYECTO/);
+	assert.match(rows()[0], /^ ⌂ PROJECT/);
 	const line = rows().findIndex((row) => row.includes("README.md"));
 	tab.handleClick(line, "left", 8);
 	assert.deepEqual(launches.at(-1), [path.join(root, "README.md"), root]);

@@ -265,3 +265,145 @@ test("other languages keep their numbered source and no m key", async () => {
 	component.handleInput("m");
 	assert.match(text(70)[4], /^▏ 1 # not a heading +▕$/);
 });
+
+test("given text instead of a file: its title on the path row, the body rendered as Markdown, and no e", async () => {
+	const fake = fakeCtx(30);
+	let body;
+	const text = new Promise((resolve) => (body = resolve));
+	assert.equal(openPreview(fake.ctx, { text, title: "#41 · bugfix · Gauge", label: "Memory" }), true);
+	const component = fake.component();
+	assert.match(plain(component.render(70)[4]), /Reading…/, "while the text is on its way");
+	body("**What**: the gauge\n\n- rounded down\n");
+	await component.ready;
+	const out = component.render(70).map(plain);
+	assert.match(out[1], /^▏ Read-only — Memory +▕$/);
+	assert.match(out[2], /^▏ #41 · bugfix · Gauge +▕$/);
+	assert.match(out[4], /^▏ What: the gauge +▕$/);
+	assert.ok(!out.join("\n").includes("**"));
+	assert.match(out.at(-2), /^▏ Esc close · m source · ↑↓/, "no e edit in the footer");
+	component.handleInput("e");
+	assert.equal(fake.calls.done.length, 0, "e does nothing");
+	component.handleInput("m");
+	assert.match(component.render(70).map(plain)[4], /^▏ 1 \*\*What\*\*: the gauge +▕$/);
+	component.handleInput("\x1b");
+	assert.equal(fake.calls.done.length, 1);
+});
+
+test("given empty or failed text: one row, never a file read", async () => {
+	for (const [text, row] of [["", /\(empty\)/], [Promise.reject(new Error("gone")), /Cannot read: gone/]]) {
+		const fake = fakeCtx(30);
+		assert.equal(openPreview(fake.ctx, { text, title: "#1", label: "Memory" }), true);
+		const component = fake.component();
+		await component.ready;
+		assert.match(plain(component.render(70)[4]), row);
+	}
+});
+
+// A TUI routing the mouse as Pi 1.4.0 does (tui.ts handleMouseEvent, trimmed): an overlay gets a press only
+// inside its box, else the layout under it does; the release and the click go to whatever answered the press.
+class MouseTui {
+	constructor(rows = 30) {
+		this.terminal = { rows, columns: 120 };
+		this.overlays = []; // { component, col, row, width, height }
+		this.layoutEvents = []; // what reached the layout (a TREE row, the conversation)
+		this.renders = [];
+	}
+	requestRender(force) {
+		this.renders.push(force === true);
+	}
+	getTopmostVisibleOverlay() {
+		return this.overlays.at(-1);
+	}
+	dispatchMouseToOverlay(event) {
+		for (const layout of [...this.overlays].reverse()) {
+			if (event.screenX < layout.col || event.screenX >= layout.col + layout.width || event.screenY < layout.row || event.screenY >= layout.row + layout.height) continue;
+			const result = layout.component.handleMouse?.({ ...event, x: event.screenX - layout.col, y: event.screenY - layout.row });
+			return result ? { hit: true, result: { ...result, target: { component: layout.component } } } : { hit: true };
+		}
+		return { hit: false };
+	}
+	layout(event) {
+		this.layoutEvents.push(event.type);
+		return { handled: true, target: { component: { handleMouse: (e) => (this.layoutEvents.push(e.type), { handled: true }) } } };
+	}
+	// One left click (press, release, click) at x, y; `type` "wheel" sends one wheel notch instead.
+	click(x, y, { button = "left", type = "press" } = {}) {
+		const event = (kind) => ({ type: kind, button, x, y, screenX: x, screenY: y, width: this.terminal.columns, height: this.terminal.rows, ...(kind === "wheel" ? { wheelDelta: 1 } : {}) });
+		const overlay = this.dispatchMouseToOverlay(event(type));
+		const result = overlay.result ?? (overlay.hit ? undefined : this.layout(event(type)));
+		if (type !== "press" || !result) return;
+		for (const kind of ["release", "click"]) result.target.component.handleMouse?.(event(kind));
+	}
+}
+
+// The preview of a file mounted as Pi mounts an overlay: 60 columns wide from column 30, rows 2 to 21.
+async function mounted() {
+	const tui = new MouseTui(30);
+	const done = [];
+	const ctx = { hasUI: true, ui: { custom: (factory) => {
+		const entry = { col: 30, row: 2, width: 60, height: 20 };
+		entry.component = factory(tui, theme, {}, (value) => {
+			done.push(value);
+			tui.overlays = tui.overlays.filter((other) => other !== entry); // Pi hides it
+		});
+		tui.overlays.push(entry);
+		return new Promise(() => {});
+	} } };
+	assert.equal(openPreview(ctx, { file: file("a.ts", lines(40)), relPath: "a.ts", onEdit: () => {} }), true);
+	const component = tui.overlays[0].component;
+	await component.ready;
+	return { tui, done, component };
+}
+
+test("a click outside the pop-up closes it, and that click reaches nothing under it", async () => {
+	const { tui, done } = await mounted();
+	tui.click(5, 10); // on the conversation, left of the pop-up
+	assert.equal(done.length, 1, "closed");
+	assert.deepEqual(tui.layoutEvents, [], "no press, release or click reached the row under the pointer");
+	assert.ok(tui.renders.includes(true), "a full repaint after closing");
+	tui.click(100, 10);
+	assert.deepEqual(tui.layoutEvents, ["press", "release", "click"], "once closed, clicks reach the layout again");
+	assert.equal(done.length, 1);
+});
+
+test("outside the pop-up, any button's press closes it; the wheel there does not", async () => {
+	for (const [x, y] of [[100, 5], [40, 0], [40, 25]]) {
+		const { tui, done } = await mounted();
+		tui.click(x, y, { button: "right" });
+		assert.equal(done.length, 1, `a press at ${x},${y}`);
+		assert.deepEqual(tui.layoutEvents, []);
+	}
+	const { tui, done } = await mounted();
+	tui.click(100, 5, { type: "wheel" });
+	assert.equal(done.length, 0, "the wheel scrolls what is under it and leaves the pop-up open");
+	assert.deepEqual(tui.layoutEvents, ["wheel"]);
+});
+
+test("a click inside the pop-up keeps it open; its wheel still scrolls it", async () => {
+	const { tui, done, component } = await mounted();
+	tui.click(30, 2); // its top-left corner
+	tui.click(89, 21); // its bottom-right corner
+	tui.click(50, 10);
+	assert.equal(done.length, 0);
+	assert.deepEqual(tui.layoutEvents, []);
+	tui.click(50, 10, { type: "wheel" });
+	assert.match(plain(component.render(60).at(-2)), /4-\d+ \/ 40/);
+});
+
+test("Esc still closes the pop-up, and then clicks outside go where they used to", async () => {
+	const { tui, done, component } = await mounted();
+	component.handleInput("\x1b");
+	assert.equal(done.length, 1);
+	assert.ok(!Object.hasOwn(tui, "dispatchMouseToOverlay"), "Pi's own routing is back");
+	tui.click(5, 10);
+	assert.equal(done.length, 1);
+	assert.deepEqual(tui.layoutEvents, ["press", "release", "click"]);
+});
+
+test("a click outside closes only the top overlay: another overlay over the pop-up keeps it open", async () => {
+	const { tui, done } = await mounted();
+	tui.overlays.push({ col: 0, row: 0, width: 10, height: 3, component: { handleMouse: () => undefined } });
+	tui.click(100, 10);
+	assert.equal(done.length, 0, "the pop-up is not the top overlay");
+	assert.deepEqual(tui.layoutEvents, ["press", "release", "click"]);
+});

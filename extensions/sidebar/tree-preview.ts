@@ -2,12 +2,16 @@
 // in the border color, drawn at the cells' outer edge (▔ ▁ ▏ ▕ and their corners) so no half-cell of the
 // overlay sticks out past it, around "Read-only — <language>", the file's path, then its numbered lines (no
 // wrap, long lines cut with "…", tabs as spaces) and the footer "Esc close · e edit · ↑↓ PgUp/PgDn Home/End
-// · 43-64 / 168". Esc or q closes it, ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel
-// three lines; e closes it and opens the file in the editor tab, as a click did before.
+// · 43-64 / 168". Esc or q closes it, and so does a click anywhere outside it (that click does nothing else);
+// ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel three lines; e closes it and opens the
+// file in the editor tab, as a click did before.
 //
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
 // theme), without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
 // footer). Where this Pi cannot render Markdown, the source is shown and there is no m.
+//
+// Given text instead of a file (a memory from the MEM tab, ./mem.ts) shows the same way: "Read-only — <label>",
+// its title on the path row, the body rendered as Markdown (m for its source), and no e, as there is no file.
 //
 // At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
 // row. Pi's highlighter colors the code when this Pi exports it; otherwise the lines are plain.
@@ -97,6 +101,19 @@ export async function readPreview(file) {
 	}
 }
 
+/** Given text for the preview, as readPreview gives a file's: { lines } or { empty }, { error } when it fails. */
+export async function textPreview(text) {
+	try {
+		const body = String((await text) ?? "");
+		if (!body.trim()) return { empty: true };
+		const lines = body.split(/\r?\n/);
+		if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+		return { lines: lines.map(sanitize), cut: 0 };
+	} catch (error) {
+		return { error: error?.message ?? String(error) };
+	}
+}
+
 // Pi's highlighter, when this Pi exports it and the file is small enough; the plain lines otherwise.
 function highlighted(file, lines) {
 	try {
@@ -131,16 +148,54 @@ function renderedMarkdown(lines, width) {
 // Outline strokes at the outer edge of their cells.
 const EDGE = { top: "▔", bottom: "▁", left: "▏", right: "▕", topLeft: "\u{1FB7D}", topRight: "\u{1FB7E}", bottomRight: "\u{1FB7F}", bottomLeft: "\u{1FB7C}" };
 
+// Answers the rest of a click that closed the pop-up (release, click), so it reaches nothing under it.
+const SWALLOW = { handleMouse: () => undefined, invalidate() {} };
+
+// Pi 1.4.0 hands an overlay the mouse only inside its box (TUI.dispatchMouseToOverlay), has no overlay option
+// for a click outside it, and its terminal input listeners never see mouse sequences (the viewport's own
+// listener takes them first). So while the pop-up is open the TUI's dispatchMouseToOverlay is wrapped on the
+// instance: a press that lands on no overlay, with the pop-up on top, closes it and is answered with a target
+// that swallows the release and the click. Pi then sends that press nowhere else. Returns the unwrap.
+function closeOnOutsidePress(tui, preview) {
+	const original = tui?.dispatchMouseToOverlay;
+	if (typeof original !== "function") return () => {};
+	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
+	const wrapped = function (event) {
+		const routed = original.call(this, event);
+		if (routed?.hit || event?.type !== "press" || preview.closed) return routed;
+		try {
+			const top = tui.getTopmostVisibleOverlay?.();
+			if (top && top.component !== preview) return routed; // another overlay is over it
+		} catch {
+			// an older TUI: the pop-up is the one on top
+		}
+		preview.close();
+		const target = { component: SWALLOW, originX: 0, originY: 0, width: event.width, height: event.height };
+		return { hit: true, result: { handled: true, render: true, target } };
+	};
+	try {
+		tui.dispatchMouseToOverlay = wrapped;
+	} catch {
+		return () => {};
+	}
+	return () => {
+		if (tui.dispatchMouseToOverlay !== wrapped) return; // wrapped again since: ours stays, inert once closed
+		if (own) tui.dispatchMouseToOverlay = original;
+		else delete tui.dispatchMouseToOverlay;
+	};
+}
+
 class FilePreview {
-	constructor({ file, relPath, tui, theme, done, onEdit, loading }) {
-		Object.assign(this, { file, relPath, tui, theme, done, onEdit });
+	constructor({ file, relPath, tui, theme, done, onEdit, loading, label }) {
+		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label });
+		this.unwrapMouse = closeOnOutsidePress(tui, this);
 		this.top = 0;
 		this.content = undefined;
 		this.closed = false;
-		this.markdown = languageOf(file) === "Markdown"; // rendered, until m or a failed render
+		this.markdown = file === undefined || languageOf(file) === "Markdown"; // rendered, until m or a failed render
 		this.rendered = undefined; // { width, rows } of the last Markdown render
 		this.ready = loading.then((content) => {
-			this.content = content.lines ? { ...content, shown: highlighted(file, content.lines) } : content;
+			this.content = content.lines ? { ...content, shown: file === undefined ? content.lines : highlighted(file, content.lines) } : content;
 			this.redraw();
 		});
 	}
@@ -214,6 +269,7 @@ class FilePreview {
 	close(edit = false) {
 		if (this.closed) return;
 		this.closed = true;
+		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
 		if (edit) this.onEdit?.();
@@ -221,7 +277,7 @@ class FilePreview {
 
 	handleInput(data) {
 		if (pressed(data, "escape") || letter(data, "q")) return this.close();
-		if (letter(data, "e")) return this.close(true);
+		if (letter(data, "e")) return this.onEdit ? this.close(true) : false;
 		if (letter(data, "m")) return this.toggleMarkdown();
 		if (pressed(data, "down") || letter(data, "j")) return this.scrollTo(this.top + 1);
 		if (pressed(data, "up") || letter(data, "k")) return this.scrollTo(this.top - 1);
@@ -253,9 +309,9 @@ class FilePreview {
 		const body = [];
 		let range = "";
 		if (!content) body.push(text("dim", "Reading…"));
-		else if (content.error) body.push(text("warning", `Cannot read the file: ${content.error}`));
+		else if (content.error) body.push(text("warning", `${this.file === undefined ? "Cannot read" : "Cannot read the file"}: ${content.error}`));
 		else if (content.binary) body.push(text("muted", "Binary file — press e to open it in the editor"));
-		else if (content.empty) body.push(text("muted", "(empty file)"));
+		else if (content.empty) body.push(text("muted", this.file === undefined ? "(empty)" : "(empty file)"));
 		else {
 			const rows = this.markdownRows(inner);
 			const total = this.total();
@@ -277,36 +333,47 @@ class FilePreview {
 		}
 		return [
 			this.paint("border", `${EDGE.topLeft}${EDGE.top.repeat(inner + 2)}${EDGE.topRight}`),
-			fit(text("toolTitle", `Read-only — ${languageOf(this.file)}`, true)),
+			fit(text("toolTitle", `Read-only — ${this.label ?? languageOf(this.file)}`, true)),
 			fit(text("muted", `${this.relPath}${cut}`)),
 			fit(""),
 			...body.map(fit),
-			fit(text("dim", `Esc close · e edit${range}`)),
+			fit(text("dim", `Esc close${this.onEdit ? " · e edit" : ""}${range}`)),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
 	}
 
 	invalidate() {}
+
+	// Pi disposes the component when it closes the overlay, by whatever path.
+	dispose() {
+		this.closed = true;
+		this.unwrapMouse();
+	}
 }
 
-/**
- * Opens the read-only preview of `file` (shown as `relPath`) over Pi. `onEdit` runs when e closes it. Returns
- * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
- */
 /** The pop-up's width on a terminal `columns` wide: 65% of it, between 60 and 125 columns, so lines stay readable. */
 export function previewWidthFor(columns) {
 	return Math.max(60, Math.min(125, Math.floor((Number(columns) || 0) * 0.65)));
 }
 
-export function openPreview(ctx, { file, relPath, onEdit }) {
+/**
+ * Opens the read-only preview of `file` (shown as `relPath`) over Pi. `onEdit` runs when e closes it. Returns
+ * false, having opened nothing, when Pi has no overlay UI here: the caller then opens the editor itself.
+ * With `text` (a string, or a promise of one) instead of `file`, shows that text as Markdown under `title`,
+ * named `label` on the title row ("Text" without one), with no e.
+ */
+export function openPreview(ctx, { file, relPath, onEdit, text, title, label }) {
 	try {
 		if (!ctx?.hasUI || typeof ctx.ui?.custom !== "function") return false;
-		const loading = readPreview(file);
+		const given = text !== undefined;
+		const loading = given ? textPreview(text) : readPreview(file);
 		let host;
 		const result = ctx.ui.custom(
 			(tui, theme, _keybindings, done) => {
 				host = tui;
-				return new FilePreview({ file, relPath, tui, theme, done, onEdit, loading });
+				return given
+					? new FilePreview({ relPath: title ?? "", tui, theme, done, loading, label: label ?? "Text" })
+					: new FilePreview({ file, relPath, tui, theme, done, onEdit, loading });
 			},
 			{
 				overlay: true,

@@ -3,12 +3,13 @@
 //
 // - Top, "⎇ Git": the branch with its status badges, the ASCII commit graph (git log --graph, 20 commits) and
 //   the changes row; "[ Graph | Branches ]" in its title switches to the branch list (ahead/behind, gone, age).
-// - Bottom, "Working tree": the changed files with a status badge, +n −n and [diff]. A click on a branch in the
-//   list turns it into the branch diff inspector, "Diff · <branch>", with [ ✕ ] to close and [ ↗ ] for the
-//   full diff in less.
+// - Bottom, "Working tree": the changed files with TREE's icon for each, then +n −n and the status letter on the
+//   right, as VS Code's. A click on a branch in the list turns it into the branch diff inspector,
+//   "Diff · <branch>", with [ ✕ ] to close it.
 //
-// A click on a file opens it in the editor ($VISUAL, $EDITOR, nvim); on its [diff], or a right click, its diff.
-// Both open in a herdr tab inside herdr, else in a detached terminal (./git-launch.ts). A click on a card's
+// A left click on a file opens its read-only preview over Pi (./tree-preview.ts; e there opens the editor:
+// $VISUAL, $EDITOR, nvim). No diff opens in a tab of its own: the preview is where a file is looked at. The
+// editor opens in a herdr tab inside herdr, else in a detached terminal (./git-launch.ts). A click on a card's
 // title folds it to one summary row. The wheel scrolls a card whose rows do not fit its half.
 // @ts-nocheck
 
@@ -16,7 +17,9 @@ import path from "node:path";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { createGitData, statusCounts } from "./git-data.ts";
-import { editorName, openDiff, openInEditor } from "./git-launch.ts";
+import { openInEditor } from "./git-launch.ts";
+import { nerdIcon } from "./nerd-icons.ts";
+import { openPreview } from "./tree-preview.ts";
 
 const GAP = 1; // blank rows between the two cards
 const MIN_HEIGHT = 14; // under this the cards keep it and the column scrolls, as cute's
@@ -28,16 +31,20 @@ const FILE_BADGES = {
 	added: ["success", "A"],
 	deleted: ["error", "D"],
 	renamed: ["accent", "R"],
-	untracked: ["accent", "?"],
-	conflict: ["error", "U"],
+	untracked: ["accent", "U"], // as VS Code and Neo-tree mark them
+	conflict: ["error", "!"],
 };
 
-/** One row of a card: `left` cut to fit, `right` against the right edge; `hit` is what a click on it does. */
+/**
+ * One row of a card: `left` cut to fit, `right` against the right edge; `hit` is what a click on it does.
+ * A row with a `narrow` left uses it, before any cut, when `left` does not fit.
+ */
 function fitRow(row, inner) {
 	const right = row.right ?? "";
 	const rightWidth = visibleWidth(right);
 	const room = Math.max(0, inner - (rightWidth ? rightWidth + 1 : 0));
-	const left = visibleWidth(row.left ?? "") > room ? truncateToWidth(row.left, room, "…") : (row.left ?? "");
+	const whole = row.narrow !== undefined && visibleWidth(row.left ?? "") > room ? row.narrow : (row.left ?? "");
+	const left = visibleWidth(whole) > room ? truncateToWidth(whole, room, "…") : whole;
 	if (!rightWidth) return { text: left, rightAt: inner };
 	const gap = Math.max(1, inner - visibleWidth(left) - rightWidth);
 	return { text: `${left}${" ".repeat(gap)}${right}`, rightAt: visibleWidth(left) + gap };
@@ -114,12 +121,32 @@ export function createTab(host: SidebarHost): SidebarTab {
 		return `${c("accent", "✎")} ${plural(files, "file", "files")} · ${deltas(added, deleted, " ")}`;
 	};
 
-	const fileRow = (file) => {
+	// A file's icon as TREE draws it (./tree.ts): its emoji, or with Tree icons on nerd, the glyph in its color.
+	const fileIcon = (name) => {
+		if (host.treeIcons !== "nerd") return "📄";
+		const { char, color } = nerdIcon(name);
+		return c(color, char);
+	};
+
+	// A file's +n −n, the parts that are not 0.
+	const counts = (file) => [file.added > 0 && ["toolDiffAdded", `+${file.added}`], file.deleted > 0 && ["toolDiffRemoved", `−${file.deleted}`]].filter(Boolean);
+	const countsWidth = (files) => Math.max(0, ...files.map((file) => visibleWidth(counts(file).map(([, text]) => text).join(" "))));
+
+	// Icon and path on the left (the icon goes first when the row is narrow); on the right the counts, padded to
+	// `width` so the status letter, last, lines up across the rows.
+	const fileRow = (file, width) => {
 		const [role, letter] = FILE_BADGES[file.status] ?? FILE_BADGES.modified;
 		const slash = file.path.lastIndexOf("/");
 		const name = slash < 0 ? c("text", file.path) : `${c("dim", file.path.slice(0, slash + 1))}${c("text", file.path.slice(slash + 1))}`;
-		const right = [`${c("dim", "[")}${c("accent", "diff")}${c("dim", "]")}`, file.added > 0 && c("toolDiffAdded", `+${file.added}`), file.deleted > 0 && c("toolDiffRemoved", `−${file.deleted}`)];
-		return { left: `${c(role, letter)}  ${name}`, right: right.filter(Boolean).join(" "), hit: { kind: "file", path: file.path, untracked: file.status === "untracked" } };
+		const parts = counts(file);
+		const shown = parts.map(([tone, text]) => c(tone, text)).join(" ");
+		const pad = " ".repeat(Math.max(0, width - visibleWidth(parts.map(([, text]) => text).join(" "))));
+		return {
+			left: `${fileIcon(file.path.slice(slash + 1))} ${name}`,
+			narrow: name,
+			right: width ? `${shown}${pad}  ${c(role, letter)}` : c(role, letter),
+			hit: { kind: "file", path: file.path },
+		};
 	};
 
 	// The top card: title with the view toggle, then the graph or the branch list (or one summary row, folded).
@@ -172,23 +199,22 @@ export function createTab(host: SidebarHost): SidebarTab {
 	// The bottom card: the working tree, or the diff of the selected branch.
 	const treeCard = (snap, inner) => {
 		const divider = { left: c("border", "─".repeat(Math.max(0, inner))) };
-		const hint = { left: c("dim", `click: ${editorName()} · [diff]: view diff`) };
 		if (state.selected) {
 			const head = [
 				{
 					left: `${title("Diff")} ${c("dim", "·")} ${c("accent", state.selected)}`,
-					right: `${button("✕", "error")} ${button("↗", "accent")}`,
-					hit: { kind: "title", card: "diff", buttons: [{ from: 0, to: 5, action: "close" }, { from: 6, to: 11, action: "open" }] },
+					right: button("✕", "error"),
+					hit: { kind: "title", card: "diff", buttons: [{ from: 0, to: 5, action: "close" }] },
 				},
 				{ left: "" },
 			];
 			const diff = snap.diff;
 			if (!diff) return { key: "diff", head, body: [{ left: c("dim", "Reading diff…") }] };
 			const body = [{ left: `${c("warning", `● ${diff.files.length}`)} ${c("dim", diff.files.length === 1 ? "file" : "files")}`, right: deltas(diff.added, diff.deleted) }];
-			if (diff.files.length) body.push(hint);
 			body.push(divider);
 			if (!diff.files.length) body.push({ left: `${c("success", "✔")} ${c("success", "No differences with HEAD")}` });
-			body.push(...diff.files.map((file) => fileRow(file)));
+			const width = countsWidth(diff.files);
+			body.push(...diff.files.map((file) => fileRow(file, width)));
 			return { key: "diff", head, body };
 		}
 		const head = [{ left: `${title("Working tree")} ${c("dim", state.folded.tree ? "▼" : "▲")}`, hit: { kind: "title", card: "tree", buttons: [] } }, { left: "" }];
@@ -200,8 +226,9 @@ export function createTab(host: SidebarHost): SidebarTab {
 		if (state.folded.tree) {
 			return { key: "tree", head, body: [{ left: `${c("warning", `● ${status.files.length}`)} ${c("dim", status.files.length === 1 ? "file" : "files")}`, right: deltas(counts.added, counts.deleted, " ") }] };
 		}
-		const body = [{ left: `${c("warning", `● ${status.files.length}`)} ${c("dim", status.files.length === 1 ? "file changed" : "files changed")}`, right: deltas(counts.added, counts.deleted) }, hint, divider];
-		body.push(...status.files.map((file) => fileRow(file)));
+		const body = [{ left: `${c("warning", `● ${status.files.length}`)} ${c("dim", status.files.length === 1 ? "file changed" : "files changed")}`, right: deltas(counts.added, counts.deleted) }, divider];
+		const width = countsWidth(status.files);
+		body.push(...status.files.map((file) => fileRow(file, width)));
 		return { key: "tree", head, body };
 	};
 
@@ -276,8 +303,6 @@ export function createTab(host: SidebarHost): SidebarTab {
 			} else if (onButton?.action === "close") {
 				state.selected = null;
 				state.scroll.diff = 0;
-			} else if (onButton?.action === "open") {
-				if (root && state.selected) openDiff(root, state.selected);
 			} else if (hit.card === "graph" || hit.card === "tree") {
 				state.folded[hit.card] = !state.folded[hit.card];
 			} else return false;
@@ -291,9 +316,11 @@ export function createTab(host: SidebarHost): SidebarTab {
 			return true;
 		}
 		if (hit.kind === "file" && root) {
-			if (button === "right" || (button === "left" && local >= hit.rightAt)) openDiff(root, state.selected, hit.path, hit.untracked && !state.selected);
-			else if (button === "left") openInEditor(path.join(root, hit.path), root);
-			else return false;
+			if (button !== "left") return false;
+			// The read-only preview pop-up, as in TREE; e there, or a Pi without overlays, opens the editor.
+			const file = path.join(root, hit.path);
+			const edit = () => openInEditor(file, root);
+			if (!openPreview(host.ctx?.(), { file, relPath: hit.path, onEdit: edit })) edit();
 			return true;
 		}
 		return false;

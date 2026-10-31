@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ScrollView } from "@earendil-works/pi-tui";
 import { load, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
+import { TAB_FACTORIES } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
@@ -33,7 +34,7 @@ async function wide(options = {}, config = {}) {
 	const side = layout.entries?.[1]?.component?.[NODE]?.();
 	const status = side?.entries?.[1]?.component;
 	const rail = side?.entries?.[2]?.component;
-	return { ...loaded, ...h, footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
+	return { ...loaded, ...h, footerFactory: loaded.footer(), footer, todo, agents, layout, body, side, status, rail, rows: (width = 60) => rail?.render(width).map(plain) };
 }
 
 test("wide fullscreen terminals put a side column beside the conversation, with no bar on top", async () => {
@@ -308,8 +309,37 @@ test("/gentle-quiet toggles the column and picks the width it opens at", async (
 	const { select, seen } = picker(/^Blocks and agents ›$/, /^Side column: on/, /^Side column from: 140 columns/, /^Back|^← Back/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160, mcpCollapsed: false });
+	assert.deepEqual(readConfig().sidebar, { enabled: false, minColumns: 160 });
 	assert.ok(seen.some(({ items }) => items.includes("Side column: off")), "the menu shows the new state");
+});
+
+test("/gentle-quiet moves a tab in the side column's tab order and saves it", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Blocks and agents ›$/, /^Tab order: MAIN GIT PROF MEM TREE PR$/, /^6:PR$/, /^Move up$/, /^Move up$/, /^Move up$/, /^Move up$/, /^← Back$/, /^← Back$/, /^Tab order: MAIN PR GIT PROF MEM TREE$/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "pr", "git", "prof", "mem", "tree"]);
+	const tabs = seen.filter(({ title }) => /^Tab order/.test(title));
+	assert.deepEqual(tabs.at(-1).items, ["1:MAIN", "2:PR", "3:GIT", "4:PROF", "5:MEM", "6:TREE", "Reset to default order", "← Back"], "numbered by position");
+	const moves = seen.filter(({ title }) => title.startsWith("Tab order › PR"));
+	assert.deepEqual(moves.map(({ title }) => title), ["Tab order › PR (6 of 6)", "Tab order › PR (5 of 6)", "Tab order › PR (4 of 6)", "Tab order › PR (3 of 6)", "Tab order › PR (2 of 6)"]);
+	assert.deepEqual(moves[0].items, ["Move up", "← Back"], "the last tab cannot move down");
+	assert.deepEqual(moves.at(-1).items, ["Move up", "Move down", "← Back"]);
+	assert.equal(readConfig().sidebar.enabled, true, "the other side column settings untouched");
+});
+
+test("/gentle-quiet's tab order moves MAIN down and resets to the default order, which leaves gentle-quiet.json without one", async () => {
+	writeConfig({ sidebar: { tabOrder: ["pr", "main"] } });
+	const { select, seen } = picker(/^Blocks and agents ›$/, /^Tab order: PR MAIN GIT PROF MEM TREE$/, /^2:MAIN$/, /^Move down$/, /^← Back$/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["pr", "git", "main", "prof", "mem", "tree"]);
+	assert.deepEqual(seen.find(({ title }) => title.startsWith("Tab order › MAIN")).items, ["Move up", "Move down", "← Back"]);
+	const reset = picker(/^Blocks and agents ›$/, /^Tab order: PR GIT MAIN/, /^Reset to default order$/);
+	const again = await load({ select: reset.select });
+	await again.commands["gentle-quiet"].handler("", again.ctx);
+	assert.deepEqual(readConfig().sidebar, { enabled: true, minColumns: 140 });
+	assert.ok(reset.seen.some(({ items }) => items.includes("Tab order: MAIN GIT PROF MEM TREE PR")), "the menu shows the default order back");
 });
 
 // A Todos card like gentle-pi's: only a click on its title row toggles it; the title is row `titleRow` of the card.
@@ -385,4 +415,59 @@ test("the wheel over the Todos card reaches it", async () => {
 	assert.equal(mouse("wheel", 3, { wheelDelta: 3 })?.handled, true);
 	assert.equal(seen[0].type, "wheel");
 	assert.equal(seen[0].wheelDelta, 3);
+});
+
+test("in the column the Todos title drops gentle-pi's shortcut hint and keeps ▾ Collapse / ▸ Expand", async () => {
+	const loaded = await wide();
+	let header = "";
+	loaded.ui.setWidget("gentle-todo", () => ({ render: (width) => panel(header, "○ Test it")(width) }));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	const drawn = (label, hint) => {
+		header = `Todos \x1b[36m${label}\x1b[39m  0 of 1${" ".repeat(10)}\x1b[2m${hint}\x1b[22m`;
+		loaded.root[NODE]();
+		return loaded.rows().find((r) => r.includes("Todos")).replace(/ +│$/, "");
+	};
+	assert.equal(drawn("▾ Collapse", "ctrl+shift+t"), "│ ≡ Todos ▾ Collapse  0 of 1");
+	assert.equal(drawn("▸ Expand", "ctrl+shift+t expand"), "│ ≡ Todos ▸ Expand  0 of 1");
+});
+
+test("the TREE tab's host reads Tree hidden items live and saves it when the tab sets it", async () => {
+	const original = TAB_FACTORIES.tree;
+	let tabHost;
+	TAB_FACTORIES.tree = (host) => {
+		tabHost = host;
+		return { id: "tree", render: (width) => ["tree".padEnd(width)] };
+	};
+	try {
+		const { root } = await wide({}, { sidebar: { treeIcons: "nerd" } });
+		const side = () => root[NODE]().entries[1].component[NODE]();
+		const bar = side().entries[0].component;
+		const x = plain(bar.render(60)[0]).indexOf("TREE") + 1;
+		bar.handleMouse({ type: "click", button: "left", x, y: 0, width: 60, height: 2, screenX: 120, screenY: 0 });
+		side().entries.at(-1).component.render(60);
+		assert.ok(tabHost, "the TREE tab was opened");
+		assert.equal(tabHost.treeIcons, "nerd");
+		assert.equal(tabHost.treeHidden, false, "hidden entries stay hidden by default");
+		tabHost.setTreeHidden(true);
+		assert.equal(tabHost.treeHidden, true);
+		assert.equal(readConfig().sidebar.treeHidden, true, "saved in gentle-quiet.json");
+		assert.equal(readConfig().sidebar.treeIcons, "nerd", "the rest of the config kept");
+	} finally {
+		TAB_FACTORIES.tree = original;
+	}
+});
+
+test("a resumed session gets the column back: shutdown takes it down and the next start builds it again on the same terminal", async () => {
+	const w = await wide();
+	assert.equal(w.root[NODE]().type, "hstack", "the column is up");
+	// /resume keeps the same extension instance and terminal (no /reload): Pi ends the old session, then starts the new one.
+	await w.emit("session_shutdown", { reason: "resume" });
+	assert.equal(w.root[NODE](), w.native, "shutdown hands Pi its own layout back, nothing left from the old session");
+	await w.emit("session_start", { reason: "resume" });
+	w.footerFactory?.(w.tui, theme, footerData);
+	w.ui.setWidget("gentle-todo", () => ({ render: panel("Todos  1 of 2", "◐ Write it", "○ Test it") }));
+	w.widgets["gentle-todo"](w.tui, theme);
+	const layout = w.root[NODE]();
+	assert.equal(layout.type, "hstack", "the column is back without a /reload");
+	assert.equal(layout.entries[0].component[NODE](), w.native, "beside Pi's own layout, not a column inside an old one");
 });

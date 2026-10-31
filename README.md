@@ -15,29 +15,75 @@ same; only how it is drawn changes.
   the call runs, like Claude Code (pi-web-access's progress, or "Fetching…"), then its status line, such as
   `2/2 queries, 6 sources`. `ctrl+o` shows pi-web-access's full output.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
+- **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
+  (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
+  status, model and elapsed time, then its thread (thinking, text, each tool with its output) drawn with
+  gentle-pi's own renderer, as the `alt+k` window draws it. It reads gentle-pi's presence file for the session
+  about twice a second and follows the end while the subagent works; `↑↓` `PgUp/PgDn` `Home/End` or the wheel
+  scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. When the subagent finishes, its last
+  thread stays, marked finished. Without that file the click opens gentle-pi's `/gentle:agents` list instead.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, a column on the right
-  holds the status line as two cards that always stay on top. **Status** has the project and branch
-  under a label column, then a blank row and the statuses, one per row. After them a divider across the
-  card opens the **MCP** section, one row per MCP server with its state (`active · 9 tools` or
-  `offline`); click the divider to fold the servers into it (`──── MCP 3/3`), and the choice is saved. **Context** has the tokens in
+  holds the status line as two cards that always stay on top. **Status** has the project, branch and
+  model under a label column, then an **MCP** row with the MCP servers online out of those installed
+  (`MCP   3/3`, in the warning color while one is offline), then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the ctx gauge (`56k / 200k tokens   󰪢 28%`), a bar across the card in the gauge's color,
   and the tokens spent with the cost (the plan usage is in the PROF tab). Jobs and Todos scroll under them. The Todos card shows every
   task. Click a card's title to collapse or expand it (Todos keeps gentle-pi's own state and shortcuts).
   The Agents card stays inline above the editor, as without the column.
 - **Tabs in the side column**, after [pi-cinlodev-cute](https://github.com/CinloDev/pi-cinlodev-cute):
-  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE` on top of the column. Click a tab, or turn the wheel over
+  `1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR` on top of the column. Click a tab, or turn the wheel over
   the bar, to switch. **MAIN** is the column above; **GIT** the commit graph or branches and the working
-  tree (a click opens a file in your editor, `[diff]` its diff, a branch its diff with HEAD); **PROF** gentle-pi's profiles with the active profile's roster, and the plan
-  usage (a click opens `/gentle:profiles`); **MEM** Engram, the last session handoff, the stack versions
-  and the tool calls of the session; **TREE** the project tree with git badges and `[ ↗ nvim ]` (a click
-  on a file opens a read-only preview over Pi: `Esc`/`q` closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
+  tree, each file with TREE's icon for it (emoji or nerd, as Tree icons) and its path, then `+n −n` and its status letter
+  (`M`, `A`, `D`, `R`, `U`, `!`) last on the right, as VS Code's (a click opens a file in the read-only preview, a branch lists its diff with HEAD); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
+  usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile
+  selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
+  on its effort steps to the next level that model allows; edits stay unsaved (•, ● N unsaved, in warning) until
+  `[ Save ]`. `[ Use in this session ]` binds the profile to this session (◉), saving unsaved edits first; leaving a profile
+  with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` (the default for new sessions is marked ●) saves and opens `/gentle:profiles`, where
+  gentle-pi keeps its Make default; the Profiles title opens that editor too, and so does every click with Gentle Shell on or
+  a gentle-pi without these functions. PROF also takes the keyboard, with the keys of gentle-pi's screen: `alt+p` opens
+  PROF with the keyboard on it, and so does a click on the Profiles card (the click still does its own). The selected row
+  is drawn as gentle-pi's screen draws it: plain text on the theme's selection background across the whole row (name,
+  model and effort, and its wrapped row), its text where it was (reverse video on a theme without one), and a dim hint closes the card; `←` `→` the previous or next profile (unsaved edits ask as a
+  click does: `s` save and switch, `d` discard, `esc` stay), `↑` `↓` the orchestrator and the agents, `enter` its model
+  (the picker's own keys then; `esc` closes it first), `e` its effort, `s` or `ctrl+s` Save, `u` Use in this session,
+  `d` Make default, `esc` gives the keyboard back to the editor (so do another tab and a narrower terminal). While PROF
+  has the keyboard no key reaches the editor; without the side column `alt+p` reaches Pi as before; **MEM** Engram's local essentials (server status and version, this project's memories, sessions and prompts, the shared database's size; "⚑ N to review · N conflicts" when
+  some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
+  the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ PROJECT · <name>`) with git badges and `[ ↗ nvim ]` (a click
+  on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
-  source). Files and diffs open in your editor in a herdr tab
-  inside herdr, else in a new terminal. Narrower terminals keep everything as it is.
+  source); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR
+  based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
+  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
+  ⧗ CI 5/10, ✗ CI 9/10; skipped ones left out) that stands for a ✗ CI or ⧗ CI verdict; a click on a PR
+  expands its detail under its bold title (mergeability, review, then `Checks 2/3` and `Threads 4` over each check and
+  each unresolved thread, and a blank row closing the block) or closes it, several open at once, the current branch's PR (◉) to begin with,
+  the stack's line running on through the detail of a PR with PRs under it, and a check or a thread
+  opens in the browser. On the current branch's PR, [ Fix N threads with agent ] and [ Fix CI ] put the
+  threads or the failed checks in Pi's editor for you to send. Files open in your editor (`e` in the preview) in a herdr tab
+  inside herdr, else in a new terminal. Narrower terminals keep everything as it is. **Blocks** → Tab order
+  in `/gentle-quiet` reorders the tabs: pick one, Move up / Move down (PR second gives
+  `1:MAIN 2:PR 3:GIT 4:PROF 5:MEM 6:TREE`, numbered by position), or Reset to default order. You can also
+  drag a tab sideways in the bar and drop it at a new place; the order is saved the same way.
+- **Nerd Font icons in TREE.** With **Blocks** → Tree icons: nerd in `/gentle-quiet` (emoji by default),
+  the TREE tab draws its file and folder icons as Neo-tree draws them in LazyVim (what `omarchy-launch-editor`
+  opens): the glyph [mini.icons](https://github.com/nvim-mini/mini.icons) picks for the file
+  ([MIT](fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
+  Nerd Font at its own size, painted with your Pi theme's colors. No extra font to install.
+  `fonts/build-nerd-icons.py` regenerates the mapping from mini.icons in a headless Neovim.
+- **Hidden items in TREE, as Neo-tree.** Dotfiles, git-ignored files and build folders (`node_modules`,
+  `dist`, `.git`…) are hidden, and each folder level that hid some ends with a dim "(n hidden items)" row.
+  Click that row, or set **Blocks** → Tree hidden items: show in `/gentle-quiet`, to list them (dim); the
+  setting is saved.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
-  **Icons**). Without the side column the status line keeps `⠋ N jobs`.
+  **Icons**). Without the side column the status line keeps `⠋ N jobs`. A running job's row ends with `↗`:
+  a click on it opens the same live pop-up as a subagent's, with the job's label and id, running or finished with
+  its exit code, the elapsed time, and the tail of its output as it is written (like `tail -f`; the log gentle-pi
+  keeps for the job, found among the files Pi holds open on Linux). Elsewhere, or when that log cannot be found,
+  the click opens gentle-pi's `/gentle:jobs` list.
 - **One status line** with your folder, branch, changed lines, context, cost and plan usage. The
   model and its effort stay at the bottom right above the editor at all times, dimmed: at the end
   of the `Working` row while Pi works, and on that same row when it is idle.

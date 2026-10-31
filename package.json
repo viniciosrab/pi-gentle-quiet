@@ -20,6 +20,7 @@
 	"files": [
 		"extensions/",
 		"fonts/GentleIcons.ttf",
+		"fonts/LICENSE-mini-icons",
 		"README.md",
 		"LICENSE"
 	],

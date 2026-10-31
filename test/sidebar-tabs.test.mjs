@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, painted, plain, role, theme, writeConfig } from "./helpers.mjs";
-import { renderTabBar, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
+import { load, painted, plain, readConfig, role, theme, writeConfig } from "./helpers.mjs";
+import { cycleTab, DEFAULT_TAB_ORDER, moveTab, moveTabTo, normalizeTabOrder, renderTabBar, slotAt, TAB_FACTORIES, TABS } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 
@@ -10,8 +10,27 @@ function host({ columns = 180, rows = 40 } = {}) {
 	const root = { render: () => [], [NODE]: () => native };
 	const terminal = { columns, rows };
 	let renders = 0;
-	const tui = { terminal, mode: "fullscreen", layoutRoot: root, requestRender: () => renders++ };
-	return { tui, root, native, terminal, renders: () => renders };
+	// Pi's raw input listeners, run before the focused component (the editor) as Pi's TUI does.
+	const listeners = new Set();
+	const editor = [];
+	const tui = {
+		terminal,
+		mode: "fullscreen",
+		layoutRoot: root,
+		requestRender: () => renders++,
+		addInputListener: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
+	};
+	/** Types `data` as Pi's terminal would: what the listeners leave goes to the editor. */
+	const type = (data) => {
+		let current = data;
+		for (const listener of listeners) {
+			const result = listener(current);
+			if (result?.consume) return;
+			if (result?.data !== undefined) current = result.data;
+		}
+		if (current.length) editor.push(current);
+	};
+	return { tui, root, native, terminal, renders: () => renders, type, editor, listeners };
 }
 
 const footerData = { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} };
@@ -71,23 +90,23 @@ async function withTab(id, factory, run) {
 	}
 }
 
-test("the tabs are 1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE, with no AGENTS or YouTube tab", () => {
-	assert.deepEqual(TABS.map((tab) => `${tab.key}:${tab.label}`), ["1:MAIN", "2:GIT", "3:PROF", "4:MEM", "5:TREE"]);
-	assert.deepEqual(Object.keys(TAB_FACTORIES).sort(), ["git", "mem", "prof", "tree"]);
+test("the tabs are 1:MAIN 2:GIT 3:PROF 4:MEM 5:TREE 6:PR, with no AGENTS or YouTube tab", () => {
+	assert.deepEqual(TABS.map((tab) => `${tab.key}:${tab.label}`), ["1:MAIN", "2:GIT", "3:PROF", "4:MEM", "5:TREE", "6:PR"]);
+	assert.deepEqual(Object.keys(TAB_FACTORIES).sort(), ["git", "mem", "pr", "prof", "tree"]);
 });
 
 test("the tab bar draws the active tab bracketed in accent bold and the others dim and muted, spread across the width", () => {
 	const { line, divider, hitboxes } = renderTabBar(58, "tree", theme);
 	const text = plain(line);
 	assert.equal([...text].length, 58);
-	assert.match(text, /^1:MAIN +2:GIT +3:PROF +4:MEM +\[ 5:TREE \]$/);
+	assert.match(text, /^1:MAIN +2:GIT +3:PROF +4:MEM +\[ 5:TREE \] +6:PR$/);
 	const gaps = hitboxes.slice(1).map((box, i) => box.startX - hitboxes[i].endX);
 	assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 1, "equal gaps");
 	assert.ok(line.includes(role("accent")) && line.includes(theme.bold("[ 5:TREE ]")), "active: accent and bold");
 	assert.ok(painted(line, "dim", "1") && painted(line, "muted", "MAIN"), "inactive: key dim, label muted");
 	assert.equal(plain(divider), "─".repeat(58));
 	assert.ok(painted(divider, "border"), "the divider in the border color");
-	assert.deepEqual(hitboxes.map((box) => box.id), ["main", "git", "prof", "mem", "tree"]);
+	assert.deepEqual(hitboxes.map((box) => box.id), ["main", "git", "prof", "mem", "tree", "pr"]);
 	assert.equal(text.slice(hitboxes[4].startX, hitboxes[4].endX), "[ 5:TREE ]");
 	assert.equal(text.slice(hitboxes[1].startX, hitboxes[1].endX), "2:GIT");
 });
@@ -96,6 +115,8 @@ test("under 44 columns the active tab drops the spaces inside its brackets, and 
 	const { line } = renderTabBar(43, "main", theme);
 	assert.ok(plain(line).startsWith("[1:MAIN]"));
 	assert.ok([...plain(line)].length <= 43);
+	assert.match(plain(line), /^\[1:MAIN\] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR *$/, "all six tabs still fit");
+	assert.match(plain(renderTabBar(43, "pr", theme).line), / \[6:PR\]$/);
 	assert.ok([...plain(renderTabBar(20, "main", theme).line)].length <= 20, "cut when even that does not fit");
 });
 
@@ -106,7 +127,7 @@ test("the column opens with the tab bar fixed on top, MAIN active, with no banne
 	assert.equal(entries[0].grow, 0, "the bar stays on top, outside the scrolling");
 	const [bar, divider] = barRows();
 	assert.equal(barRows().length, 2);
-	assert.match(bar, /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE$/, "the tabs from the column's start to its end");
+	assert.match(bar, /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR$/, "the tabs from the column's start to its end");
 	assert.equal([...bar].length, 59);
 	assert.equal(divider, `╶${"─".repeat(57)}╴`, "the divider ends mid-cell, like the cards' corners");
 	assert.ok(!barRows().join("").includes("CINLODEV"));
@@ -135,7 +156,7 @@ test("with the column open the Agents card stays inline above the editor, drawn 
 	assert.ok(inline[0].startsWith("┌") && inline.at(-1).startsWith("└"));
 	assert.deepEqual(inline.slice(1, 3), ["│ ◈ Agents  1 active", "│ ◔ gentle-ai-worker"], "no blank row under the title, as in place");
 	assert.deepEqual(loaded.todo.render(60), [], "Todos still leaves its place for the column");
-	for (const label of ["2:GIT", "3:PROF", "4:MEM", "5:TREE"]) {
+	for (const label of ["2:GIT", "3:PROF", "4:MEM", "5:TREE", "6:PR"]) {
 		loaded.clickTab(label);
 		assert.ok(loaded.agents.render(60).length > 0, label);
 	}
@@ -172,14 +193,14 @@ test("the wheel over the bar cycles the tabs, wrapping at both ends", async () =
 	assert.ok(renders() > before, "the column is redrawn");
 	wheelBar(-1);
 	wheelBar(-1);
-	assert.match(barRows()[0], /\[ 5:TREE \]/, "MAIN back to TREE");
+	assert.match(barRows()[0], /\[ 6:PR \]/, "MAIN back to PR");
 	wheelBar(1);
-	assert.match(barRows()[0], /\[ 1:MAIN \]/, "TREE on to MAIN");
+	assert.match(barRows()[0], /\[ 1:MAIN \]/, "PR on to MAIN");
 });
 
-test("GIT, PROF, MEM and TREE draw their own cards in the square outline, within the column", async () => {
+test("GIT, PROF, MEM, TREE and PR draw their own cards in the square outline, within the column", async () => {
 	const loaded = await wide();
-	for (const [label, title] of [["2:GIT", "GIT"], ["3:PROF", "PROF"], ["4:MEM", "MEM"], ["5:TREE", "TREE"]]) {
+	for (const [label, title] of [["2:GIT", "GIT"], ["3:PROF", "PROF"], ["4:MEM", "MEM"], ["5:TREE", "TREE"], ["6:PR", "PR"]]) {
 		loaded.clickTab(label);
 		const out = loaded.rows();
 		assert.ok(out[0].startsWith("┌"), title);
@@ -226,6 +247,26 @@ test("the host hands a tab the theme, the card outline, the session and a redraw
 	});
 });
 
+test("a tab is told when it is hidden: another tab, or MAIN, takes its place", async () => {
+	const hidden = [];
+	const shown = [];
+	const factory = (id) => () => ({ id, render: (width) => [" ".repeat(width)], onShow: () => shown.push(id), onHide: () => hidden.push(id) });
+	await withTab("git", factory("git"), async () => {
+		await withTab("mem", factory("mem"), async () => {
+			const loaded = await wide();
+			loaded.clickTab("2:GIT");
+			loaded.rows();
+			loaded.clickTab("4:MEM");
+			loaded.rows();
+			assert.deepEqual(hidden, ["git"]);
+			loaded.clickTab("1:MAIN");
+			loaded.rows();
+			assert.deepEqual(hidden, ["git", "mem"]);
+			assert.deepEqual(shown, ["git", "mem"]);
+		});
+	});
+});
+
 test("a tab that throws draws an error card instead of closing the column", async () => {
 	await withTab("prof", () => ({ id: "prof", render: () => { throw new Error("boom"); } }), async () => {
 		const loaded = await wide();
@@ -245,4 +286,256 @@ test("below the breakpoint nothing changes, whatever tab was open", async () => 
 	assert.ok(loaded.todo.render(60).length > 0, "Todos back in place");
 	loaded.terminal.columns = 180;
 	assert.match(loaded.barRows()[0], /\[ 2:GIT \]/, "the tab is remembered while the column is closed");
+});
+
+test("a tab order keeps the known ids once, in their order, and appends the missing tabs in the default order", () => {
+	assert.deepEqual(DEFAULT_TAB_ORDER, ["main", "git", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(normalizeTabOrder(undefined), DEFAULT_TAB_ORDER);
+	assert.deepEqual(normalizeTabOrder("pr"), DEFAULT_TAB_ORDER, "not an array");
+	assert.deepEqual(normalizeTabOrder(["main", "pr"]), ["main", "pr", "git", "prof", "mem", "tree"], "partial");
+	assert.deepEqual(normalizeTabOrder(["yt", "pr", 3, null, "agents"]), ["pr", "main", "git", "prof", "mem", "tree"], "unknown ids dropped");
+	assert.deepEqual(normalizeTabOrder(["tree", "pr", "tree", "main", "pr"]), ["tree", "pr", "main", "git", "prof", "mem"], "duplicates once");
+});
+
+test("moving a tab up or down swaps it with its neighbour and stops at the ends", () => {
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "pr", -1), ["main", "git", "prof", "mem", "pr", "tree"]);
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "main", 1), ["git", "main", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "main", -1), DEFAULT_TAB_ORDER, "first stays first");
+	assert.deepEqual(moveTab(DEFAULT_TAB_ORDER, "pr", 1), DEFAULT_TAB_ORDER, "last stays last");
+	assert.deepEqual(moveTab(["pr"], "pr", -1), ["pr", "main", "git", "prof", "mem", "tree"], "on a normalised order");
+});
+
+test("with a custom order the tab bar draws the tabs in it, numbered by position, and the wheel follows it", () => {
+	const order = ["main", "pr", "git", "prof", "mem", "tree"];
+	const { line, hitboxes } = renderTabBar(58, "pr", theme, order);
+	assert.match(plain(line), /^1:MAIN +\[ 2:PR \] +3:GIT +4:PROF +5:MEM +6:TREE$/);
+	assert.deepEqual(hitboxes.map((box) => box.id), order, "the ids stay the same");
+	assert.match(plain(renderTabBar(58, "main", theme, ["tree"]).line), /^1:TREE +\[ 2:MAIN \] +3:GIT +4:PROF +5:MEM +6:PR$/, "a partial order");
+	assert.equal(cycleTab("main", 1, order), "pr");
+	assert.equal(cycleTab("tree", 1, order), "main", "wraps");
+	assert.equal(cycleTab("main", -1, order), "tree");
+	assert.equal(cycleTab("main", 1), "git", "the default order without one");
+	assert.match(plain(renderTabBar(58, "main", theme).line), /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR$/, "default unchanged");
+});
+
+test("the column's tab bar, clicks and wheel follow sidebar.tabOrder from gentle-quiet.json", async () => {
+	const { barRows, clickTab, wheelBar, side } = await wide({}, { sidebar: { tabOrder: ["main", "pr"] } });
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT +4:PROF +5:MEM +6:TREE$/);
+	assert.equal(clickTab("2:PR")?.handled, true);
+	assert.match(barRows()[0], /\[ 2:PR \]/);
+	assert.equal(side().entries.length, 2, "the PR tab's content, not MAIN");
+	wheelBar(1);
+	assert.match(barRows()[0], /\[ 3:GIT \]/, "PR on to GIT");
+	wheelBar(-1);
+	wheelBar(-1);
+	assert.match(barRows()[0], /\[ 1:MAIN \]/);
+	wheelBar(-1);
+	assert.match(barRows()[0], /\[ 6:TREE \]/, "MAIN back to TREE");
+});
+
+// Drag to reorder (S12): Pi sends the press, then drag events (motion with the button held) and the release to
+// the component that captured the press, wherever the pointer goes; a click follows only when nothing moved.
+function dragger(bar) {
+	const send = (type, x, y = 0) => bar().handleMouse({ type, button: "left", x, y, width: 60, height: 2, screenX: 120 + x, screenY: y });
+	return { press: (x, y) => send("press", x, y), drag: (x, y) => send("drag", x, y), release: (x, y) => send("release", x, y), click: (x, y) => send("click", x, y) };
+}
+const INVERSE = "\x1b[7m";
+
+test("dragging a tab sideways moves it live, the others make room, and the release saves sidebar.tabOrder", async () => {
+	const { bar, barRows, tabX, side } = await wide();
+	const { press, drag, release, click } = dragger(bar);
+	const from = tabX("6:PR");
+	const to = tabX("2:GIT");
+	assert.equal(press(from)?.capture, true, "the press captures the drag and the release");
+	const moving = drag(to, 5); // below the bar: still the bar's, captured
+	assert.equal(moving?.handled, true);
+	assert.equal(moving?.render, true);
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT +4:PROF +5:MEM +6:TREE$/, "PR already in the second place, numbered by position");
+	const raw = bar().render(60)[0];
+	assert.ok(raw.includes(`${INVERSE}${role("accent")}`) && /2:PR/.test(plain(raw.slice(raw.indexOf(INVERSE)))), "the dragged tab is highlighted");
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined, "nothing saved while dragging");
+	assert.equal(release(to, 5)?.handled, true);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "pr", "git", "prof", "mem", "tree"]);
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:PR +3:GIT/, "MAIN still active, PR stays second");
+	assert.ok(!bar().render(60)[0].includes(INVERSE), "no highlight after the drop");
+	assert.equal(click(to)?.handled, true, "a click after a drag is swallowed");
+	assert.match(barRows()[0], /^\[ 1:MAIN \]/, "the click did not switch tabs");
+	assert.equal(side().entries.length, 3, "MAIN's content");
+});
+
+test("a press and release without moving still switches tabs and keeps the order; a jitter under 2 columns is a click", async () => {
+	const { bar, barRows, tabX } = await wide();
+	const { press, drag, release, click } = dragger(bar);
+	const git = tabX("2:GIT");
+	press(git);
+	release(git);
+	click(git);
+	assert.match(barRows()[0], /^1:MAIN +\[ 2:GIT \] +3:PROF/);
+	const prof = tabX("3:PROF");
+	press(prof);
+	assert.equal(drag(prof + 1)?.render, false, "a 1-column jitter does not start a drag");
+	assert.ok(!bar().render(60)[0].includes(INVERSE));
+	release(prof + 1); // Pi sends no click once the pointer moved
+	assert.match(barRows()[0], /\[ 3:PROF \]/, "the release picks the pressed tab");
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined, "order unchanged and not saved");
+});
+
+test("a drag past either end clamps to the first or last place; the active tab stays the same", async () => {
+	const { bar, barRows, tabX, clickTab } = await wide();
+	const { press, drag, release } = dragger(bar);
+	clickTab("4:MEM");
+	press(tabX("4:MEM"));
+	drag(500);
+	assert.match(barRows()[0], /^1:MAIN +2:GIT +3:PROF +4:TREE +5:PR +\[ 6:MEM \]$/);
+	release(500);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["main", "git", "prof", "tree", "pr", "mem"]);
+	press(tabX("4:TREE"));
+	drag(-40, -3);
+	release(-40, -3);
+	assert.deepEqual(readConfig().sidebar.tabOrder, ["tree", "main", "git", "prof", "pr", "mem"]);
+	assert.match(barRows()[0], /^1:TREE +2:MAIN +3:GIT +4:PROF +5:PR +\[ 6:MEM \]$/, "MEM still active");
+});
+
+test("a press after a drag that never got its release starts afresh", async () => {
+	const { bar, barRows, tabX } = await wide();
+	const { press, drag, release } = dragger(bar);
+	const prof = tabX("3:PROF");
+	press(tabX("6:PR"));
+	drag(tabX("2:GIT"));
+	assert.match(barRows()[0], /2:PR/);
+	assert.equal(press(prof)?.render, true, "the release was lost: the bar is redrawn"); // PROF's place in the saved order
+	assert.match(barRows()[0], /^\[ 1:MAIN \] +2:GIT +3:PROF +4:MEM +5:TREE +6:PR$/, "the saved order back");
+	release(prof);
+	assert.match(barRows()[0], /\[ 3:PROF \]/);
+	assert.equal(readConfig()?.sidebar?.tabOrder, undefined);
+});
+
+test("moveTabTo puts a tab at a place, clamped, and slotAt finds the nearest slot", () => {
+	assert.deepEqual(moveTabTo(undefined, "pr", 1), ["main", "pr", "git", "prof", "mem", "tree"]);
+	assert.deepEqual(moveTabTo(undefined, "main", 99), ["git", "prof", "mem", "tree", "pr", "main"]);
+	assert.deepEqual(moveTabTo(undefined, "git", -5), ["git", "main", "prof", "mem", "tree", "pr"]);
+	assert.deepEqual(moveTabTo(undefined, "nope", 0), DEFAULT_TAB_ORDER);
+	const slots = [{ startX: 0, endX: 4 }, { startX: 10, endX: 14 }, { startX: 20, endX: 24 }];
+	assert.equal(slotAt(slots, -9), 0);
+	assert.equal(slotAt(slots, 8), 1);
+	assert.equal(slotAt(slots, 18), 2);
+	assert.equal(slotAt(slots, 99), 2);
+});
+
+// ---- The column's keyboard (T26): alt+p (caught by the column, not a Pi shortcut), or a click on a tab that asks for it ----
+
+// A tab that asks for the keyboard on a click and records the keys it gets; esc is not its own.
+function keyTab(id) {
+	const seen = { keys: [], host: undefined };
+	const factory = (host) => {
+		seen.host = host;
+		return {
+			id,
+			render: (width) => [host.focused() === id ? "focused".padEnd(width) : "idle".padEnd(width)],
+			handleClick(_line, button) {
+				if (button === "left") host.focus(id);
+				return true;
+			},
+			handleKey(data) {
+				seen.keys.push(data);
+				return data !== "\x1b";
+			},
+		};
+	};
+	return { seen, factory };
+}
+
+test("alt+p opens PROF with the keyboard: keys go to the tab, not the editor; esc gives them back", async () => {
+	const { seen, factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		assert.equal(loaded.shortcuts["alt+p"], undefined, "the column's own key, not a Pi shortcut");
+		loaded.type("a");
+		assert.deepEqual(loaded.editor, ["a"], "unfocused: the editor types as before");
+		loaded.type("alt+p");
+		assert.deepEqual(loaded.editor, ["a"], "alt+p is the column's");
+		assert.match(loaded.barRows()[0], /\[ 3:PROF \]/, "the PROF tab opens");
+		assert.equal(loaded.rows()[0].trim(), "focused");
+		for (const key of ["\x1b[D", "\x1b[B", "\r", "e", "s", "\x13", "u", "d", "q"]) loaded.type(key);
+		assert.deepEqual(loaded.editor, ["a"], "nothing reached the editor");
+		assert.deepEqual(seen.keys, ["\x1b[D", "\x1b[B", "\r", "e", "s", "\x13", "u", "d", "q"]);
+		loaded.type("\x1b");
+		assert.deepEqual(loaded.editor, ["a"], "esc itself is taken");
+		assert.equal(loaded.rows()[0].trim(), "idle", "the keyboard is the editor's again");
+		loaded.type("b");
+		assert.deepEqual(loaded.editor, ["a", "b"]);
+		assert.equal(seen.keys.length, 10);
+	});
+});
+
+test("a click on the tab's card asks for the keyboard; mouse and terminal reports still pass through", async () => {
+	const { seen, factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		loaded.clickTab("3:PROF");
+		loaded.rows();
+		loaded.type("x");
+		assert.deepEqual(loaded.editor, ["x"], "opening the tab alone keeps the editor's keyboard");
+		loaded.content().handleMouse({ type: "click", button: "left", x: 3, y: 0, width: 60, height: 38, screenX: 123, screenY: 2 });
+		loaded.type("y");
+		assert.deepEqual(loaded.editor, ["x"]);
+		assert.deepEqual(seen.keys, ["y"]);
+		const mouse = "\x1b[<0;10;5M";
+		loaded.type(mouse);
+		loaded.type("\x1b[200~pasted\x1b[201~");
+		assert.deepEqual(loaded.editor, ["x", mouse, "\x1b[200~pasted\x1b[201~"], "a mouse report and a paste are not keys for the tab");
+		assert.equal(loaded.rows()[0].trim(), "idle", "a paste gives the keyboard back so it lands in the editor");
+	});
+});
+
+test("another tab, a narrow terminal, or alt+p again give the keyboard back", async () => {
+	const { factory } = keyTab("prof");
+	await withTab("prof", factory, async () => {
+		const loaded = await wide();
+		const shortcut = () => loaded.type("alt+p");
+		shortcut();
+		loaded.clickTab("1:MAIN");
+		loaded.rows();
+		loaded.type("a");
+		assert.deepEqual(loaded.editor, ["a"], "MAIN took the column");
+		shortcut();
+		loaded.rows();
+		loaded.type("alt+p");
+		loaded.type("b");
+		assert.deepEqual(loaded.editor, ["a", "b"], "alt+p again leaves keyboard mode");
+		shortcut();
+		loaded.terminal.columns = 139;
+		loaded.root[NODE]();
+		loaded.type("c");
+		assert.deepEqual(loaded.editor, ["a", "b", "c"], "no column, no keyboard mode");
+	});
+});
+
+test("below the breakpoint alt+p reaches Pi as before, and the editor keeps its keys", async () => {
+	const loaded = await wide({ columns: 100 });
+	loaded.root[NODE]();
+	loaded.type("alt+p");
+	loaded.type("a");
+	assert.deepEqual(loaded.editor, ["alt+p", "a"]);
+	loaded.terminal.columns = 180;
+	assert.match(loaded.barRows()[0], /\[ 1:MAIN \]/, "the column opens later on MAIN, as before");
+});
+
+test("the tab's own pop-up keeps the keyboard with the tab; anything else taking Pi's focus gives it back", async () => {
+	const popup = { id: "picker" };
+	const { seen, factory } = keyTab("prof");
+	const withPopup = (host) => ({ ...factory(host), keyOverlay: () => popup });
+	await withTab("prof", withPopup, async () => {
+		const loaded = await wide();
+		loaded.tui.focusedComponent = { id: "editor" };
+		loaded.type("alt+p");
+		loaded.rows();
+		loaded.tui.focusedComponent = popup;
+		loaded.type("g");
+		assert.deepEqual(seen.keys, ["g"], "the picker's keys come through the tab");
+		loaded.tui.focusedComponent = { id: "a dialog" };
+		loaded.type("y");
+		assert.deepEqual(loaded.editor, ["y"], "the dialog gets its key");
+		assert.equal(loaded.rows()[0].trim(), "idle");
+	});
 });
