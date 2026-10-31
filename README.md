@@ -81,7 +81,7 @@ same; only how it is drawn changes.
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ <name>`) with git badges and `[ ↗ ]`, which opens your editor (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
-  source); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR
+  source, and dims the screen behind the pop-up); **PR** the repository's open pull requests from one `gh api graphql` call, drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
   ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
   ⧗ CI 5/10, ✗ CI 9/10; skipped ones left out) that stands for a ✗ CI or ⧗ CI verdict; a click on a PR
