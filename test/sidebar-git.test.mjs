@@ -5,6 +5,13 @@ import { painted, plain, theme } from "./helpers.mjs";
 import { createTab } from "../extensions/sidebar/git.ts";
 import { parseBranchDiff, parseBranches, parseStatus, statusCounts } from "../extensions/sidebar/git-data.ts";
 import { launchDeps, openInEditor } from "../extensions/sidebar/git-launch.ts";
+import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
+
+// TREE's file icon on the emoji theme (tree.ts); the hosts below have no treeIcons, so emoji.
+const DOC = "📄";
+const esc = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// The column where `mark` ends up in `row`, in terminal cells.
+const cell = (row, mark) => visibleWidth(row.slice(0, row.lastIndexOf(mark)));
 
 const GRAPH = [
 	"* a1b2c3d (HEAD -> main, origin/main) Add git tab",
@@ -69,7 +76,7 @@ const pad = (row, width) => {
 };
 
 // A host like gentle-quiet's tabHost, with the theme of the helpers and git answered by `git`.
-function makeHost({ git = repo(), cwd = "/repo", outline = true, changes, ctx } = {}) {
+function makeHost({ git = repo(), cwd = "/repo", outline = true, changes, ctx, treeIcons } = {}) {
 	const calls = [];
 	let renders = 0;
 	const inner = (width) => (outline ? width - 4 : width - 1);
@@ -97,6 +104,7 @@ function makeHost({ git = repo(), cwd = "/repo", outline = true, changes, ctx } 
 		usage: () => ({ name: "", windows: [] }),
 		gauge: () => "",
 		icons: { branch: "⎇" },
+		treeIcons,
 	};
 	return { host, calls, renders: () => renders };
 }
@@ -226,24 +234,58 @@ test("a detached HEAD shows the short commit as the branch", async () => {
 	assert.match(rows()[3], /│ a1b2c3d /);
 });
 
-test("the working tree card lists each file with its status badge and +n −n, with no [diff] and no hint row", async () => {
+test("the working tree card lists each file with TREE's icon, +n −n and its status letter last, with no [diff] and no hint row", async () => {
 	const { rows, draw } = await open();
 	const out = rows();
 	const summary = out.findIndex((row) => /● 3 files changed +\+12 {2}−3 │$/.test(row));
 	assert.ok(summary > 0);
 	assert.match(out[summary + 1], /^│ ─+ │$/, "the divider right under the summary: no hint row");
 	assert.ok(!out.some((row) => /click:|view diff|\[diff\]/.test(row)), "no [diff] and no hint");
-	assert.ok(out.some((row) => /^│ M {2}src\/a\.ts +\+10 −2 │$/.test(row)), "counts flush right");
-	assert.ok(out.some((row) => /^│ A {2}src\/b\.ts +\+2 −1 │$/.test(row)));
-	assert.ok(out.some((row) => /^│ U {2}new\.txt +│$/.test(row)));
-	for (const row of out.filter((row) => row.trim())) assert.equal([...row].length, 59, "every card row as wide as the column");
+	assert.ok(out.some((row) => new RegExp(`^│ ${DOC} src/a\\.ts +\\+10 −2 {2}M │$`).test(row)), "icon, path; counts then the letter flush right");
+	assert.ok(out.some((row) => new RegExp(`^│ ${DOC} src/b\\.ts +\\+2 −1 {3}A │$`).test(row)), "counts padded to one column");
+	assert.ok(out.some((row) => new RegExp(`^│ ${DOC} new\\.txt +U │$`).test(row)), "no counts for an untracked file, the letter still last");
+	const at = (name, mark) => cell(out.find((row) => row.includes(name)), mark);
+	assert.equal(at("src/a.ts", "+"), at("src/b.ts", "+"), "the counts start in one column");
+	assert.ok([at("src/a.ts", "M"), at("src/b.ts", "A"), at("new.txt", "U")].every((x, _, all) => x === all[0]), "the letters line up in the last column");
+	for (const row of out.filter((row) => row.trim())) assert.equal(visibleWidth(row), 59, "every card row as wide as the column");
 	const colored = draw();
 	const a = rows().findIndex((row) => row.includes("src/a.ts"));
+	assert.ok(colored[a].includes(`${DOC} `), "TREE's emoji file icon, then one space");
 	assert.ok(painted(colored[a], "warning", "M"));
 	assert.ok(painted(colored[a], "dim", "src/") && painted(colored[a], "text", "a.ts"), "folder dim, name in text");
 	assert.ok(painted(colored[a], "toolDiffAdded", "+10") && painted(colored[a], "toolDiffRemoved", "−2"));
 	const b = rows().findIndex((row) => row.includes("src/b.ts"));
 	assert.ok(painted(colored[b], "success", "A"));
+	const n = rows().findIndex((row) => row.includes("new.txt"));
+	assert.ok(painted(colored[n], "accent", "U"));
+});
+
+test("with TREE's nerd icons each file row starts with the glyph and color TREE draws for its name", async () => {
+	const { rows, draw } = await open({ treeIcons: "nerd", git: repo({ status: " M src/a.ts\n M README.md\n?? Dockerfile\n", numstat: "10\t2\tsrc/a.ts\n6\t0\tREADME.md\n" }) });
+	const out = rows();
+	const colored = draw();
+	for (const [file, name] of [["src/a.ts", "a.ts"], ["README.md", "README.md"], ["Dockerfile", "Dockerfile"]]) {
+		const { char, color } = nerdIcon(name);
+		const i = out.findIndex((row) => row.includes(file));
+		assert.ok(out[i].startsWith(`│ ${char} ${file.includes("/") ? "src/" : file}`), `${file}: the glyph, one space, the path`);
+		assert.ok(painted(colored[i], color, char), `${file}: in TREE's color`);
+		assert.ok(!out[i].includes(DOC));
+	}
+	assert.notEqual(nerdIcon("a.ts").char, nerdIcon("README.md").char, "by the file's type");
+	assert.match(out.find((row) => row.includes("README.md")), / README\.md +\+6 {6}M │$/);
+	assert.match(out.find((row) => row.includes("Dockerfile")), / Dockerfile +U │$/);
+});
+
+test("a row that does not fit drops the icon before cutting the path; the counts and letter stay", async () => {
+	const git = repo({ status: " M src/components/widget.ts\n", numstat: "1\t1\tsrc/components/widget.ts\n" });
+	// The nerd glyph is one cell (an emoji is two in a terminal), so the widths below hold on either measure.
+	const { rows } = await open({ git, treeIcons: "nerd" }, { width: 39, height: 30 });
+	const icon = nerdIcon("widget.ts").char;
+	const row = (width) => rows(width, 30).find((line) => line.includes("src/comp"));
+	assert.match(row(39), new RegExp(`│ ${esc(icon)} src/components/widget\\.ts \\+1 −1 {2}M │$`), "fits with its icon");
+	for (const width of [38, 37]) assert.match(row(width), /│ src\/components\/widget\.ts +\+1 −1 {2}M │$/, "icon dropped, path whole");
+	assert.match(row(34), /│ src\/components\/widge… \+1 −1 {2}M │$/, "path cut last");
+	assert.ok(!row(34).includes(icon));
 });
 
 test("the toggle switches to the branch list, with tracking and dates, and back to the graph", async () => {
@@ -277,9 +319,9 @@ test("clicking a branch turns the working tree card into the branch diff inspect
 	const summary = out.findIndex((row) => /● 3 files +\+8 {2}−8 │$/.test(row));
 	assert.ok(summary > 0);
 	assert.match(out[summary + 1], /^│ ─+ │$/, "no hint row");
-	assert.ok(out.some((row) => /│ A {2}src\/new\.ts +\+5 │$/.test(row)));
-	assert.ok(out.some((row) => /│ D {2}src\/gone\.ts +−7 │$/.test(row)));
-	assert.ok(out.some((row) => /│ R {2}src\/moved\.ts +\+3 −1 │$/.test(row)), "a rename under its new name");
+	assert.ok(out.some((row) => new RegExp(`│ ${DOC} src/new\\.ts +\\+5 {5}A │$`).test(row)), "the inspector rows as the working tree's");
+	assert.ok(out.some((row) => new RegExp(`│ ${DOC} src/gone\\.ts +−7 {5}D │$`).test(row)));
+	assert.ok(out.some((row) => new RegExp(`│ ${DOC} src/moved\\.ts +\\+3 −1 {2}R │$`).test(row)), "a rename under its new name");
 	assert.ok(!out.some((row) => /\[diff\]|view diff|↗/.test(row)));
 	assert.ok(!out.some((row) => row.includes("Working tree")));
 	const colored = draw();
@@ -318,7 +360,7 @@ test("a branch with no merge base falls back to the direct diff; no difference s
 	await settle();
 	direct.click(/● feature/);
 	await settle();
-	assert.ok(direct.rows().some((row) => /M {2}README\.md +\+4 −4 │$/.test(row)));
+	assert.ok(direct.rows().some((row) => / README\.md +\+4 −4 {2}M │$/.test(row)));
 	assert.ok(direct.calls.some(([args]) => args === "diff HEAD feature --name-status"));
 
 	const same = await open({ git: repo({ "diff...numstat": "", "diff..numstat": "" }) });
@@ -476,7 +518,7 @@ test("without the outline the rows are indented and clicks still land on the rig
 		const { rows, click } = await open({ outline: false });
 		const out = rows();
 		assert.match(out[0], /^ ⎇ Git +\[ Graph \| Branches \]$/);
-		assert.match(out.find((row) => row.includes("src/a.ts")), /^ M {2}src\/a\.ts +\+10 −2$/, "counts flush right without the outline too");
+		assert.match(out.find((row) => row.includes("src/a.ts")), new RegExp(`^ ${DOC} src/a\\.ts +\\+10 −2 {2}M$`), "counts and letter flush right without the outline too");
 		assert.equal(click(/src\/a\.ts/, { at: "+10" }), true);
 		assert.match(launches.runs.at(-1).args.at(-1), /^nvim '\/repo\/src\/a\.ts'$/);
 		assert.equal(click(/Graph \| Branches/, { at: "Branches" }), true);
@@ -536,6 +578,11 @@ test("with Pi's overlay UI a file click opens the read-only preview, and e there
 		assert.equal(launches.runs.length, before2);
 		assert.equal(click(/src\/b\.ts/, { at: "+2" }), true, "a left click where [diff] was opens the preview");
 		assert.equal(overlays.length, 2);
+		assert.equal(click(/src\/b\.ts/, { at: "A │" }), true, "on the status letter too");
+		assert.equal(click(/src\/b\.ts/, { at: DOC }), true, "and on the icon");
+		assert.equal(overlays.length, 4);
+		assert.equal(click(/src\/b\.ts/, { at: "A │", button: "right" }), false);
+		assert.equal(overlays.length, 4);
 	} finally {
 		launches.restore();
 	}

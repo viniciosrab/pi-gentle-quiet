@@ -274,19 +274,43 @@ test("the Active Handoff starts folded to one row: id, age and the goal's first 
 	assert.ok(painted(rows().join(""), "accent", "#803"));
 });
 
-test("the folded handoff cuts a long goal with … and a click on its row or title toggles the full text", async () => {
+test("the folded handoff cuts a long goal with …; a click on its title toggles the full text", async () => {
 	const long = HANDOFF.replace("Ship the sidebar tabs.", `Ship the sidebar tabs ${"and more ".repeat(12)}.`);
 	const { text, click } = await shown({ search: long });
 	const row = text().find((r) => /#803 · 1h ago/.test(r));
 	assert.match(row, /… │$/);
 	assert.equal([...row].length, WIDTH);
-	assert.equal(await click(/#803 · 1h ago/), true);
+	assert.equal(await click(/M Active Handoff/), true);
 	assert.ok(text().some((r) => /│ ✦ Goal +│/.test(r)), "expanded");
 	assert.ok(text().some((r) => /M Active Handoff +▲ │$/.test(r)));
 	await click(/M Active Handoff/);
 	assert.ok(!text().some((r) => /✦ Goal/.test(r)), "folded again");
+});
+
+test("a click on the handoff's content opens the whole summary read-only in the pop-up, folded or not", async () => {
+	const observations = { 803: { id: 803, type: "session_summary", title: "Session summary", content: "## Goal\nShip the sidebar tabs.\n\n## Next Steps\n- the whole text, not only the card" } };
+	const fake = fakeUi();
+	const { text, click, calls } = await shown({ observations }, { ui: fake.ui });
+	assert.equal(await click(/#803 · 1h ago/), true);
+	assert.equal(fake.opened.length, 1, "the folded row opens it");
+	assert.ok(!text().some((r) => /✦ Goal/.test(r)), "the card stays folded");
+	assert.ok(calls.fetch.includes("http://127.0.0.1:7437/observations/803"), "the full text from the local API");
+	const out = (await fake.component()).render(80).map(plain);
+	assert.match(out[1], /^▏ Read-only — Handoff +▕$/);
+	assert.match(out[2], /^▏ #803 · session_summary · Session summary +▕$/);
+	assert.ok(out.some((r) => /the whole text, not only the card/.test(r)));
 	await click(/M Active Handoff/);
-	assert.ok(text().some((r) => /✦ Goal/.test(r)), "the title toggles too");
+	assert.equal(await click(/✦ Goal/), true);
+	assert.equal(fake.opened.length, 2, "a row of the expanded card opens it too");
+	assert.ok(text().some((r) => /✦ Goal/.test(r)), "and leaves the card expanded");
+});
+
+test("without Engram's API the handoff pop-up shows the search's text", async () => {
+	const fake = fakeUi();
+	const { click } = await shown({}, { ui: fake.ui });
+	await click(/#803 · 1h ago/);
+	const out = (await fake.component()).render(80).map(plain);
+	assert.ok(out.some((r) => /Ship the sidebar tabs\./.test(r)));
 });
 
 test("the expanded Active Handoff shows the latest session summary from `engram search`", async () => {
