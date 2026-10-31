@@ -15,6 +15,13 @@ same; only how it is drawn changes.
   the call runs, like Claude Code (pi-web-access's progress, or "Fetching…"), then its status line, such as
   `2/2 queries, 6 sources`. `ctrl+o` shows pi-web-access's full output.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors.
+- **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
+  (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
+  status, model and elapsed time, then its thread (thinking, text, each tool with its output) drawn with
+  gentle-pi's own renderer, as the `alt+k` window draws it. It reads gentle-pi's presence file for the session
+  about twice a second and follows the end while the subagent works; `↑↓` `PgUp/PgDn` `Home/End` or the wheel
+  scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. When the subagent finishes, its last
+  thread stays, marked finished. Without that file the click opens gentle-pi's `/gentle:agents` list instead.
 - **Side column on wide terminals.** In a fullscreen Pi with 140+ columns, a column on the right
   holds the status line as two cards that always stay on top. **Status** has the project, branch and
   model under a label column, then an **MCP** row with the MCP servers online out of those installed
@@ -72,7 +79,11 @@ same; only how it is drawn changes.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
   first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or –. Click its title or press
   `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
-  **Icons**). Without the side column the status line keeps `⠋ N jobs`.
+  **Icons**). Without the side column the status line keeps `⠋ N jobs`. A running job's row ends with `↗`:
+  a click on it opens the same live pop-up as a subagent's, with the job's label and id, running or finished with
+  its exit code, the elapsed time, and the tail of its output as it is written (like `tail -f`; the log gentle-pi
+  keeps for the job, found among the files Pi holds open on Linux). Elsewhere, or when that log cannot be found,
+  the click opens gentle-pi's `/gentle:jobs` list.
 - **One status line** with your folder, branch, changed lines, context, cost and plan usage. The
   model and its effort stay at the bottom right above the editor at all times, dimmed: at the end
   of the `Working` row while Pi works, and on that same row when it is idle.

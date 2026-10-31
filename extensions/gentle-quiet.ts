@@ -46,6 +46,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { activeRowStatus, findActivityFile, JobLogs, jobRows, presenceDir, readActivity, rowTask } from "./sidebar/run-data.ts";
+import { openAgentPopup, openJobPopup } from "./sidebar/run-popup.ts";
 import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
 // Pi's agent dir (honors PI_CODING_AGENT_DIR); ~/.pi/agent on hosts without the export.
@@ -514,7 +516,8 @@ function drawBlock(target, width, options, t, rail = {}) {
 	const inner = width - BOX_CHROME;
 	if (!config.blocks.border || inner < BOX_MIN_INNER) {
 		const rows = trimBlankEdges(flatten(target.render(Math.max(1, width - 1)), { ...options(), margin: true })).map(inProgressIcon);
-		return rail.agents ? rows.map(agentGap) : rows;
+		const spaced = rail.agents ? rows.map(agentGap) : rows;
+		return rail.runs ? markRuns(spaced, width, t ?? theme, rail.runs, 0) : spaced;
 	}
 	// The panel keeps ~3 columns of margin and accent bar on the left, which
 	// flatten() removes, and 2 on the right; render it wider to fill the box.
@@ -532,6 +535,7 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// In the column the Todos title leaves out gentle-pi's shortcut hint; "▾ Collapse" stays.
 	if (rail.hang && rail.spaced && rows.length) rows = [quietTitle(rows[0]), ...rows.slice(1)];
 	if (rail.spaced && rows.length > 1) rows = [rows[0], "", ...rows.slice(1)];
+	if (rail.runs) rows = markRuns(rows, inner, t ?? theme, rail.runs, 1); // under the outline's top row
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
 const STACK_WIDTH = 120;
@@ -566,9 +570,19 @@ function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
 	const inline = INLINE_BLOCKS.has(key);
 	if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	// The Agents card's rows with a ↗, by the row the card drew them on: a left click there opens the subagent.
+	const hits = key === "gentle-agents" ? new Map() : undefined;
+	const marked = hits && { hits, match: agentRows };
 	return new Proxy(component, {
 		get(target, prop) {
-			if (prop === "render") return (width) => (sidebar.active && !inline ? [] : drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo" }));
+			if (prop === "render") {
+				return (width) => {
+					if (sidebar.active && !inline) return [];
+					if (hits) scheduleRuns();
+					return drawBlock(target, width, options, t, { agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
+				};
+			}
+			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? target.handleMouse?.(event, ...rest);
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -586,6 +600,7 @@ function rewriteWidget(key, content) {
 	if (typeof content === "function") {
 		return (tui, t, ...rest) => {
 			openSidebar(tui);
+			if (key === "gentle-agents") runs.tui = tui;
 			return blockComponent(content(tui, t, ...rest), options, t, key);
 		};
 	}
@@ -1773,6 +1788,7 @@ async function openPalette(pi, palette, ctx) {
 // side column's outline; without the column the status line keeps its "⠋ N jobs".
 const JOBS_CARD = "jobs"; // its railBlocks key
 let jobsCard; // { list, collapsed, key, drawn } while gentle-pi's jobs files load
+const jobLogs = new JobLogs(); // the jobs' log paths seen in /proc, kept after a job's stream closes
 
 async function loadJobsCard() {
 	if (!gentleShellOff()) return undefined; // Gentle Shell draws its own card
@@ -1815,11 +1831,26 @@ async function registerJobsCard(pi) {
 		card.session = value.sessionId;
 		sidebar.tui?.requestRender?.();
 	});
-	// The column only hands a card the clicks on its title row, so any left click is the collapse control;
-	// the wheel goes back to the column.
+	// A snapshot of the session that was open before a switch is not drawn.
+	const jobs = () => (card.session === liveCtx?.sessionManager?.getSessionId?.() ? card.list : []);
+	// A running job's row ends with ↗ and a left click on it opens the job's live output (./sidebar/run-popup.ts),
+	// read from the log the Pi process holds open (./sidebar/run-data.ts JobLogs); with no log found, or off
+	// Linux, gentle-pi's /gentle:jobs list opens instead.
+	const marked = { hits: new Map(), match: (texts) => jobRows(texts, jobs()) };
+	const openJob = (id) => {
+		try {
+			const file = jobLogs.find(id);
+			const job = () => card.list.find((candidate) => candidate?.id === id);
+			if (file && openJobPopup(liveCtx, { file, id, job })) return;
+		} catch {
+			// gentle-pi's list below
+		}
+		piApi?.sendUserMessage?.("/gentle:jobs", { expandPromptTemplates: true });
+	};
+	// The column hands the card the clicks on its title row, so a left click there is the collapse control;
+	// the rows with a ↗ take theirs through `click`. The wheel goes back to the column.
 	const component = {
-		// A snapshot of the session that was open before a switch is not drawn.
-		render: (width) => jobsGlyphs(lib.renderJobsCard(card.session === liveCtx?.sessionManager?.getSessionId?.() ? card.list : [], theme, width, Date.now(), { collapsed: card.collapsed, collapseKey: card.key, collapseControl: true })),
+		render: (width) => jobsGlyphs(lib.renderJobsCard(jobs(), theme, width, Date.now(), { collapsed: card.collapsed, collapseKey: card.key, collapseControl: true })),
 		handleMouse(event) {
 			if (event?.type !== "click" || event.button !== "left") return undefined;
 			toggle();
@@ -1829,14 +1860,143 @@ async function registerJobsCard(pi) {
 	};
 	railBlocks.set(JOBS_CARD, {
 		component,
+		click: (event) => runClick(event, marked.hits, openJob),
 		draw: (width) => {
-			const rows = drawBlock(component, width, blockOptions("jobs"), theme, { spaced: true, agents: true });
+			const rows = drawBlock(component, width, blockOptions("jobs"), theme, { spaced: true, agents: true, runs: marked });
 			card.drawn = rows.length > 0;
 			return rows;
 		},
 	});
 	if (card.key && typeof pi.registerShortcut === "function") pi.registerShortcut(card.key, { description: "Collapse or expand the jobs card", handler: async () => toggle() });
 	jobsCard = card;
+}
+
+// ---------------------------------------------------------------------------
+// Subagent pop-ups: a ↗ on each working row of the Agents card opens that subagent's live thread
+// ---------------------------------------------------------------------------
+
+// gentle-agents publishes this session's working subagents (running, queued, waiting) with their live thread in its
+// presence file (./sidebar/run-data.ts). A row of the Agents card whose task is in it ends with a ↗, in its trailing
+// padding so gentle-pi's right-aligned details keep their column, and a left click anywhere on that row opens the
+// subagent's pop-up (./sidebar/run-popup.ts) instead of reaching gentle-pi; a finished task leaves the file and its
+// row keeps no ↗. With no file to read, every working row gets the ↗ and a click opens gentle-pi's list
+// (/gentle:agents), as it does when the task has left the file by the time of the click.
+const PRESENCE_DIR = presenceDir(AGENT_DIR);
+const RUN_MARK = "↗";
+const RUNS_LOOK_MS = 5000; // how often the presence folder is listed again for the session's newest file
+// What the card last read, outside render: available is undefined until the first read, false without a file.
+const runs = { session: undefined, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0, pending: false, tui: undefined };
+let runLib; // gentle-pi's renderThreadItem and taskHeader, those that loaded
+let runLibLoading;
+
+// gentle-pi's thread renderer (lib/agents-thread-view.ts) and task header (lib/agents-view.ts); the pop-up draws its
+// own rows for any that is missing or fails to load.
+async function loadRunLib() {
+	const load = async (name, key) => {
+		try {
+			const file = path.join(GENTLE_PI_LIB, name);
+			if (!existsSync(file)) return undefined;
+			const value = (await import(pathToFileURL(file).href))[key];
+			return typeof value === "function" ? value : undefined;
+		} catch {
+			return undefined; // gentle-pi moved or changed
+		}
+	};
+	const [renderThreadItem, taskHeader] = await Promise.all([load("agents-thread-view.ts", "renderThreadItem"), load("agents-view.ts", "taskHeader")]);
+	runLib = { renderThreadItem, taskHeader };
+	return runLib;
+}
+
+// A draw of the card asks for one read of the presence file, right after it: render itself never reads.
+function scheduleRuns() {
+	if (runs.pending) return;
+	runs.pending = true;
+	const timer = setTimeout(() => {
+		runs.pending = false;
+		refreshRuns();
+	}, 0);
+	timer.unref?.();
+}
+
+const runsDigest = () => JSON.stringify([runs.available, runs.tasks.map((task) => [task.id, task.status, task.agent, task.label])]);
+
+function refreshRuns() {
+	try {
+		const session = liveCtx?.sessionManager?.getSessionId?.();
+		if (session !== runs.session) Object.assign(runs, { session, file: undefined, stamp: undefined, tasks: [], available: undefined, looked: 0 });
+		const before = runsDigest();
+		if (!runs.file || !existsSync(runs.file) || Date.now() - runs.looked >= RUNS_LOOK_MS) {
+			if (runs.available === false && Date.now() - runs.looked < 1000) return; // no file a moment ago
+			runs.looked = Date.now();
+			const file = findActivityFile(PRESENCE_DIR, session);
+			if (file !== runs.file) Object.assign(runs, { file, stamp: undefined });
+		}
+		if (!runs.file) Object.assign(runs, { tasks: [], available: false });
+		else {
+			const stat = statSync(runs.file);
+			const stamp = `${stat.mtimeMs}:${stat.size}`;
+			if (stamp !== runs.stamp) {
+				const read = readActivity(runs.file);
+				Object.assign(runs, read.error ? { tasks: [], available: false, stamp: undefined } : { tasks: read.tasks, available: true, stamp });
+			}
+		}
+		if (runsDigest() !== before) runs.tui?.requestRender?.();
+	} catch {
+		Object.assign(runs, { file: undefined, stamp: undefined, tasks: [], available: false });
+	}
+}
+
+// The Agents card's task id on each row (null without a file): its working rows; undefined before the first read.
+// The "… N more" row has no status glyph.
+function agentRows(texts) {
+	if (runs.available === undefined) return undefined;
+	return texts.map((text) => (!activeRowStatus(text) ? undefined : runs.available ? rowTask(text, runs.tasks) : null));
+}
+
+// A card's rows with the ↗ on each row `match` names (from their plain texts), and `hits` filled with their row
+// (past `offset` rows of outline) and id. The title row (0) never gets one.
+function markRuns(rows, room, t, { hits, match }, offset) {
+	hits.clear();
+	const ids = match(rows.map((row) => row.replace(SGR, "")));
+	if (!ids) return rows;
+	return rows.map((row, index) => {
+		const id = ids[index];
+		if (index === 0 || id === undefined) return row;
+		hits.set(index + offset, id);
+		return withRunMark(row, room, t);
+	});
+}
+
+// The ↗ one space past the row's end, or in its last column when the row fills the card: never wider.
+function withRunMark(row, room, t) {
+	const mark = fg(t, "accent", RUN_MARK);
+	const width = visibleWidth(row);
+	if (width <= room - 2) return `${row} ${mark}`;
+	if (width === room - 1) return `${row}${mark}`;
+	return `${truncateToWidth(row, Math.max(0, room - 1), "…")}${mark}`;
+}
+
+// A left click on a row with a ↗ opens what it shows (`open(id)`); its press and release go nowhere either.
+// Anything else is the card's own (undefined).
+function runClick(event, hits, open) {
+	if (event?.button !== "left" || !["press", "release", "click"].includes(event.type) || !hits.has(event.y)) return undefined;
+	if (event.type === "click") open(hits.get(event.y));
+	return { handled: true };
+}
+
+function openRun(id) {
+	const ctx = liveCtx;
+	const open = () => {
+		try {
+			const file = id ? findActivityFile(PRESENCE_DIR, ctx?.sessionManager?.getSessionId?.()) : undefined;
+			if (file && openAgentPopup(ctx, { file, taskId: id, lib: runLib })) return;
+		} catch {
+			// gentle-pi's list below
+		}
+		piApi?.sendUserMessage?.("/gentle:agents", { expandPromptTemplates: true });
+	};
+	if (runLib || !runLibLoading) open();
+	else runLibLoading.then(open, open);
 }
 
 async function registerPalette(pi) {
@@ -2751,7 +2911,7 @@ function railRows(width, keys = [JOBS_CARD, "gentle-todo"]) {
 		const block = railBlocks.get(key);
 		const section = block?.draw(width);
 		if (!section?.length) continue;
-		hits.push({ component: block.component, start: rows.length, height: section.length });
+		hits.push({ component: block.component, click: block.click, start: rows.length, height: section.length });
 		rows.push(...section);
 	}
 	return { rows, hits };
@@ -2768,6 +2928,9 @@ function railMouse(event, hits, scrollTop) {
 	if (!hit || typeof hit.component?.handleMouse !== "function") return undefined;
 	const local = { ...event, x: Math.max(0, event.x - 2), height: hit.height, width: Math.max(1, event.width - 4) };
 	if (event.type === "wheel") return hit.component.handleMouse({ ...local, y: y - hit.start });
+	// A card's own rows that take clicks (a running job's ↗).
+	const own = hit.click?.({ ...local, y: y - hit.start });
+	if (own) return own;
 	if (event.type !== "click" || y - hit.start !== 1) return undefined;
 	for (const row of TITLE_ROWS) {
 		const result = hit.component.handleMouse({ ...local, y: row });
@@ -3323,6 +3486,7 @@ export default async function (pi) {
 	const chrome = await loadEngramChrome();
 	await registerPalette(pi);
 	await registerJobsCard(pi);
+	runLibLoading = loadRunLib(); // needed only once a ↗ is clicked
 	imagePaste = await loadImagePaste();
 
 	piThinking = typeof pi.getThinkingLevel === "function" ? () => pi.getThinkingLevel() : undefined;
