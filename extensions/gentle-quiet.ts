@@ -47,6 +47,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { activeRowStatus, findActivityFile, FinishedRecords, finishedRowStatus, JobLogs, jobRows, presenceDir, readActivity, rowRecord, rowTask, SessionFinder } from "./sidebar/run-data.ts";
+import { createMusic } from "./sidebar/music.ts";
 import { openAgentPopup, openJobPopup } from "./sidebar/run-popup.ts";
 import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
 
@@ -2019,6 +2020,32 @@ function jobsGlyphs(rows) {
 	});
 }
 
+// MAIN's Music card (./sidebar/music.ts): the cliamp player under Status and Context; with no player answering,
+// a "▶ Start cliamp" row when cliamp is installed, else left out. A click on Start starts cliamp headless, one on
+// its ♥, previous, play/pause, next or ⏻ control runs it, one on its category, track or artist
+// row opens the picker over Pi (liveCtx's ui.custom, placed by the click's screen cell); its rows start under the
+// title and the blank row, past the outline's top row.
+const MUSIC_CARD = "music"; // its railBlocks key
+function registerMusicCard() {
+	railBlocks.get(MUSIC_CARD)?.dispose?.();
+	const music = createMusic({ paint: (role, text) => fg(theme, role, text), requestRender: () => sidebar.tui?.requestRender?.(), ctx: () => liveCtx });
+	const outlined = (width) => config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
+	railBlocks.set(MUSIC_CARD, {
+		component: { handleMouse: () => undefined, invalidate() {} },
+		dispose: () => music.dispose(),
+		draw: (width) => {
+			const rows = music.rows(outlined(width) ? width - BOX_CHROME : width - 1);
+			return rows.length ? railCard("Music", rows, width, theme) : [];
+		},
+		// railMouse hands the column from the outline's left edge plus two, the card's row from its top.
+		click: (event) => {
+			if (event.type !== "click" || event.button !== "left") return undefined;
+			const open = outlined(event.width + 4);
+			return music.click(event.y - (open ? 3 : 2), event.x + (open ? 0 : 1), event) ? { handled: true, render: true } : undefined;
+		},
+	});
+}
+
 async function registerJobsCard(pi) {
 	if (typeof pi.events?.on !== "function") return;
 	const lib = await loadJobsCard();
@@ -3130,8 +3157,8 @@ const PROF_KEY = "alt+p";
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Jobs and Todos as outlined cards, one right under the other, with where each one sits. */
-function railRows(width, keys = [JOBS_CARD, "gentle-todo"]) {
+/** Music, Jobs and Todos as outlined cards, one right under the other, with where each one sits. */
+function railRows(width, keys = [MUSIC_CARD, JOBS_CARD, "gentle-todo"]) {
 	const rows = [];
 	const hits = [];
 	for (const key of keys) {
@@ -3714,6 +3741,7 @@ export default async function (pi) {
 	engramChrome = chrome;
 	await registerPalette(pi);
 	await registerJobsCard(pi);
+	registerMusicCard();
 	runLibLoading = loadRunLib(); // needed only once a ↗ is clicked
 	imagePaste = await loadImagePaste();
 
