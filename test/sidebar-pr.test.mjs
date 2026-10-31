@@ -334,19 +334,19 @@ test("the current branch's PR starts expanded with its detail; the others are co
 	const out = rows();
 	const at = lineOf("#20 ");
 	const detail = out.slice(at + 1, lineOf("#19"));
-	assert.match(detail[0], /^│ │   ✓ clean · ⧗ review required +│$/, "mergeability and review, indented under the row");
+	assert.match(detail[0], /^│ │     ✓ clean · ⧗ review required +│$/, "mergeability and review, indented under the title");
 	assert.ok(painted(row("✓ clean"), "success", "✓ clean"));
 	assert.ok(painted(row("✓ clean"), "warning", "⧗ review required"));
-	assert.ok(detail.some((line) => /│ │   CI +✓ passed │$/.test(line)));
-	assert.ok(detail.some((line) => /│ │   lint +✗ failed │$/.test(line)));
+	assert.ok(detail.some((line) => /│ │     CI +✓ passed │$/.test(line)));
+	assert.ok(detail.some((line) => /│ │     lint +✗ failed │$/.test(line)));
 	assert.ok(painted(row("lint"), "error", "✗ failed"));
-	assert.ok(detail.some((line) => /│ │   deploy +⧗ running │$/.test(line)), "a status context is a check");
-	assert.ok(detail.some((line) => /│ │   docs +– skipped │$/.test(line)));
-	assert.ok(detail.some((line) => /│ │   ● P1 Dialogs lose their keys +prof\.ts:212 │$/.test(line)), "a thread: severity, title, file:line");
+	assert.ok(detail.some((line) => /│ │     deploy +⧗ running │$/.test(line)), "a status context is a check");
+	assert.ok(detail.some((line) => /│ │     docs +– skipped │$/.test(line)));
+	assert.ok(detail.some((line) => /│ │     ● P1 Dialogs lose their keys +prof\.ts:212 │$/.test(line)), "a thread: severity, title, file:line");
 	assert.ok(painted(row("Dialogs"), "error", "P1"));
-	assert.ok(detail.some((line) => /│ │   ● Esc twice +prof\.ts:40 │$/.test(line)), "no severity, none drawn");
-	assert.ok(detail.some((line) => /│ │   \[ Fix 2 threads with agent \]  \[ Fix CI \] +│$/.test(line)), "gentle-pi's buttons, two apart");
-	assert.ok(detail.some((line) => /│ │   \[ Open \] +│$/.test(line)), "[ Open ] on a row of its own, under the agent's buttons");
+	assert.ok(detail.some((line) => /│ │     ● Esc twice +prof\.ts:40 │$/.test(line)), "no severity, none drawn");
+	assert.ok(detail.some((line) => /│ │     \[ Fix 2 threads with agent \]  \[ Fix CI \] +│$/.test(line)), "gentle-pi's buttons, two apart");
+	assert.ok(detail.some((line) => /│ │     \[ Open \] +│$/.test(line)), "[ Open ] on a row of its own, under the agent's buttons");
 	assert.ok(!out.some((line) => /Fix|P2|Older comments/.test(line) && out.indexOf(line) > lineOf("#19")), "#18 and #19 show no detail");
 	assert.ok(!out.some((line) => line.includes("Current PR can disappear")), "#18 collapsed");
 });
@@ -354,9 +354,9 @@ test("the current branch's PR starts expanded with its detail; the others are co
 test("no checks and no review decision are said once, dim", async () => {
 	const { row, rows } = await open({ git: stubGit({ branch: "feat/sidebar-pr-tab\n" }).git });
 	const facts = row("no review yet");
-	assert.match(plain(facts), /^│ │ ✓ clean · no review yet · no checks +│$/, "#18 has PRs under it: its detail carries the line");
+	assert.match(plain(facts), /^│ │   ✓ clean · no review yet · no checks +│$/, "#18 has PRs under it: its detail carries the line");
 	assert.ok(painted(facts, "dim", "no review yet") && painted(facts, "dim", "no checks"));
-	assert.ok(rows().some((line) => /│ │ ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)), "an outdated thread without a line: the file alone");
+	assert.ok(rows().some((line) => /│ │   ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)), "an outdated thread without a line: the file alone");
 });
 
 test("a click on a row opens or closes only that PR; several stay open; the choice survives a refresh", async () => {
@@ -396,22 +396,25 @@ test("an open PR with PRs under it carries the stack's line through its detail",
 	const { press, rows, lineOf, row, draw } = await open();
 	press("#18");
 	const out = rows();
-	const detail18 = out.slice(lineOf("#18") + 1, lineOf("#20 "));
+	const detail18 = out.slice(lineOf("#18") + 1, lineOf("#20 ") - 1); // the blank row before #20 left out
 	assert.ok(detail18.length >= 2, "#18's facts and buttons");
-	for (const line of detail18) assert.match(line, /^│ │ \S/, `a guide in #18's marker column, the text where it was: ${line}`);
-	assert.match(detail18[0], /^│ │ ✓ clean · no review yet · no checks +│$/);
-	assert.ok(detail18.some((line) => /^│ │ ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)));
-	assert.ok(detail18.some((line) => /^│ │ \[ Open \] +│$/.test(line)));
+	for (const line of detail18) assert.match(line, /^│ │   \S/, `a guide in #18's marker column, the text under the title: ${line}`);
+	assert.match(detail18[0], /^│ │   ✓ clean · no review yet · no checks +│$/);
+	assert.ok(detail18.some((line) => /^│ │   ● P1 File names break TREE +nerd-icons\.ts │$/.test(line)));
+	assert.ok(detail18.some((line) => /^│ │   \[ Open \] +│$/.test(line)));
+	assert.match(out[lineOf("#20 ") - 1], /^│ │ +│$/, "the blank row carries the line on to #20's ├");
 	assert.ok(painted(row("no review yet"), "dim", "│"), "the guide is dim like the stack's prefix");
 	assert.match(out[lineOf("#20 ")], /^│ ├ ▾ #20 /, "the line goes on into #20's ├");
-	const detail20 = out.slice(lineOf("#20 ") + 1, lineOf("#19"));
-	for (const line of detail20) assert.match(line, /^│ │   \S/, `#20 has no PR under it: the parent's line only: ${line}`);
+	const detail20 = out.slice(lineOf("#20 ") + 1, lineOf("#19") - 1);
+	for (const line of detail20) assert.match(line, /^│ │     \S/, `#20 has no PR under it: the parent's line only: ${line}`);
+	assert.match(out[lineOf("#19") - 1], /^│ │ +│$/, "the parent's line on to #19's └");
 	assert.match(out[lineOf("#19")], /^│ └ ▸ #19 /);
 	press("#19");
 	const after = rows();
-	const detail19 = after.slice(lineOf("#19") + 1, lineOf("#15"));
+	const detail19 = after.slice(lineOf("#19") + 1, lineOf("#15") - 1);
 	assert.ok(detail19.length >= 2);
-	for (const line of detail19) assert.match(line, /^│     \S/, `#19, the last child without children, has no guide: ${line}`);
+	for (const line of detail19) assert.match(line, /^│       \S/, `#19, the last child without children, has no guide: ${line}`);
+	assert.match(after[lineOf("#15") - 1], /^│ +│$/, "a plain blank row before a PR at the top");
 	assert.ok(draw().every((line) => visibleWidth(line) <= 59), "within the column");
 
 	const deep = answer([node({ number: 3, title: "c", base: "b", head: "c" }), node({ number: 2, title: "b", base: "a", head: "b" }), node({ number: 4, title: "d", base: "a", head: "d" }), node({ number: 1, title: "a", head: "a" })]);
@@ -420,18 +423,99 @@ test("an open PR with PRs under it carries the stack's line through its detail",
 	const lines = nested.rows();
 	const at = (n) => nested.lineOf(`#${n} `);
 	assert.deepEqual(nested.numbers(), [1, 2, 3, 4]);
-	for (const line of lines.slice(at(1) + 1, at(2))) assert.match(line, /^│ │ \S/, `#1's guide: ${line}`);
+	for (const line of lines.slice(at(1) + 1, at(2) - 1)) assert.match(line, /^│ │   \S/, `#1's guide: ${line}`);
+	assert.match(lines[at(2) - 1], /^│ │ +│$/);
 	assert.match(lines[at(2)], /^│ ├ ▾ #2 /);
-	const detail2 = lines.slice(at(2) + 1, at(3));
+	const detail2 = lines.slice(at(2) + 1, at(3) - 1);
 	assert.ok(detail2.length >= 2);
-	for (const line of detail2) assert.match(line, /^│ │ │ \S/, `#2's guide in its own marker's column, under #1's: ${line}`);
+	for (const line of detail2) assert.match(line, /^│ │ │   \S/, `#2's guide in its own marker's column, under #1's: ${line}`);
+	assert.match(lines[at(3) - 1], /^│ │ │ +│$/, "both lines run on to #3's └");
 	assert.match(lines[at(3)], /^│ │ └ ▸ #3 /, "the guide runs into #3's └");
 	assert.match(lines[at(4)], /^│ └ ▸ #4 /);
 	nested.press("#3 ");
 	nested.press("#4 ");
 	const deeper = nested.rows();
-	for (const line of deeper.slice(at(3) + 1, at(4))) assert.match(line, /^│ │     \S/, `#3 has no PR under it: ${line}`);
-	for (const line of deeper.slice(at(4) + 1, deeper.findIndex((l, i) => i > at(4) && /^└/.test(l)))) assert.match(line, /^│     \S/, `#4: ${line}`);
+	for (const line of deeper.slice(at(3) + 1, at(4) - 1)) assert.match(line, /^│ │       \S/, `#3 has no PR under it: ${line}`);
+	assert.match(deeper[at(4) - 1], /^│ │ +│$/, "#1's line on to #4's └, #2's ended");
+	const end = deeper.findIndex((l, i) => i > at(4) && /^└/.test(l));
+	for (const line of deeper.slice(at(4) + 1, end)) assert.match(line, /^│       \S/, `#4, no blank row at the end: ${line}`);
+});
+
+test("each PR reads as a block: bold title, quieter detail under it, dim labels, a blank guide row after it", async () => {
+	const { tab, press, rows, row, lineOf, draw } = await open();
+	press("#18");
+	const bold = "\x1b[1m";
+	for (const n of [18, 20, 19, 15]) {
+		const line = row(`#${n} `);
+		assert.equal(line.split(bold).length - 1, 1, `#${n}: one bold run`);
+		assert.ok(painted(line, "text", `${bold}feat`) || painted(line, "text", `${bold}chore`), `#${n}: the title bold in text`);
+		assert.ok(!line.includes(`${bold}#`) && painted(line, "accent", `#${n}`), `#${n}: the number not bold`);
+	}
+	const inner = rows().map((line) => line.slice(2, -2).trimEnd());
+	const card = inner.slice(inner.findIndex((line) => line.includes("#18")), -1);
+	const expected = [
+		/^▾ #18 feat\(sidebar\): PR tab, .*… +⚠ 4 threads$/,
+		/^│   ✓ clean · no review yet · no checks$/,
+		/^│   Threads 4$/,
+		/^│   ● P1 File names break TREE +nerd-icons\.ts$/,
+		/^│   ● P1 Another fork's PR appears +pr-data\.ts:200$/,
+		/^│   ● P2 Current PR can disappear +pr-data\.ts:188$/,
+		/^│   ● Older comments go missing +pr-data\.ts:29$/,
+		/^│   \[ Open \]$/,
+		/^│$/,
+		/^├ ▾ #20 feat\(sidebar\): PROF .*… +◉ ✗ CI 1\/3$/,
+		/^│     ✓ clean · ⧗ review required$/,
+		/^│     Checks 1\/3$/,
+		/^│     CI +✓ passed$/,
+		/^│     lint +✗ failed$/,
+		/^│     deploy +⧗ running$/,
+		/^│     docs +– skipped$/,
+		/^│     Threads 2$/,
+		/^│     ● P1 Dialogs lose their keys +prof\.ts:212$/,
+		/^│     ● Esc twice +prof\.ts:40$/,
+		/^│     \[ Fix 2 threads with agent \]  \[ Fix CI \]$/,
+		/^│     \[ Open \]$/,
+		/^│$/,
+		/^└ ▸ #19 feat\(sidebar\): GIT .*… +✓ CI 1\/1 ✓ ready$/,
+		/^▸ #15 chore: bump pi-tui +✗ CI 0\/2$/,
+	];
+	assert.equal(card.length, expected.length, card.join("\n"));
+	card.forEach((line, i) => assert.match(line, expected[i]));
+	assert.ok(draw().every((line) => visibleWidth(line) <= 59), "within the column");
+
+	assert.ok(painted(row("Checks 1/3"), "dim", "Checks 1/3") && painted(row("Threads 2"), "dim", "Threads 2"), "dim labels");
+	assert.ok(painted(row("lint"), "muted", "lint") && painted(row("Dialogs"), "muted", "Dialogs lose their keys"), "check names and thread titles muted");
+	assert.ok(painted(row("lint"), "error", "✗ failed") && painted(row("Dialogs"), "error", "P1") && painted(row("Dialogs"), "warning", "●"), "badges and severities keep their colors");
+	assert.ok(painted(row("[ Open ]"), "accent", "[ Open ]"));
+	assert.ok(!draw().some((line) => line.includes(theme.fg("text", "lint")) || line.includes(theme.fg("text", "Dialogs"))), "no detail in text");
+
+	opened.length = 0;
+	for (const label of ["Checks 1/3", "Threads 2", "Threads 4"]) assert.equal(tab.handleClick(lineOf(label), "left", rows()[lineOf(label)].indexOf(label) + 2), false, `${label}: not clickable`);
+	for (const line of [lineOf("#20 ") - 1, lineOf("#19") - 1]) for (const x of [2, 6, 20]) assert.equal(tab.handleClick(line, "left", x), false, "the blank rows do nothing");
+	assert.equal(press("lint"), true);
+	assert.equal(press("File names break TREE"), true);
+	assert.equal(press("Dialogs lose their keys"), true);
+	assert.equal(press("[ Open ]"), true, "#18's [ Open ]");
+	const open20 = rows().findIndex((line, i) => i > lineOf("#20 ") && line.includes("[ Open ]"));
+	assert.equal(tab.handleClick(open20, "left", rows()[open20].indexOf("[ Open ]") + 3), true);
+	assert.deepEqual(opened, ["https://ci/lint", `${url(0)}#discussion_r21`, `${url(0)}#discussion_r23`, url(18), url(20)]);
+	assert.ok(/▾ #18/.test(rows()[lineOf("#18")]) && /▾ #20/.test(rows()[lineOf("#20 ")]));
+
+	press("#19");
+	press("#15 ");
+	const all = rows();
+	assert.match(all[lineOf("#15 ") - 1], /^│ +│$/, "a blank row before a top-level PR");
+	assert.match(all[all.length - 2], /\[ Open \]/, "no blank row after the last PR");
+	assert.ok(!all.some((line) => /Threads/.test(line) && all.indexOf(line) > lineOf("#19") && all.indexOf(line) < lineOf("#15 ")), "#19 without threads: no Threads label");
+	assert.ok(all.slice(lineOf("#19"), lineOf("#15 ")).some((line) => /^│       Checks 1\/1 +│$/.test(line)));
+	assert.ok(!all.slice(lineOf("#18"), lineOf("#20 ")).some((line) => line.includes("Checks")), "#18 without checks: no Checks label");
+
+	const quiet = node({ number: 5, title: "skipped", head: "q", checks: [run("docs", "COMPLETED", "SKIPPED")], threads: [thread("one"), thread("two")], threadsTotal: 150 });
+	const solo = await open({ gh: answer([quiet]), git: stubGit({ branch: "q\n" }).git });
+	const soloRows = solo.rows();
+	assert.ok(soloRows.some((line) => /^│     Checks +│$/.test(line)), "only skipped checks: the label alone");
+	assert.ok(soloRows.some((line) => /^│     Threads 2\+ +│$/.test(line)), "threads not all read: 2+");
+	assert.match(soloRows[soloRows.length - 2], /\[ Open \]/, "one PR: no blank row at the end");
 });
 
 test("a branch change goes back to the new branch's PR", async () => {
@@ -507,7 +591,7 @@ test("a draft in the editor is kept: the prompt goes after it", async () => {
 
 test("without Pi's editor there is no agent button; [ Open ] stays", async () => {
 	const { rows } = await open({ editor: null });
-	assert.ok(rows().some((line) => /│ │   \[ Open \] +│$/.test(line)));
+	assert.ok(rows().some((line) => /│ │     \[ Open \] +│$/.test(line)));
 	assert.ok(!rows().some((line) => line.includes("Fix")));
 });
 
