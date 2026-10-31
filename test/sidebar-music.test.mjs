@@ -54,7 +54,6 @@ const tracksArgs = (id, provider = "cliamp") => ["remote", "call", "provider.tra
 // What reached the favorites store: a toggle of { path, title, artist, album }, and the reads of its paths.
 const toggled = ({ path, title, artist, album }) => ["toggle", { path, title, artist, album }];
 const READ_FAVORITES = ["favorites"];
-const queueArgs = (index) => ["remote", "call", "queue.play", "--params", `{"index":${index}}`, "--wait"];
 // Each list's tracks as provider.tracks answers ([title, artist, path after the host]); the first one has no index,
 // and none says whether it is a favorite, as cliamp sends them: the Favorites list says it.
 const TRACKS = {
@@ -304,7 +303,7 @@ test("a track of another category is loaded at its index, then the status is rea
 	}
 });
 
-test("a track of the category playing is played from the queue without loading; a click picks too", async (t) => {
+test("a track of the category playing is loaded at its index too, never picked from a live queue that may hold another list; a click picks", async (t) => {
 	const { picker, calls, popup, shown } = await openPicker(t, player().reply);
 	await settled(picker, ["\r"]); // Lofi, the category playing
 	const out = shown();
@@ -314,12 +313,12 @@ test("a track of the category playing is played from the queue without loading; 
 	await settle();
 	assert.equal(popup.done.length, 1);
 	const ran = calls.slice(listed);
-	assert.deepEqual(ran.slice(0, 2), [queueArgs(2), ["status", "--json"]]);
-	assert.ok(!ran.some((args) => args[2] === "provider.load" || args[0] === "play"), "no load, already playing");
+	assert.deepEqual(ran.slice(0, 2), [loadArgs("lofi", 2), ["status", "--json"]]);
+	assert.ok(!ran.some((args) => args[2] === "queue.play" || args[0] === "play"), "no queue.play: the live queue may be Favorites or another list");
 });
 
-test("a failed load or queue.play closes the pop-up and leaves the card as it was", async (t) => {
-	for (const [options, keys, expected] of [[{ load: false }, ["j", "j", "\r", "\r"], [loadArgs("synthwave", 0)]], [{ queue: false }, ["\r", "\r"], [queueArgs(1)]]]) {
+test("a failed load closes the pop-up and leaves the card as it was", async (t) => {
+	for (const [options, keys, expected] of [[{ load: false }, ["j", "j", "\r", "\r"], [loadArgs("synthwave", 0)]], [{ load: false }, ["\r", "\r"], [loadArgs("lofi", 1)]]]) {
 		const { picker, calls, popup, rows } = await openPicker(t, player(options).reply);
 		await settled(picker, keys.slice(0, -1));
 		const listed = calls.length;

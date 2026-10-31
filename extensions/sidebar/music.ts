@@ -34,8 +34,8 @@
 // provider's (for Favorites) once the player first answers; a track from no known category shows "Playlists". A
 // click on that row opens a picker over Pi (./music-picker.ts): Favorites and the categories, then a list's
 // tracks; a click on the row under it, "<artist> · <title>" (the artist muted, the title as cliamp gives it, one
-// row cut with … when it does not fit), opens the tracks of the category playing. Picking a track of the
-// category playing runs queue.play at its index; any other runs provider.load at its index, which plays it. Then
+// row cut with … when it does not fit), opens the tracks of the category playing. Picking a track runs
+// provider.load at its index, which plays it (never queue.play: the live queue may hold another list). Then
 // the status is read and, when the player is not playing, `cliamp play` runs. A failure changes nothing.
 // @ts-nocheck
 
@@ -196,7 +196,6 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 		favorites: undefined, // the local provider's Favorites
 		asked: false,
 		lines: undefined, // where the category, the track and the artist rows are
-		loaded: undefined, // "provider/id" of the last provider.load from here
 		loved: new Set(), // the paths in favorites.toml
 		notice: undefined, // { text, until }: why the last ♥ or ⏻ did not work, or that cliamp did not start
 		installed: undefined, // whether `cliamp --version` answered; undefined until asked
@@ -357,14 +356,12 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 
 	const tracksOf = async (playlist) => parseTracks(await ask(remote("provider.tracks", { provider: playlist.provider, playlist: playlist.id, limit: 500 })));
 
-	// Track `index` of `playlist`: queue.play when it is the category already playing, else provider.load at that
-	// index; then the status, and `play` when the player is not playing. A failure stops there.
+	// Track `index` of `playlist`: provider.load at that index, even for the category playing, since the live queue
+	// may hold another list (Favorites, loaded in cliamp or another Pi window); then the status, and `play` when the
+	// player is not playing. A failure stops there.
 	const playTrack = async (playlist, index) => {
-		const key = `${playlist.provider}/${playlist.id}`;
-		const queued = playlist.provider === "cliamp" && playlist.id === state.status?.playlist && (!state.loaded || state.loaded === key);
-		const answer = queued ? await ask(remote("queue.play", { index })) : await ask(remote("provider.load", { provider: playlist.provider, playlist: playlist.id, index }));
+		const answer = await ask(remote("provider.load", { provider: playlist.provider, playlist: playlist.id, index }));
 		if (!jobResult(answer)) return;
-		if (!queued) state.loaded = key;
 		const now = parseStatus(await ask(["status", "--json"]));
 		if (now) {
 			state.status = now;
