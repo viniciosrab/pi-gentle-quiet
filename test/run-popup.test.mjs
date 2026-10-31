@@ -895,22 +895,22 @@ test("the session is drawn in order: the prompt folded and dim, thinking as one 
 	const raw = sessionLines(log.items, theme, 60, stubTool);
 	const rows = raw.map((row) => plain(row).trimEnd());
 	assert.deepEqual(rows, [
-		" › Implement T34 …",
+		"› Implement T34 …",
 		"",
-		" Thinking...",
+		"Thinking...",
 		"",
-		" TOOL bash done",
+		"TOOL bash done",
 		"",
-		" Spec read. Writing the tests.",
+		"Spec read. Writing the tests.",
 		"",
-		" TOOL read done",
+		"TOOL read done",
 		"",
-		" TOOL bash error",
+		"TOOL bash error",
 		"",
-		" TOOL bash running",
+		"TOOL bash running",
 	]);
 	assert.ok(painted(raw[0], "dim"), "the prompt dim");
-	assert.ok(painted(raw[2], "dim", "\x1b[3mThinking...") && plain(raw[2]) === " Thinking...", "thinking: one dim italic Thinking... row, as the main view");
+	assert.ok(painted(raw[2], "dim", "\x1b[3mThinking...") && plain(raw[2]) === "Thinking...", "thinking: one dim italic Thinking... row, as the main view");
 	assert.ok(raw[6].includes("\x1b[1mread\x1b[22m"), "the text through Pi's Markdown");
 	const broken = sessionLines(log.items, theme, 60, () => { throw new Error("boom"); }).map(plain);
 	assert.ok(broken.some((row) => row.includes("bash")), "a failing drawing falls back to the tool's name");
@@ -931,10 +931,10 @@ test("with the session file found, the popup draws it under the task header inst
 	const sessionFile = writeSession(sessions, "popup.jsonl", sessionText("p"));
 	const { body, component } = sessionPopup({ finder: { find: () => sessionFile } });
 	assert.match(plain(component.render(80)[1]), /gentle-ai-worker · running/);
-	assert.deepEqual(body(), [" › Implement T34 …", " Thinking...", " TOOL bash done", " Spec read. Writing the tests.", " TOOL read done", " TOOL bash error", " TOOL bash running"]);
+	assert.deepEqual(body(), ["› Implement T34 …", "Thinking...", "TOOL bash done", "Spec read. Writing the tests.", "TOOL read done", "TOOL bash error", "TOOL bash running"]);
 	appendFileSync(sessionFile, `${message({ role: "assistant", content: [{ type: "text", text: "All green." }] }, "e9")}\n`);
 	component.refresh();
-	assert.equal(body().at(-1), " All green.", "appended entries show on the next poll");
+	assert.equal(body().at(-1), "All green.", "appended entries show on the next poll");
 });
 
 test("without a session file, or before it has entries, the popup draws the presence thread as before", () => {
@@ -946,7 +946,7 @@ test("without a session file, or before it has entries, the popup draws the pres
 	assert.ok(early.body().includes("Tool · bash · Complete"), "no entries yet");
 	writeFileSync(empty, sessionText("e"));
 	early.component.refresh();
-	assert.ok(early.body().includes(" TOOL bash done"), "then the session");
+	assert.ok(early.body().includes("TOOL bash done"), "then the session");
 	const failing = sessionPopup({ finder: { find: () => { throw new Error("boom"); } } });
 	assert.ok(failing.body().includes("Tool · bash · Complete"), "a finder that fails");
 });
@@ -960,7 +960,7 @@ test("a finished task's popup comes from its record: finished or failed in the h
 	const out = done.component.render(80).map(plain);
 	assert.match(out[1], /^▏ gentle-ai-explore · finished · claude-bridge\/claude-opus-5-5 · 180s +▕$/);
 	assert.match(out[2], /map files/);
-	assert.ok(done.body().includes(" TOOL bash error"));
+	assert.ok(done.body().includes("TOOL bash error"));
 	const failed = sessionPopup({ record: { ...base, status: "failed" }, finder: { find: () => sessionFile } });
 	assert.match(failed.component.render(80).map(plain)[1], / · failed · /);
 	const unreadable = sessionPopup({ record: { ...base, status: "completed" }, finder: { find: () => undefined } });
@@ -1019,8 +1019,10 @@ function mainRows(tool, name, args, result, context = {}) {
 	const renderers = tool(name, {});
 	const call = renderers.renderCall(args, theme).render(76);
 	const done = renderers.renderResult(result ?? { content: [] }, { isPartial: !result }, theme, { args, toolCallId: context.id, isError: context.isError, durationMs: context.durationMs }).render(76);
-	return [...call, ...done].map((row) => plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, ""));
+	return [...call, ...done].map((row) => popupEdge(plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, "")));
 }
+// The pop-up draws a row of the conversation without its one-column margin, at the header's column.
+const popupEdge = (row) => row.replace(/^ /, "");
 
 test("a running subagent's popup draws its session's tool calls with the main view's quiet rows", async () => {
 	const items = [{ kind: "tool", callId: "toolu_main1", name: "bash", output: "", running: false, isError: false }];
@@ -1042,10 +1044,10 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	];
 	const shown = body.filter((row) => expected.includes(row));
 	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
-	assert.ok(expected.includes(" $ git status --short") && expected.includes(" └ ✗ exit 1") && expected.includes(" └ running…"), "the rows compared are the quiet ones");
-	assert.ok(body.includes(" Thinking..."), "thinking folded as the main view shows it");
+	assert.ok(expected.includes("$ git status --short") && expected.includes("└ ✗ exit 1") && expected.includes("└ running…"), "the rows compared are the quiet ones");
+	assert.ok(body.includes("Thinking..."), "thinking folded as the main view shows it");
 	assert.ok(!body.some((row) => row.includes("Reading the spec first.")), "the thinking text itself is not shown");
-	assert.ok(body.includes(" Spec read. Writing the tests."), "text");
+	assert.ok(body.includes("Spec read. Writing the tests."), "text");
 	assert.ok(!body.some((row) => row.startsWith("Tool · ")), "not the presence thread");
 });
 
@@ -1066,6 +1068,32 @@ test("a finished Agents row with a task record of this session gets ↗ and open
 	const popupRows = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
 	assert.match(popupRows[1], /gentle-ai-explore · finished · .* · 71s/, "this session's record, not the newer one of another session");
 	assert.ok(popupRows.some((row) => row.includes("└ ✗ exit 1")), "its session in the quiet look");
+});
+
+test("a finished subagent's popup starts its prompt, tool rows and answer at the header's column", async () => {
+	const p = "toolu_edge_";
+	const sessionFile = writeSession(SESSIONS_ROOT, "2026-10-31T05-00-00-000Z_edge.jsonl", [
+		...sessionEntries(p).slice(0, 3),
+		message({ role: "user", content: [{ type: "text", text: "Test run only." }] }, "e1"),
+		message({ role: "assistant", content: [{ type: "toolCall", id: `${p}1`, name: "read", arguments: { path: "/srv/app/package.json" } }] }, "e2"),
+		message({ role: "toolResult", toolCallId: `${p}1`, toolName: "read", content: [{ type: "text", text: "a\nb" }], isError: false }, "e3"),
+		message({ role: "assistant", content: [{ type: "text", text: "The package is pi-gentle-quiet." }] }, "e4"),
+	].join("\n") + "\n");
+	writeRecord(TASKS_ROOT, { id: "edge-1", agent: "gentle-ai-explore", label: "test run for display", status: "completed", sessionPath: sessionFile, parentSessionId: "card-edge", createdAt: now - 20_000, startedAt: now - 20_000, endedAt: now - 10_000 });
+	const { rows, mouse, opened } = await agentsCard("card-edge");
+	rows();
+	mouse("click", 4);
+	assert.equal(opened.length, 1);
+	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
+	const out = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain).map((row) => row.slice(1, -1));
+	const column = (row) => row.length - row.trimStart().length;
+	assert.match(out[1], /gentle-ai-explore · finished/);
+	const edge = column(out[1]);
+	assert.equal(column(out[2]), edge, "the subtitle");
+	const find = (pattern) => out.find((row) => pattern.test(row)) ?? assert.fail(`no ${pattern} in:\n${out.join("\n")}`);
+	for (const pattern of [/› Test run only\./, /read .*package\.json/, /└ /, /The package is pi-gentle-quiet\./]) {
+		assert.equal(column(find(pattern)), edge, `${pattern} at the header's column:\n${out.join("\n")}`);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -1104,7 +1132,7 @@ function mainWebRows(tool, name, args, result, isError) {
 	const call = renderers.renderCall(args, theme, { isPartial: false, isError, state }).render(76);
 	const done = renderers.renderResult(result, { isPartial: false }, theme, { args, isError, state }).render(76);
 	clearInterval(state.webBlink);
-	return [...call, ...done].map((row) => plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, ""));
+	return [...call, ...done].map((row) => popupEdge(plain(row).trimEnd().replace(/\s+ctrl\+o to expand$/, "")));
 }
 
 async function t35Popup(sessionId, p, calls) {
@@ -1133,12 +1161,12 @@ test("web, memory and codemode calls in the popup are the rows the main conversa
 		...mainRows(tool, "mem_save", memSave.arguments, memSave.result),
 		...mainRows(tool, "codemode", codemode.arguments, codemode.result, { durationMs: codemode.result.durationMs }),
 	];
-	assert.ok(expected.includes(' ● search "pi tui overlay"') && expected.includes("   └ 3 sources"), `web rows: ${expected.join(" | ")}`);
-	assert.ok(expected.includes(" \u{100000} search “sidebar tabs”") && expected.includes(" └ ✓ 3 results"), `memory rows: ${expected.join(" | ")}`);
+	assert.ok(expected.includes('● search "pi tui overlay"') && expected.includes("  └ 3 sources"), `web rows: ${expected.join(" | ")}`);
+	assert.ok(expected.includes("\u{100000} search “sidebar tabs”") && expected.includes("└ ✓ 3 results"), `memory rows: ${expected.join(" | ")}`);
 	const { body, painted: rows } = await draw();
 	const shown = body.filter((row) => expected.includes(row));
 	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
-	assert.ok(!body.some((row) => /^ (web_search|fetch_content|mem_search|mem_save)$/.test(row)), "no bare tool name");
+	assert.ok(!body.some((row) => /^(web_search|fetch_content|mem_search|mem_save)$/.test(row)), "no bare tool name");
 	assert.ok(rows.some((row) => row.includes("\x1b[38;2;78;186;101m●")), "the done web call's fixed green dot");
 	assert.ok(rows.some((row) => row.includes("\x1b[38;2;255;107;128m●")), "the failed one's fixed red dot");
 });
@@ -1154,9 +1182,9 @@ test("a running web call in the popup keeps a steady grey dot, and no call of th
 	const clock = t.mock.method(Date, "now", () => 600); // the main view's blink is off at 600 ms
 	const { body, painted: rows } = await draw();
 	clock.mock.restore();
-	assert.ok(body.includes(' ● search "still going"'), body.join("\n"));
+	assert.ok(body.includes('● search "still going"'), body.join("\n"));
 	assert.ok(rows.some((row) => painted(row, "dim", "●")), "the dot lit and grey");
-	assert.ok(body.includes("   └ searching 1/1"), "pi-web-access's progress line");
+	assert.ok(body.includes("  └ searching 1/1"), "pi-web-access's progress line");
 	assert.ok(!body.some((row) => /ctrl\+o/.test(row)), "no expand hint in the popup");
 	assert.match(plain(done.render(76)[0]).trimEnd(), /ctrl\+o to expand$/, "the main view keeps its hint");
 });
@@ -1164,6 +1192,6 @@ test("a running web call in the popup keeps a steady grey dot, and no call of th
 test("a web call Pi has not drawn in the main view yet still gets the dot and its name in the popup", async () => {
 	const { draw } = await t35Popup("card-t35-fresh", "toolu_t35f_", [{ name: "source_check", arguments: { query: "is pi fast" }, result: { content: [{ type: "text", text: "2 sources agree" }] } }]);
 	const { body } = await draw();
-	assert.ok(body.some((row) => /^ ● .*source.check.*is pi fast/.test(row)), body.join("\n"));
-	assert.ok(body.includes("   └ 2 sources agree"), body.join("\n"));
+	assert.ok(body.some((row) => /^● .*source.check.*is pi fast/.test(row)), body.join("\n"));
+	assert.ok(body.includes("  └ 2 sources agree"), body.join("\n"));
 });

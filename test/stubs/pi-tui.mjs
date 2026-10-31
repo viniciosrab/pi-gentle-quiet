@@ -1,7 +1,8 @@
 // Minimal stand-in for @earendil-works/pi-tui: just what gentle-quiet imports.
 const strip = (text) => text.replace(/\x1b\[[0-9;:]*m/g, "");
 
-export const visibleWidth = (text) => [...strip(text)].length;
+// Like Pi's, control characters take no column.
+export const visibleWidth = (text) => [...strip(text).replace(/[\x00-\x08]/g, "")].length;
 
 // Word wrap on visible width; escape sequences stay attached to their words.
 export function wrapTextWithAnsi(text, width) {
@@ -94,7 +95,9 @@ export class Image {
 }
 
 // Like Pi's: Markdown rendered to rows as wide as `width`; headings and emphasis lose their markers and go
-// through the theme. globalThis.testMarkdownBroken makes it throw, as a Pi without it would fail.
+// through the theme. As in Pi 1.4.0, a code block keeps its fence lines (through codeBlockBorder) and its
+// code indented by the theme's codeBlockIndent (two by default), and a list item gets a "- " or "<n>. "
+// marker (through listBullet), four columns per nesting level. globalThis.testMarkdownBroken makes it throw, as a Pi without it would fail.
 export class Markdown {
 	constructor(text, paddingX, paddingY, theme) {
 		if (globalThis.testMarkdownBroken) throw new Error("no markdown here");
@@ -108,10 +111,24 @@ export class Markdown {
 				.replace(/\*(.+?)\*/g, (_, x) => t.italic(x))
 				.replace(/`(.+?)`/g, (_, x) => t.code(x));
 		const rows = [];
+		let fenced = false;
 		for (const line of this.text.split("\n")) {
+			const fence = line.match(/^```(.*)$/);
+			if (fence) {
+				rows.push(t.codeBlockBorder(fenced ? "```" : `\`\`\`${fence[1]}`));
+				fenced = !fenced;
+				continue;
+			}
+			if (fenced) {
+				rows.push(`${t.codeBlockIndent ?? "  "}${t.codeBlock(line)}`);
+				continue;
+			}
 			const heading = line.match(/^#{1,6} (.*)$/);
-			const styled = heading ? t.heading(t.bold(heading[1])) : inline(line);
-			rows.push(...wrapTextWithAnsi(styled, width));
+			const item = line.match(/^( *)([-*+]|\d+\.) (.*)$/);
+			const marker = item && (/\d/.test(item[2]) ? `${item[2]} ` : "- ");
+			const indent = item ? "    ".repeat(Math.floor(item[1].length / 2)) : "";
+			const styled = heading ? t.heading(t.bold(heading[1])) : item ? t.listBullet(marker) + inline(item[3]) : inline(line);
+			rows.push(...wrapTextWithAnsi(styled, width).map((row) => indent + row));
 		}
 		while (rows.length && rows.at(-1) === "") rows.pop();
 		return rows.map((row) => row + " ".repeat(Math.max(0, width - visibleWidth(row))));

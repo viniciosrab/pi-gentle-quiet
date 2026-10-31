@@ -235,6 +235,47 @@ test("m toggles a Markdown file between rendered and numbered source", async () 
 	assert.match(out.at(-2), / m source /);
 });
 
+const LONG = "x".repeat(80);
+const SYNTAX = `# Install\n\n\`\`\`sh\npi install it\n  --flag\n\`\`\`\n\nRun \`/gentle-quiet\` once.\n\n\`\`\`\n${LONG}\n\`\`\`\n\n- one\n  - nested\n- two\n\n1. first\n2. second\n`;
+
+test("a rendered Markdown file frames code blocks without fences and shows lists with bullets", async () => {
+	const { component, text, draw } = await preview(SYNTAX, { name: "README.md", relPath: "README.md" });
+	const body = text(70).slice(4, -2).map((row) => row.slice(2, -2));
+	assert.ok(!body.some((row) => row.includes("```")), "no fence lines");
+	assert.ok(!body.some((row) => /^ *[-*+] /.test(row)), "no raw list markers");
+	assert.ok(!body.some((row) => row.includes("`")), "no inline code backticks");
+	const framed = (code) => `│ ${code.padEnd(62)} │`;
+	assert.deepEqual(body.map((row) => (row.startsWith("│") || row.startsWith("┌") || row.startsWith("└") ? row : row.trimEnd())), [
+		"Install",
+		"",
+		`┌ sh ${"─".repeat(60)}┐`,
+		framed("pi install it"),
+		framed("  --flag"),
+		`└${"─".repeat(64)}┘`,
+		"",
+		"Run /gentle-quiet once.",
+		"",
+		`┌${"─".repeat(64)}┐`,
+		framed(`${"x".repeat(61)}…`),
+		`└${"─".repeat(64)}┘`,
+		"",
+		"• one",
+		"    • nested",
+		"• two",
+		"",
+		"1. first",
+		"2. second",
+	]);
+	assert.ok(body.slice(2, 6).every((row) => [...row].length === 66), "the frame spans the content width");
+	const top = draw(70)[6];
+	assert.ok(top.includes(theme.fg("dim", "sh")), "the language dim");
+	assert.ok(top.includes(theme.fg("border", "┌ ")) && draw(70)[9].includes(theme.fg("border", `└${"─".repeat(64)}┘`)), "the frame in the border color");
+	component.handleInput("m");
+	const source = text(70).slice(4, -2).join("\n");
+	assert.match(source, / 3 ```sh/, "m still shows the raw source");
+	assert.match(source, /14 - one/);
+});
+
 test("toggling with m starts the other view from its top", async () => {
 	const long = Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}.\n`).join("\n");
 	const { component, text } = await preview(long, { name: "long.md", rows: 30 });
