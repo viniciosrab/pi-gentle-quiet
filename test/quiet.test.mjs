@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, painted, picker, readConfig, theme, writeConfig } from "./helpers.mjs";
+import { load, lines, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
 const text = (value, extra = {}) => ({ content: [{ type: "text", text: value }], ...extra });
 const native = { renderCall: () => ({ render: () => ["NATIVE"] }), renderResult: () => ({ render: () => ["\x1b[48;5;2mfull\x1b[49m", "output"] }) };
@@ -158,4 +158,29 @@ test("the tones option cycles claude → theme → soft → claude", async () =>
 	await loaded.commands["gentle-quiet"].handler("", loaded.ctx);
 	assert.equal(readConfig().tools.tones, "claude");
 	writeConfig({});
+});
+
+test("a long $ command fills the width and wraps to two rows, like Claude Code", async () => {
+	const { tool } = await load();
+	const command = Array.from({ length: 40 }, (_, i) => `step${i}`).join(" && ");
+	const rows = tool("bash", native).renderCall({ command }, theme).render(120).map((row) => plain(row));
+	assert.equal(rows.length, 2, "two rows, the second hanging under the command");
+	assert.ok(rows.every((row) => row.length <= 120), "no row passes the width");
+	assert.ok(rows[0].length > 110, "the first row uses the full width, not 100 characters");
+	assert.ok(rows[0].startsWith(" $ step0 && "));
+	assert.match(rows[1], /^   \S/, "the second row lines up under the command, past \"$ \"");
+	assert.ok(rows[1].endsWith("…"), "the rest is cut with an ellipsis");
+	assert.deepEqual(tool("bash", native).renderCall({ command: "ls" }, theme).render(120).map((row) => plain(row)), [" $ ls"]);
+});
+
+test("a long path stays on the tool's row and goes on under it, never alone on its own row", async () => {
+	const { tool } = await load();
+	const file = `/tmp/${"segment-".repeat(15)}end/images/4.png`;
+	const rows = tool("read", native).renderCall({ path: file }, theme).render(80).map((row) => plain(row));
+	assert.ok(rows[0].startsWith(" read /tmp/segment-"), "the path starts on the tool's row");
+	assert.equal(rows[0].length, 80, "and fills it to the width");
+	assert.equal(rows.length, 2);
+	assert.match(rows[1], /^ {6}\S/, "the rest lines up under the path, past \"read \"");
+	assert.equal(rows.map((row, i) => (i ? row.trimStart() : row.slice(6))).join(""), file);
+	assert.deepEqual(tool("read", native).renderCall({ path: "/tmp/a.ts" }, theme).render(80).map((row) => plain(row)), [" read /tmp/a.ts"]);
 });

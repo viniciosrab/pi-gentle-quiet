@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, picker, theme, writeConfig } from "./helpers.mjs";
+import { load, lines, picker, plain, theme, writeConfig } from "./helpers.mjs";
 
 const row = (text) => ({ render: () => [text] });
 
@@ -172,4 +172,18 @@ test("the auto scrollbar gets a column of its own, so it never paints over a too
 	assert.equal(new ScrollView({}, { scrollbar: "always" }).getContentWidth(80), 79, "always already had it");
 	assert.equal(new ScrollView({}, { scrollbar: "hidden" }).getContentWidth(80), 80, "no scrollbar, no column");
 	assert.equal(new ScrollView({}, { scrollbar: "auto" }).getContentWidth(1), 1);
+});
+
+test("the scrollbar hugs the right edge, in line with the editor's rules, instead of the cell's middle", async () => {
+	await load();
+	const { ScrollView } = await import("@earendil-works/pi-tui");
+	for (const options of [{}, { scrollbarTrackStyle: (text) => `<${text}>`, scrollbarThumbStyle: (text) => `[${text}]` }]) {
+		const view = new ScrollView({}, { scrollbar: "auto", ...options });
+		view.getContentWidth(80); // Pi asks it on every render, before it paints the scrollbar
+		view.getContentWidth(80);
+		const custom = !!options.scrollbarTrackStyle;
+		assert.equal(plain(view.scrollbarTrackStyle("│")), custom ? "<▕>" : "▕", "the track is the right eighth block, styled once");
+		assert.equal(plain(view.scrollbarThumbStyle("┃")), custom ? "[▐]" : "▐", "the idle thumb is the right half block");
+		assert.equal(plain(view.scrollbarThumbStyle("█")), custom ? "[█]" : "█", "the dragged thumb stays a full block");
+	}
 });

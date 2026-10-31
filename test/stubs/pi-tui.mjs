@@ -57,6 +57,9 @@ export class ScrollView {
 		this.options = options;
 		this.scrollTop = 0;
 		this.scrollbar = options.scrollbar ?? "auto";
+		// Like Pi's: the painter hands these the glyph it draws ("│" track, "┃" or "█" thumb).
+		this.scrollbarTrackStyle = options.scrollbarTrackStyle ?? ((text) => `\x1b[90m${text}\x1b[39m`);
+		this.scrollbarThumbStyle = options.scrollbarThumbStyle ?? ((text) => `\x1b[37m${text}\x1b[39m`);
 	}
 	// Like Pi's: only an "always" scrollbar keeps a column of its own; "auto" paints over the content's last column.
 	getContentWidth(width) {
