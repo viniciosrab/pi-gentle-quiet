@@ -74,7 +74,8 @@ test("title, language, path, numbered lines and the footer range in a square out
 	assert.match(out[5], /^▏   2 const line2 = 2;/);
 	// 30 rows * 85% = 25 rows for the overlay, 6 of them chrome: 19 lines of code.
 	assert.equal(out.length, 25);
-	assert.match(out.at(-2), /^▏ Esc close · e edit · ↑↓ PgUp\/PgDn Home\/End · 1-19 \/ 168 +▕$/);
+	assert.match(out.at(-2), /^▏ Esc close · e edit · ↑↓ PgUp\/PgDn Home\/End · 1-18 \/ 168 +▕$/);
+	assert.match(out.at(-3), /^▏ +▕$/, "a blank row between the content and the footer");
 	const raw = draw(80);
 	assert.ok(painted(raw[0], "border", "🭽"), "outline in the border role");
 	assert.ok(painted(raw[4], "border", "▏") && painted(raw[4], "border", "▕"), "sides in the border role");
@@ -89,29 +90,29 @@ test("scroll keys move the range: arrows, j/k, pages, Home/End and g/G", async (
 	const { component, text, calls } = await preview(lines(168), { rows: 30 });
 	const range = () => text(80).at(-2).match(/(\d+)-(\d+) \/ 168/).slice(1).map(Number);
 	component.handleInput(KEYS.down);
-	assert.deepEqual(range(), [2, 20]);
+	assert.deepEqual(range(), [2, 19]);
 	component.handleInput("j");
-	assert.deepEqual(range(), [3, 21]);
+	assert.deepEqual(range(), [3, 20]);
 	component.handleInput("k");
 	component.handleInput(KEYS.up);
-	assert.deepEqual(range(), [1, 19]);
+	assert.deepEqual(range(), [1, 18]);
 	component.handleInput(KEYS.up);
-	assert.deepEqual(range(), [1, 19], "nothing above the first line");
+	assert.deepEqual(range(), [1, 18], "nothing above the first line");
 	component.handleInput(KEYS.pageDown);
-	assert.deepEqual(range(), [20, 38]);
+	assert.deepEqual(range(), [19, 36]);
 	component.handleInput(KEYS.pageUp);
-	assert.deepEqual(range(), [1, 19]);
+	assert.deepEqual(range(), [1, 18]);
 	component.handleInput(KEYS.end);
-	assert.deepEqual(range(), [150, 168]);
-	assert.match(text(80).at(-3), /168 const line168 = 168;/);
+	assert.deepEqual(range(), [151, 168]);
+	assert.match(text(80).at(-4), /168 const line168 = 168;/);
 	component.handleInput(KEYS.pageDown);
-	assert.deepEqual(range(), [150, 168], "nothing below the last line");
+	assert.deepEqual(range(), [151, 168], "nothing below the last line");
 	component.handleInput(KEYS.home);
-	assert.deepEqual(range(), [1, 19]);
+	assert.deepEqual(range(), [1, 18]);
 	component.handleInput("G");
-	assert.deepEqual(range(), [150, 168]);
+	assert.deepEqual(range(), [151, 168]);
 	component.handleInput("g");
-	assert.deepEqual(range(), [1, 19]);
+	assert.deepEqual(range(), [1, 18]);
 	assert.ok(calls.renders.length > 0, "keys ask for a redraw");
 	assert.equal(calls.done.length, 0);
 });
@@ -119,9 +120,9 @@ test("scroll keys move the range: arrows, j/k, pages, Home/End and g/G", async (
 test("the mouse wheel scrolls three lines", async () => {
 	const { component, text } = await preview(lines(168), { rows: 30 });
 	assert.deepEqual(component.handleMouse({ type: "wheel", wheelDelta: 1, x: 3, y: 5 }), { handled: true, render: true });
-	assert.match(text(80).at(-2), /4-22 \/ 168/);
+	assert.match(text(80).at(-2), /4-21 \/ 168/);
 	component.handleMouse({ type: "wheel", wheelDelta: -1, x: 3, y: 5 });
-	assert.match(text(80).at(-2), /1-19 \/ 168/);
+	assert.match(text(80).at(-2), /1-18 \/ 168/);
 });
 
 test("Esc and q close the overlay and repaint behind it", async () => {
@@ -148,14 +149,15 @@ test("a short file is drawn whole and its footer counts all its lines", async ()
 	assert.match(out[4], /^▏ 1 one +▕$/);
 	assert.match(out[5], /^▏ 2     two +▕$/, "a tab becomes spaces up to the next stop of 4");
 	assert.match(out[6], /^▏ 3 three +▕$/);
-	assert.match(out[7], /1-3 \/ 3 +▕$/);
-	assert.equal(out.length, 9);
+	assert.match(out[7], /^▏ +▕$/, "a blank row over the footer");
+	assert.match(out[8], /1-3 \/ 3 +▕$/);
+	assert.equal(out.length, 10);
 });
 
 test("long lines are cut with an ellipsis instead of wrapping", async () => {
 	const { text } = await preview(`${"x".repeat(200)}\nshort\n`, { name: "a.ts" });
 	const out = text(60);
-	assert.equal(out.length, 8);
+	assert.equal(out.length, 9);
 	assert.match(out[4], /^▏ 1 x+… ▕$/);
 	assert.ok(out.every((row) => [...row].length === 60));
 });
@@ -239,8 +241,8 @@ const LONG = "x".repeat(80);
 const SYNTAX = `# Install\n\n\`\`\`sh\npi install it\n  --flag\n\`\`\`\n\nRun \`/gentle-quiet\` once.\n\n\`\`\`\n${LONG}\n\`\`\`\n\n- one\n  - nested\n- two\n\n1. first\n2. second\n`;
 
 test("a rendered Markdown file frames code blocks without fences and shows lists with bullets", async () => {
-	const { component, text, draw } = await preview(SYNTAX, { name: "README.md", relPath: "README.md" });
-	const body = text(70).slice(4, -2).map((row) => row.slice(2, -2));
+	const { component, text, draw } = await preview(SYNTAX, { name: "README.md", relPath: "README.md", rows: 31 }); // 19 rows of body
+	const body = text(70).slice(4, -3).map((row) => row.slice(2, -2));
 	assert.ok(!body.some((row) => row.includes("```")), "no fence lines");
 	assert.ok(!body.some((row) => /^ *[-*+] /.test(row)), "no raw list markers");
 	assert.ok(!body.some((row) => row.includes("`")), "no inline code backticks");
@@ -279,11 +281,11 @@ test("a rendered Markdown file frames code blocks without fences and shows lists
 test("toggling with m starts the other view from its top", async () => {
 	const long = Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}.\n`).join("\n");
 	const { component, text } = await preview(long, { name: "long.md", rows: 30 });
-	assert.match(text(90).at(-2), / m source · .* 1-19 \/ 159 /);
+	assert.match(text(90).at(-2), / m source · .* 1-18 \/ 159 /);
 	component.handleInput("\x1b[6~");
-	assert.match(text(90).at(-2), / 20-38 \/ 159 /, "the rendered rows scroll by pages");
+	assert.match(text(90).at(-2), / 19-36 \/ 159 /, "the rendered rows scroll by pages");
 	component.handleInput("m");
-	assert.match(text(90).at(-2), / m rendered · .* 1-19 \/ 159 /);
+	assert.match(text(90).at(-2), / m rendered · .* 1-18 \/ 159 /);
 	assert.match(text(90)[4], /^▏   1 Paragraph 1\. +▕$/);
 });
 

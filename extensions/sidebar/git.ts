@@ -23,7 +23,7 @@ import { openInEditor } from "./git-launch.ts";
 import { nerdIcon } from "./nerd-icons.ts";
 import { openPreview } from "./tree-preview.ts";
 
-const GAP = 1; // blank rows between the two cards
+const GAP = 0; // blank rows between the two cards: none, as the MAIN tab stacks its cards
 const MIN_HEIGHT = 14; // under this the cards keep it and the column scrolls, as cute's
 const SCROLL_STEP = 2;
 const COMPACT_WIDTH = 38; // narrower columns get "[ G | B ]"

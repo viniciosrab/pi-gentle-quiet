@@ -25,7 +25,7 @@ import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/
 import { readActivity, readTail, SessionLog } from "./run-data.ts";
 import { previewWidthFor } from "./tree-preview.ts";
 
-const CHROME = 6; // top, title, subtitle, blank row, footer, bottom
+const CHROME = 7; // top, title, subtitle, blank row, blank row over the footer, footer, bottom
 const WHEEL_LINES = 3;
 const INTERVAL_MS = 500;
 
@@ -229,6 +229,7 @@ class LivePopup {
 			fit(text("muted", this.view?.subtitle ?? "")),
 			fit(""),
 			...body.map(fit),
+			fit(""), // the footer apart from the thread
 			fit(text("dim", footer)),
 			paint(this.theme, "border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];

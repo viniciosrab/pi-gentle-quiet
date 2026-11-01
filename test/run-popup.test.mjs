@@ -200,6 +200,7 @@ test("the popup draws the task header, its label, the dropped line and the threa
 	]);
 	assert.equal(out.length, 25, "85% of 30 rows, whatever the thread's length");
 	assert.match(out.at(-2), /^▏ Esc close · ↑↓ PgUp\/PgDn Home\/End · following +▕$/);
+	assert.match(out.at(-3), /^▏ +▕$/, "a blank row between the content and the footer");
 	const raw = component.render(80);
 	assert.ok(painted(raw[1], "toolTitle"), "the header in the title color");
 	assert.ok(painted(raw[2], "muted", "subagent popup"));

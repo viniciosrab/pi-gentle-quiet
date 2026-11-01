@@ -208,9 +208,8 @@ test("two cards split the height 50/50: the commit graph on top and the working 
 	assert.match(out[0], /^┌─+┐$/);
 	assert.match(out[1], /^│ ⎇ Git +\[ Graph \| Branches \] │$/);
 	const topEnd = out.findIndex((row) => row.startsWith("└"));
-	assert.equal(topEnd + 1, 19, "top card: half of the 39 rows left by the gap");
-	assert.equal(out[19].trim(), "", "a blank row between the cards");
-	assert.match(out[20], /^┌/);
+	assert.equal(topEnd + 1, 20, "top card: half of the 40 rows");
+	assert.match(out[20], /^┌/, "the Working tree card right under it, as the MAIN tab's cards: no blank row between");
 	assert.match(out[21], /Working tree ▲/);
 	assert.match(out.at(-1), /^└/);
 	for (const row of out) assert.ok([...row].length <= 59, `fits: ${row}`);
