@@ -1,7 +1,7 @@
 // The TREE tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's
 // project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ <project>   [ ↗ ]"
-// in the card title style, then the project's tree with git badges on the right ("M", "?",
-// "A", "U" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
+// in the card title style, then the project's tree with git badges on the right ("M", "U",
+// "A", "!" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
 // (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), the icons Neo-tree draws in LazyVim
 // (./nerd-icons.ts): mini.icons' glyph for the file, Neo-tree's folders, one cell of the terminal's Nerd Font,
 // painted with a theme role.
@@ -33,7 +33,8 @@ const DATA = new Set(["json", "yaml", "yml", "toml", "lock"]);
 const HIDDEN_ROW = { hiddenRow: true };
 // The git-ignored entries under the session's folder, folders once with a trailing "/".
 const IGNORED_ARGS = ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"];
-const BADGES = { modified: ["warning", "M"], added: ["success", "A"], untracked: ["accent", "?"], conflict: ["error", "U"], deleted: ["error", "D"] };
+// The GIT tab's letters (./git.ts): U for a new file, as VS Code and Neo-tree mark it, ! for a conflict.
+const BADGES = { modified: ["warning", "M"], added: ["success", "A"], untracked: ["accent", "U"], conflict: ["error", "!"], deleted: ["error", "D"] };
 
 export function createTab(host: SidebarHost): SidebarTab {
 	const state = {
