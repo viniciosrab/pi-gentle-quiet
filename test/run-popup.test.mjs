@@ -1045,7 +1045,7 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	];
 	const shown = body.filter((row) => expected.includes(row));
 	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
-	assert.ok(expected.includes("$ git status --short") && expected.includes("└ ✗ exit 1") && expected.includes("└ running…"), "the rows compared are the quiet ones");
+	assert.ok(expected.includes("$ git status --short") && expected.includes("├ ✗ exit 1") && expected.includes("└ running…"), "the rows compared are the quiet ones");
 	assert.ok(body.includes("Thinking..."), "thinking folded as the main view shows it");
 	assert.ok(!body.some((row) => row.includes("Reading the spec first.")), "the thinking text itself is not shown");
 	assert.ok(body.includes("Spec read. Writing the tests."), "text");
@@ -1068,7 +1068,7 @@ test("a finished Agents row with a task record of this session gets ↗ and open
 	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 	const popupRows = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
 	assert.match(popupRows[1], /gentle-ai-explore · finished · .* · 71s/, "this session's record, not the newer one of another session");
-	assert.ok(popupRows.some((row) => row.includes("└ ✗ exit 1")), "its session in the quiet look");
+	assert.ok(popupRows.some((row) => row.includes("├ ✗ exit 1")), "its session in the quiet look");
 });
 
 test("a finished subagent's popup starts its prompt, tool rows and answer at the header's column", async () => {
