@@ -81,8 +81,9 @@ const DEFAULTS = {
 	// while the call runs, like Claude Code; ctrl+o shows pi-web-access's full output.
 	// codemode: "summary" (one line), "failures" (plus each failed call) or "all" (every call).
 	// hint: "ctrl+o to expand" on the most recent call ("last"), on every call ("all") or nowhere ("never").
-	// codemodeOutput: lines of the script's own output shown under a codemode summary.
-	quiet: { enabled: true, preview: 0, codemode: "failures", codemodeOutput: 3, hint: "last" },
+	// codemodeOutput: lines of the script's own output shown under a codemode summary; 0 (the default) keeps
+	// a call to two rows, as the other tools.
+	quiet: { enabled: true, preview: 0, codemode: "failures", codemodeOutput: 0, hint: "last" },
 	// Gentle-Shell-style status line in place of Pi's footer; enabled: false gives the footer back to Pi.
 	// tokens: "cache" (R W CH%), "all" (↑ ↓ R W CH%) or "off".
 	// subscriptionProviders: providers billed by a plan that Pi cannot detect (no OAuth), e.g. claude-bridge.
@@ -1363,7 +1364,7 @@ const seconds = (ms) => (typeof ms === "number" && ms >= 1000 ? `${(ms / 1000).t
 
 /** One summary line plus up to `preview` dim output lines. */
 const CODEMODE_DETAILS = ["summary", "failures", "all"];
-const CODEMODE_OUTPUTS = [3, 5, 10, 0];
+const CODEMODE_OUTPUTS = [0, 3, 5, 10];
 const CODEMODE_CALL_LIMIT = 8;
 
 /** Child calls Pi recorded for a codemode run (details.calls). */

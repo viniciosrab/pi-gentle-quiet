@@ -16,15 +16,15 @@ async function draw(result, config = {}, context = {}) {
 	return lines(renderers.renderResult(result, {}, theme, { args: { code: "return 1;" }, ...context }), 70).map((line) => line.trimEnd());
 }
 
-test("the script's output shows under the summary, without Pi's bookkeeping header", async () => {
+test("by default the script's output stays hidden: the call and its summary take two rows, ctrl+o shows the rest", async () => {
 	const out = await draw(finished('{"ok":"ok"}'));
+	assert.equal(out.length, 1, "the summary alone under the call");
 	assert.match(out[0], /^ └ ✓ 1 call · bash +ctrl\+o to expand$/);
-	assert.deepEqual(out.slice(1), ['   {"ok":"ok"}']);
 });
 
-test("only the first lines are shown, with a count of the rest", async () => {
-	const out = await draw(finished("a\nb\nc\nd\ne"));
-	assert.deepEqual(out.slice(1), ["   a", "   b", "   c", "   … 2 more lines"]);
+test("with output lines turned on, the script's output shows under the summary, without Pi's bookkeeping header", async () => {
+	assert.deepEqual((await draw(finished('{"ok":"ok"}'), { quiet: { codemodeOutput: 3 } })).slice(1), ['   {"ok":"ok"}']);
+	assert.deepEqual((await draw(finished("a\nb\nc\nd\ne"), { quiet: { codemodeOutput: 3 } })).slice(1), ["   a", "   b", "   c", "   … 2 more lines"]);
 });
 
 test("the number of output lines is configurable, and 0 hides them", async () => {
@@ -38,7 +38,7 @@ test("an empty output shows no rows", async () => {
 
 test("failed calls are listed before the output", async () => {
 	const result = finished("done", { details: { calls: [{ name: "read", status: "error", error: "ENOENT" }] } });
-	const out = await draw(result);
+	const out = await draw(result, { quiet: { codemodeOutput: 3 } });
 	assert.deepEqual(out.slice(1), ["   ✗ read ENOENT", "   done"]);
 });
 
@@ -49,11 +49,11 @@ test("a script that threw shows its error in the summary only", async () => {
 	assert.match(out[0], /✗ Script failed/);
 });
 
-test("Codemode output cycles 3 → 5 → 10 → 0 → 3 and is saved", async () => {
+test("Codemode output starts at 0 and cycles 0 → 3 → 5 → 10 → 0, saved", async () => {
 	writeConfig({});
 	const { select, seen } = picker(/^Tool rows ›$/, /^Codemode output/);
 	const { commands, ctx } = await load({ select });
 	await commands["gentle-quiet"].handler("", ctx);
-	assert.ok(seen[1].items.includes("Codemode output lines: 3"));
-	assert.equal(readConfig().quiet.codemodeOutput, 5);
+	assert.ok(seen[1].items.includes("Codemode output lines: 0"));
+	assert.equal(readConfig().quiet.codemodeOutput, 3);
 });
