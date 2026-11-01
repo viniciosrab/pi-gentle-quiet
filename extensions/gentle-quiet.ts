@@ -548,10 +548,54 @@ function drawBlock(target, width, options, t, rail = {}) {
 	// In the column the Todos title leaves out gentle-pi's shortcut hint; "▾ Collapse" stays.
 	if (rail.hang && rail.spaced && rows.length) rows = [quietTitle(rows[0]), ...rows.slice(1)];
 	if (rail.spaced) rows = headed(rows, t ?? theme);
+	if (rail.view) rows = windowed(rows, rail.view, t ?? theme);
 	if (rail.runs) rows = markRuns(rows, inner, t ?? theme, rail.runs, 1); // under the outline's top row
 	return rows.length ? boxed(rows, width, t ?? theme) : rows;
 }
 const STACK_WIDTH = 120;
+
+// In the column the Todos card grows with its list until it reaches the bottom of the terminal (`view.room`,
+// the rows left under the cards above it); a longer list then scrolls inside the card, with a dim
+// "↑↓ 8–17 / 25" row under it. Until the wheel moves it, the view follows the task in progress, else the
+// first pending one, else the end; a change to the list follows it again.
+const WHEEL_ROWS = 3;
+const MIN_TODO_ROWS = 3; // a card squeezed by the cards above it still shows a few rows; the column scrolls
+const TASK_ROW = /^[○◐◔⊘✓✕] /u;
+function todoView() {
+	return { top: 0, total: 0, size: 0, user: false, list: undefined, room: undefined };
+}
+function windowed(rows, view, t) {
+	const list = rows.slice(2);
+	const text = list.map((row) => row.replace(SGR, ""));
+	const folded = /▸/u.test(rows[0].replace(SGR, ""));
+	const fits = view.room === undefined ? Infinity : view.room - 2 - 2; // the outline, the title and its blank row
+	view.total = folded || list.length <= fits ? 0 : list.length;
+	if (!view.total) return rows;
+	const size = (view.size = Math.max(MIN_TODO_ROWS, fits - 1)); // and the scroll row
+	const key = text.join("\n");
+	if (key !== view.list) Object.assign(view, { list: key, user: false });
+	if (!view.user) {
+		let start = text.findIndex((row) => /^[◔◐] /u.test(row));
+		if (start < 0) start = text.findIndex((row) => row.startsWith("○ "));
+		if (start < 0) start = list.length - 1;
+		let end = start + 1;
+		while (end < list.length && !TASK_ROW.test(text[end]) && text[end].startsWith(" ")) end++;
+		if (start < view.top) view.top = start;
+		else if (end > view.top + size) view.top = Math.min(start, end - size); // its last row at the bottom; its first on top when it is taller than the card
+	}
+	view.top = Math.max(0, Math.min(view.top, list.length - size));
+	const shown = `↑↓ ${view.top + 1}–${view.top + size} / ${list.length}`;
+	return [...rows.slice(0, 2), ...list.slice(view.top, view.top + size), fg(t, "dim", shown)];
+}
+// The wheel over an overflowing Todos card scrolls its list, and stops there: the column stays put.
+function scrollTodo(view, event) {
+	if (event?.type !== "wheel" || !view.total) return undefined;
+	if (event.wheelDelta) {
+		view.top = Math.max(0, Math.min(view.top + Math.sign(event.wheelDelta) * WHEEL_ROWS, view.total - view.size));
+		view.user = true;
+	}
+	return { handled: true, render: true };
+}
 
 // gentle-pi's card titles end in the shortcut that folds them ("ctrl+shift+t", "ctrl+shift+t expand").
 const TITLE_HINT = /\s{2,}(?:\x1b\[[0-9;:]*m)*(?:ctrl|alt|shift|super|meta)\+\S*(?: (?:collapse|expand))?(?:\x1b\[[0-9;:]*m)*\s*$/;
@@ -582,7 +626,15 @@ const INLINE_BLOCKS = new Set(["gentle-agents"]);
 function blockComponent(component, options, t, key) {
 	if (!component || typeof component.render !== "function") return component;
 	const inline = INLINE_BLOCKS.has(key);
-	if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true, hang: key === "gentle-todo", grow: key === "gentle-todo" }) });
+	if (key === "gentle-todo") {
+		const view = todoView();
+		const mouse = { handleMouse: (event, ...rest) => scrollTodo(view, event) ?? component.handleMouse?.(event, ...rest) };
+		const draw = (width, room) => {
+			view.room = room;
+			return drawBlock(component, width, options, t, { spaced: true, hang: true, grow: true, view });
+		};
+		railBlocks.set(key, { component: mouse, draw });
+	} else if (key && !inline) railBlocks.set(key, { component, draw: (width) => drawBlock(component, width, options, t, { spaced: true }) });
 	// The Agents card's rows with a ↗, by the row the card drew them on: a left click there opens the subagent.
 	const hits = key === "gentle-agents" ? new Map() : undefined;
 	const marked = hits && { hits, match: agentRows };
@@ -3174,13 +3226,16 @@ const PROF_KEY = "alt+p";
 const railBlocks = new Map(); // widget key -> (width) => rows, registered by blockComponent
 let railStatus; // (width) => rows of the Status and Context cards, registered by the footer
 
-/** Music, Jobs and Todos as outlined cards, one right under the other, with where each one sits. */
-function railRows(width, keys = [MUSIC_CARD, JOBS_CARD, "gentle-todo"]) {
+/**
+ * Music, Jobs and Todos as outlined cards, one right under the other, with where each one sits. `room` is
+ * the column's height under the tab bar and the Status card: each card is told the rows left to it.
+ */
+function railRows(width, room, keys = [MUSIC_CARD, JOBS_CARD, "gentle-todo"]) {
 	const rows = [];
 	const hits = [];
 	for (const key of keys) {
 		const block = railBlocks.get(key);
-		const section = block?.draw(width);
+		const section = block?.draw(width, room === undefined ? undefined : room - rows.length);
 		if (!section?.length) continue;
 		hits.push({ component: block.component, click: block.click, start: rows.length, height: section.length });
 		rows.push(...section);
@@ -3584,8 +3639,13 @@ function installSidebar(tui) {
 				try {
 					const width = column.getContentWidth(RAIL_WIDTH);
 					// The cards first: the Status card leaves out the job count while the Jobs card shows the jobs.
-					const drawn = railRows(width);
+					// The cards' room is the terminal under the tab bar and the Status card, whose height the
+					// cards decide (the job count): drawn again in the rare frame it changes.
+					const room = (status) => Math.max(1, (tui.terminal?.rows ?? 24) - TAB_BAR_ROWS - status);
+					const before = statusLines.length;
+					let drawn = railRows(width, room(before));
 					statusLines = (config.statusLine.enabled ? railStatus?.(width) : undefined) ?? []; // lined up with the cards under it
+					if (statusLines.length !== before) drawn = railRows(width, room(statusLines.length));
 					hits = drawn.hits;
 					const fit = (row) => (visibleWidth(row) <= width ? row : truncateToWidth(row, width, "…"));
 					lines = drawn.rows.map(fit);
