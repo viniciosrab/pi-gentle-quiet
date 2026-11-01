@@ -526,7 +526,7 @@ test("the tree rescans on its own while shown and redraws when the files change"
 	t.after(() => tab.dispose());
 	writeFileSync(path.join(root, "src", "added.ts"), "x");
 	status = "?? src/added.ts\n";
-	await until(() => rows().some((row) => /added\.ts +\? │$/.test(row)), "the new file with its badge");
+	await until(() => rows().some((row) => /added\.ts +U │$/.test(row)), "the new file with its badge: U, as the GIT tab marks it");
 });
 
 test("render stays synchronous and cheap: repeated frames do not rescan", async (t) => {
