@@ -87,6 +87,7 @@ test("a changed file shows its changes inline as VS Code's: old and new numbers,
 		"6 6   six",
 	]);
 	assert.match(out.at(-2), /^▏ Esc close · e edit · n\/N change · \+2 −2 · 1-8 \/ 8 +▕$/, "the scroll keys left out where they do not fit");
+	assert.match(out.at(-3), /^▏ +▕$/, "a blank row between the content and the footer");
 	assert.match(text(90).at(-2), /^▏ Esc close · e edit · n\/N change · \+2 −2 · ↑↓ PgUp\/PgDn Home\/End · 1-8 \/ 8 +▕$/);
 	const raw = draw(70);
 	assert.ok(painted(raw[5], "toolDiffRemoved", "−") && painted(raw[6], "toolDiffAdded", "+"), "the sign in the diff color");
@@ -213,26 +214,26 @@ test("the pop-up opens at the first change, and n/N ] [ jump between change bloc
 	const target = file("long.ts", "x\n");
 	const { component, text } = await opened(target, { diff: Promise.resolve(LONG) }, { rows: 30 });
 	const range = () => text(80).at(-2).match(/(\d+)-(\d+) \/ (\d+)/).slice(1).map(Number);
-	assert.deepEqual(range(), [27, 45, 61], "three rows of context above the first change");
+	assert.deepEqual(range(), [27, 44, 61], "three rows of context above the first change");
 	assert.ok(text(80).some((row) => /^▏ 30    − L30 /.test(row)) && text(80).some((row) => /^▏    30 \+ X30 /.test(row)));
 	assert.equal(component.handleInput("n"), true);
-	assert.deepEqual(range(), [43, 61, 61], "the next block, as far as the end allows");
+	assert.deepEqual(range(), [44, 61, 61], "the next block, as far as the end allows");
 	assert.ok(text(80).some((row) => /^▏ 50    − L50 /.test(row)));
 	assert.equal(component.handleInput("n"), false, "no block after the last");
 	component.handleInput("N");
-	assert.deepEqual(range(), [27, 45, 61]);
+	assert.deepEqual(range(), [27, 44, 61]);
 	component.handleInput("]");
-	assert.deepEqual(range(), [43, 61, 61]);
+	assert.deepEqual(range(), [44, 61, 61]);
 	component.handleInput("[");
-	assert.deepEqual(range(), [27, 45, 61]);
+	assert.deepEqual(range(), [27, 44, 61]);
 	assert.equal(component.handleInput("N"), false, "no block before the first");
 	component.handleInput("g");
-	assert.deepEqual(range(), [1, 19, 61]);
+	assert.deepEqual(range(), [1, 18, 61]);
 	component.handleInput("n");
-	assert.deepEqual(range(), [27, 45, 61], "from the top, n goes to the first block");
+	assert.deepEqual(range(), [27, 44, 61], "from the top, n goes to the first block");
 	component.handleInput("G");
 	component.handleInput("N");
-	assert.deepEqual(range(), [27, 45, 61], "from the end, N goes to the block above the view's top");
+	assert.deepEqual(range(), [27, 44, 61], "from the end, N goes to the block above the view's top");
 	assert.match(text(80).at(-2), /n\/N change · \+1 −2 ·/);
 });
 

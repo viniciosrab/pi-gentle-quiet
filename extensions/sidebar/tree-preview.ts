@@ -68,7 +68,7 @@ const pressed = (data, name) => {
 };
 const letter = (data, char) => data === char || pressed(data, char === char.toLowerCase() ? char : `shift+${char.toLowerCase()}`);
 
-const CHROME = 6; // top, title, path, blank row, footer, bottom
+const CHROME = 7; // top, title, path, blank row, blank row over the footer, footer, bottom
 const WHEEL_LINES = 3;
 const LEAD = 3; // rows shown above a change the view jumps to
 const TINT = 0.25; // how much of the theme's diff color a changed row's background takes
@@ -597,6 +597,7 @@ class FilePreview {
 			fit(text("muted", `${this.relPath}${cut}`)),
 			fit(""),
 			...body.map(fit),
+			fit(""), // the footer apart from the file
 			fit([["dim", `Esc close${this.onEdit ? " · e edit" : ""}`], ...range].map(([role, part]) => (part ? this.paint(role, part) : "")).join("")),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
