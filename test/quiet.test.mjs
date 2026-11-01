@@ -27,7 +27,14 @@ test("read collapses to the path and a line count with the expand hint", async (
 
 test("bash failures show the exit code and the last output line, without a hint", async () => {
 	const out = await draw("bash", { command: "false" }, text("boom\nCommand exited with code 1", { isError: true }), {}, { isError: true });
-	assert.deepEqual(out, [" $ false", " └ ✗ exit 1", "   boom"]);
+	assert.deepEqual(out, [" $ false", " ├ ✗ exit 1", " └ boom"]);
+});
+
+test("output rows under a result hang on one rail: ├ on the result, │ on the middle rows, └ on the last", async () => {
+	const calls = ["a", "b", "c"].map((name) => ({ name: `mcp__x__${name}`, status: "error", error: "denied" }));
+	const out = (await draw("codemode", { code: "a" }, { content: [], details: { calls } })).map((row) => row.replace(/ +ctrl\+o to expand$/, ""));
+	assert.deepEqual(out.slice(1), [" ├ ✗ 3 of 3 calls failed", " │ ✗ x/a denied", " │ ✗ x/b denied", " └ ✗ x/c denied"]);
+	assert.deepEqual(await draw("bash", { command: "true" }, text("")), [" $ true", " └ ✓ no output"], "no rows under it: └ alone, as before");
 });
 
 test("empty and running calls show no expand hint", async () => {
@@ -85,8 +92,8 @@ test("codemode summarizes child calls and lists failures", async () => {
 	];
 	const out = await draw("codemode", { code: "a\nb" }, { content: [], details: { calls } });
 	assert.equal(out[0], " codemode 2 lines");
-	assert.match(out[1], /^ └ ✗ 1 of 2 calls failed +ctrl\+o to expand$/);
-	assert.equal(out[2], "   ✗ supabase/list_tables permission denied");
+	assert.match(out[1], /^ ├ ✗ 1 of 2 calls failed +ctrl\+o to expand$/);
+	assert.equal(out[2], " └ ✗ supabase/list_tables permission denied");
 	const ok = await draw("codemode", { code: "a" }, { content: [], details: { calls: [calls[0]] } }, {}, { durationMs: 1400 });
 	assert.match(ok[1], /✓ 1 call · context7 · 1\.4s/);
 });
@@ -168,7 +175,7 @@ test("a long $ command fills the width and wraps to two rows, like Claude Code",
 	assert.ok(rows.every((row) => row.length <= 120), "no row passes the width");
 	assert.ok(rows[0].length > 110, "the first row uses the full width, not 100 characters");
 	assert.ok(rows[0].startsWith(" $ step0 && "));
-	assert.match(rows[1], /^   \S/, "the second row lines up under the command, past \"$ \"");
+	assert.match(rows[1], /^ │ \S/, "the second row lines up under the command, past \"$ \", with the │ that joins the result's └ to the $");
 	assert.ok(rows[1].endsWith("…"), "the rest is cut with an ellipsis");
 	assert.deepEqual(tool("bash", native).renderCall({ command: "ls" }, theme).render(120).map((row) => plain(row)), [" $ ls"]);
 });
@@ -180,7 +187,7 @@ test("a long path stays on the tool's row and goes on under it, never alone on i
 	assert.ok(rows[0].startsWith(" read /tmp/segment-"), "the path starts on the tool's row");
 	assert.equal(rows[0].length, 80, "and fills it to the width");
 	assert.equal(rows.length, 2);
-	assert.match(rows[1], /^ {6}\S/, "the rest lines up under the path, past \"read \"");
-	assert.equal(rows.map((row, i) => (i ? row.trimStart() : row.slice(6))).join(""), file);
+	assert.match(rows[1], /^ │ {4}\S/, "the rest lines up under the path, past \"read \", with the │ to the result's └");
+	assert.equal(rows.map((row, i) => (i ? row.replace(/^ │ +/, "") : row.slice(6))).join(""), file);
 	assert.deepEqual(tool("read", native).renderCall({ path: "/tmp/a.ts" }, theme).render(80).map((row) => plain(row)), [" read /tmp/a.ts"]);
 });
