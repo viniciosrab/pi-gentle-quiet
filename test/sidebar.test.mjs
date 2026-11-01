@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ScrollView } from "@earendil-works/pi-tui";
 import { load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
-import { TAB_FACTORIES } from "../extensions/sidebar/tabs.ts";
+import { TAB_BAR_ROWS, TAB_FACTORIES } from "../extensions/sidebar/tabs.ts";
 
 const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 const GENTLE_SIDEBAR = Symbol.for("gentle-pi.experimental-sidebar.state");
@@ -217,14 +217,132 @@ function scrollingTodo() {
 	};
 }
 
-test("the Todos card in the column grows with its list instead of scrolling inside", async () => {
+// Sizes the terminal so the cards under the tab bar and the Status card get `room` rows.
+function roomFor(loaded, room) {
+	loaded.terminal.rows = TAB_BAR_ROWS + loaded.status.render(60).length + room;
+	loaded.root[NODE]();
+}
+
+test("the Todos card in the column grows with its list until the bottom of the terminal, then scrolls with its own row", async () => {
 	const loaded = await wide();
 	loaded.ui.setWidget("gentle-todo", () => scrollingTodo());
 	loaded.widgets["gentle-todo"](loaded.tui, theme);
 	loaded.root[NODE]();
+	const grown = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	assert.deepEqual(grown.filter((row) => /^○ T\d+/.test(row)), TASKS, "room for all twelve: every task, no scroll row");
+	assert.ok(!grown.some((row) => row.includes("↑↓")));
+	roomFor(loaded, 16); // border, title, blank, 12 tasks, border: exactly the room
+	const exact = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	assert.equal(exact.length, 16);
+	assert.deepEqual(exact.filter((row) => /^○ T\d+/.test(row)), TASKS, "still every task");
+	assert.ok(!exact.some((row) => row.includes("↑↓")));
+	roomFor(loaded, 15); // one row short
 	const out = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
-	assert.deepEqual(out.filter((row) => /^○ T\d+/.test(row)), TASKS);
-	assert.ok(!out.some((row) => row.includes("↑↓")), "no scroll indicator row");
+	assert.equal(out.length, 15, "as tall as the room left, no taller");
+	assert.deepEqual(out.filter((row) => /^○ T\d+/.test(row)), TASKS.slice(0, 10), "the first pending task in view");
+	assert.equal(out.at(-2), "↑↓ 1–10 / 12", "ours, not gentle-pi's");
+	assert.ok(!out.some((row) => row.includes("ctrl+shift")));
+});
+
+// A Todos list of 25 rows in the column: 15 done, one in progress that wraps to two rows, 8 pending.
+const LONG = "T16 Rodar checagens automáticas do pipeline completo e comparar com produção";
+async function longTodo() {
+	const loaded = await wide();
+	const state = { tasks: [...Array.from({ length: 15 }, (_, i) => `✓ T${i + 1} done`), `◐ ${LONG}`, ...Array.from({ length: 8 }, (_, i) => `○ T${i + 17} next`)] };
+	loaded.ui.setWidget("gentle-todo", () => ({
+		render: (width) => panel("Todos ▾ Collapse  1 of 24", ...state.tasks)(width),
+		handleMouse: (event) => (event.type === "click" && event.y === 0 ? { handled: true, render: true } : undefined),
+	}));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	roomFor(loaded, 15); // ten list rows under the title, then the scroll row
+	const card = () => {
+		loaded.root[NODE]();
+		return loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	};
+	const wheel = (delta) => loaded.rail.handleMouse({ type: "wheel", button: "none", x: 10, y: 6, width: 60, height: 30, screenX: 100, screenY: 6, wheelDelta: delta });
+	return { ...loaded, state, card, wheel };
+}
+
+test("a Todos list taller than the room left stops at the bottom of the terminal, following the task in progress", async () => {
+	const { card, rail } = await longTodo();
+	const out = card();
+	assert.equal(out.length, 15, "the room left: border, title, blank, ten rows, the scroll row, border");
+	assert.equal(out[1], "≡ Todos ▾ Collapse  1 of 24");
+	assert.equal(out[2], "");
+	assert.equal(out[3], "✓ T8 done");
+	assert.match(out[11], /^◔ T16 Rodar/, "the task in progress in view");
+	assert.match(out[12], /^ {2}\S/, "with all its wrapped rows");
+	assert.equal(out[13], "↑↓ 8–17 / 25");
+	assert.ok(out[14].startsWith("└"));
+	assert.ok(painted(rail.render(60)[13], "dim", "↑↓ 8–17 / 25"), "dim");
+});
+
+test("the wheel over the Todos card scrolls its list three rows a notch, clamped at both ends, and not the column", async () => {
+	const { card, wheel, rail } = await longTodo();
+	const scrollTop = rail.scrollTop;
+	const seen = [];
+	for (const delta of [1, 1, 1, 1]) {
+		assert.equal(wheel(delta)?.handled, true);
+		seen.push(card()[13]);
+	}
+	assert.deepEqual(seen, ["↑↓ 11–20 / 25", "↑↓ 14–23 / 25", "↑↓ 16–25 / 25", "↑↓ 16–25 / 25"]);
+	assert.equal(card()[12], "○ T24 next", "the end of the list");
+	for (let i = 0; i < 7; i++) assert.equal(wheel(-1)?.handled, true);
+	const top = card();
+	assert.equal(top[13], "↑↓ 1–10 / 25");
+	assert.equal(top[3], "✓ T1 done");
+	assert.equal(top.length, 15);
+	assert.equal(rail.scrollTop, scrollTop, "the column stays where it was");
+});
+
+test("after the user scrolls the Todos card keeps their place until a task changes, then follows the work again", async () => {
+	const { card, wheel, state } = await longTodo();
+	for (let i = 0; i < 3; i++) wheel(-1);
+	assert.equal(card()[13], "↑↓ 1–10 / 25");
+	assert.equal(card()[13], "↑↓ 1–10 / 25", "a redraw keeps the user's place");
+	state.tasks[15] = `✓ ${LONG}`;
+	state.tasks[16] = "◐ T17 next";
+	const out = card();
+	assert.equal(out[13], "↑↓ 9–18 / 25");
+	assert.equal(out[12], "◔ T17 next");
+});
+
+test("a Todos list that fits draws as before, with no scroll row, and the wheel goes on to the card", async () => {
+	const { seen, mouse } = await clickable(0);
+	assert.equal(mouse("wheel", 3, { wheelDelta: 1 })?.handled, true);
+	assert.equal(seen.length, 1, "gentle-pi's card got it");
+	const loaded = await wide();
+	const out = loaded.rows().map((row) => row.replace(/ +│$/, ""));
+	assert.deepEqual(out.slice(1, 5), ["│ ≡ Todos  1 of 2", "│", "│ ◔ Write it", "│ ○ Test it"]);
+	assert.ok(out[5].startsWith("└"));
+	assert.ok(!out.some((row) => row.includes("↑↓")));
+});
+
+test("a collapsed Todos card stays as it is and its title still folds it", async () => {
+	const loaded = await wide();
+	const tasks = Array.from({ length: 14 }, (_, i) => `○ T${i + 1} task`);
+	let collapsed = true;
+	loaded.ui.setWidget("gentle-todo", () => ({
+		render: (width) => (collapsed ? panel("Todos ▸ Expand  0 of 14", ...tasks.slice(0, 1), "… 13 more")(width) : panel("Todos ▾ Collapse  0 of 14", ...tasks)(width)),
+		handleMouse: (event) => (event.type === "click" && event.y === 0 ? ((collapsed = !collapsed), { handled: true, render: true }) : undefined),
+	}));
+	loaded.widgets["gentle-todo"](loaded.tui, theme);
+	roomFor(loaded, 15);
+	const folded = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	assert.deepEqual(folded.slice(1, -1), ["≡ Todos ▸ Expand  0 of 14", "", "○ T1 task", "… 13 more"]);
+	const click = loaded.rail.handleMouse({ type: "click", button: "left", x: 10, y: 1, width: 60, height: 30, screenX: 100, screenY: 1 });
+	assert.equal(click?.handled, true);
+	loaded.root[NODE]();
+	const open = loaded.rows().map((row) => row.replace(/^│ | +│$/g, ""));
+	assert.equal(open[13], "↑↓ 1–10 / 14");
+});
+
+test("below the breakpoint a long Todos list keeps gentle-pi's own scrolling, with no scroll row of the column's", async () => {
+	const loaded = await wide({ columns: 139 });
+	loaded.ui.setWidget("gentle-todo", () => scrollingTodo());
+	const todo = loaded.widgets["gentle-todo"](loaded.tui, theme);
+	const out = todo.render(60).map(plain);
+	assert.deepEqual(out.slice(1, -1).map((row) => row.replace(/^│ | +│$/g, "")), ["≡ Todos  0 of 12", "", "○ T1 task", "○ T2 task", "○ T3 task"], "gentle-pi's three rows");
 });
 
 test("below the breakpoint the Todos card keeps scrolling inside", async () => {
