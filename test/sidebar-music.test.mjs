@@ -550,6 +550,23 @@ test("a click on the seek bar jumps to that point of the track with seek.absolut
 	assert.ok(!calls.slice(before).some((args) => args[2] === "seek.absolute"));
 });
 
+test("with repeat one on, next and previous still change the track: repeat goes to all for the skip, then back to one", async (t) => {
+	const { rows, mouse, calls } = await column(t, (args) => (args[0] === "status" ? status({ repeat: "One" }) : args[0] === "remote" ? playlists() : ""));
+	const out = rows();
+	const y = out.findIndex((row) => row.includes(PAUSE));
+	const at = (glyph) => [...out[y]].indexOf(glyph);
+	for (const command of ["next", "prev"]) {
+		const before = calls.length;
+		assert.equal(mouse("click", y, at(command === "next" ? NEXT : PREV))?.handled, true, command);
+		await settle();
+		assert.deepEqual(calls.slice(before, before + 3), [["repeat", "all"], [command], ["repeat", "one"]], `${command} skips the repeated track`);
+	}
+	const before = calls.length;
+	mouse("click", y, at(PAUSE));
+	await settle();
+	assert.deepEqual(calls[before], ["toggle"], "play/pause leaves repeat alone");
+});
+
 test("a click on previous, play/pause or next runs that cliamp command and reads the status again", async (t) => {
 	const { rows, mouse, calls } = await column(t, (args) => (args[0] === "status" ? status() : args[0] === "remote" ? playlists() : ""));
 	const out = rows();

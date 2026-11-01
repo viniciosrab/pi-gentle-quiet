@@ -1271,7 +1271,6 @@ const QUIET_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "l
 const QUIET_PREVIEWS = [0, 1, 3, 5];
 // The link from a call to its result rows, on every tool row.
 const LINK = "└";
-const RAIL = { tee: "├", bar: "│" }; // the result's connector when output rows hang under it
 const HOME = os.homedir();
 
 const shortPath = (value) => {
@@ -1640,14 +1639,7 @@ function quietResultComponent({ summary, hint: available, rest }, order, t) {
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
 			lines.push(hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…"));
-			// Output rows under the result hang on one rail: ├ on the result, │ on the middle rows, └ on the last.
-			const railed = rest.length > 0 && rest.every((line) => typeof line === "string" && line.startsWith("  "));
-			if (railed) lines[0] = lines[0].replace(LINK, RAIL.tee);
-			rest.forEach((line, i) => {
-				if (typeof line === "object") return lines.push(diffRow(line, width, t));
-				const row = railed ? `${fg(t ?? theme, "dim", i === rest.length - 1 ? LINK : RAIL.bar)} ${line.slice(2)}` : line;
-				lines.push(truncateToWidth(` ${row}`, width, "…"));
-			});
+			for (const line of rest) lines.push(typeof line === "object" ? diffRow(line, width, t) : truncateToWidth(` ${line}`, width, "…"));
 			return lines;
 		},
 		invalidate() {},
@@ -1898,57 +1890,18 @@ function popupToolRows(item, t, width) {
 	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1, t).render(width)];
 }
 
-// The │ on a call's wrapped rows, under its first column: it joins the result's └ to the call's first row.
-const callRail = () => fg(theme, "dim", RAIL.bar);
-
-// Claude Code's "$ command" row: the full width, wrapped to two rows under the command and cut with "…".
-const COMMAND_ROWS = 2;
-function commandRow(text) {
+// The "$ command" and read rows: one row at the full width, cut with "…", so a call and its result take two
+// rows. (Web calls keep pi-web-access's own rows.)
+function oneRow(text) {
 	return {
 		render(width) {
-			const inner = Math.max(1, width - 1);
-			if (visibleWidth(text) <= inner || typeof PiTui.wrapTextWithAnsi !== "function") return [` ${truncateToWidth(text, inner, "…")}`];
-			const [first, ...rest] = PiTui.wrapTextWithAnsi(text, inner);
-			const hang = Math.max(1, inner - 2);
-			const more = PiTui.wrapTextWithAnsi(rest.join(" "), hang);
-			const shown = more.slice(0, COMMAND_ROWS - 1);
-			if (more.length > shown.length) shown[shown.length - 1] = truncateToWidth(`${shown[shown.length - 1]} ${more[shown.length]}`, hang, "…");
-			return [` ${first}`, ...shown.map((line) => ` ${callRail()} ${line}`)];
+			return [` ${truncateToWidth(text, Math.max(1, width - 1), "…")}`];
 		},
 		invalidate() {},
 	};
 }
-
-// The read row: a path has no spaces, so a word wrap would put it alone under "read". It starts on
-// the tool's row instead and is split where the row ends, going on under the path, past "read ".
-const READ_HANG = "read ".length;
-function readRow(text) {
-	return {
-		render(width) {
-			const inner = Math.max(1, width - 1);
-			if (visibleWidth(text) <= inner) return [` ${text}`];
-			const rows = [""];
-			let used = 0;
-			let styles = ""; // every escape so far, replayed at the start of each new row
-			for (const tok of tokens(text)) {
-				if (tok.esc) {
-					rows[rows.length - 1] += tok.esc;
-					styles += tok.esc;
-					continue;
-				}
-				const w = visibleWidth(tok.ch);
-				if (used + w > (rows.length === 1 ? inner : Math.max(1, inner - READ_HANG))) {
-					rows.push(styles);
-					used = 0;
-				}
-				rows[rows.length - 1] += tok.ch;
-				used += w;
-			}
-			return rows.map((row, i) => (i ? ` ${callRail()}${" ".repeat(READ_HANG - 1)}\x1b[0m${row}` : ` ${row}`));
-		},
-		invalidate() {},
-	};
-}
+const commandRow = oneRow;
+const readRow = oneRow;
 
 function quietRenderers(toolName, renderers) {
 	return {

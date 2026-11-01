@@ -569,6 +569,15 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 				if (!state.stopping) void stop().catch(() => undefined);
 				return true;
 			}
+			// cliamp's next and prev replay the same track under repeat one: the skip runs under repeat all,
+			// then repeat one comes back for the new track.
+			if (status.repeat === "one" && (hit.command === "next" || hit.command === "prev")) {
+				ask(["repeat", "all"])
+					.then(() => ask([hit.command]))
+					.then(() => ask(["repeat", "one"]))
+					.then(read);
+				return true;
+			}
 			ask([hit.command]).then(read);
 			return true;
 		},

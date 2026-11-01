@@ -27,6 +27,9 @@ const GAP = 0; // blank rows between the two cards: none, as the MAIN tab stacks
 const MIN_HEIGHT = 14; // under this the cards keep it and the column scrolls, as cute's
 const SCROLL_STEP = 2;
 const COMPACT_WIDTH = 38; // narrower columns get "[ G | B ]"
+// The Working tree card lists at most `files` changed files, then "… N more": a folder of new files that
+// is not in .gitignore cannot flood the tab.
+export const gitLimits = { files: 300 };
 
 const FILE_BADGES = {
 	modified: ["warning", "M"],
@@ -229,8 +232,10 @@ export function createTab(host: SidebarHost): SidebarTab {
 			return { key: "tree", head, body: [{ left: `${c("warning", `● ${status.files.length}`)} ${c("dim", status.files.length === 1 ? "file" : "files")}`, right: deltas(counts.added, counts.deleted, " ") }] };
 		}
 		const body = [{ left: `${c("warning", `● ${status.files.length}`)} ${c("dim", status.files.length === 1 ? "file changed" : "files changed")}`, right: deltas(counts.added, counts.deleted) }, divider];
-		const width = countsWidth(status.files);
-		body.push(...status.files.map((file) => fileRow(file, width)));
+		const shown = status.files.slice(0, gitLimits.files);
+		const width = countsWidth(shown);
+		body.push(...shown.map((file) => fileRow(file, width)));
+		if (status.files.length > shown.length) body.push({ left: c("dim", `… ${status.files.length - shown.length} more`) });
 		return { key: "tree", head, body };
 	};
 

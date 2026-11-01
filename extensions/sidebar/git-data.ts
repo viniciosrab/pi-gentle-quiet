@@ -210,7 +210,9 @@ export function createGitData(host: SidebarHost) {
 		/** { files } or { error }: the working tree's changed files. */
 		status: (cwd) =>
 			get(`status:${cwd}`, TTL.status, async () => {
-				const porcelain = await git(["-c", "core.quotePath=false", "status", "--porcelain=v1"], cwd);
+				// Every new file, not just its new folder: an agent's new files show one by one. Ignored files
+				// (node_modules, build output) never show.
+				const porcelain = await git(["-c", "core.quotePath=false", "status", "--porcelain=v1", "--untracked-files=all"], cwd);
 				if (porcelain === undefined) return { error: true };
 				const numstat = await git(["-c", "core.quotePath=false", "diff", "HEAD", "--numstat", "--no-renames"], cwd);
 				return { files: parseStatus(porcelain, numstat ?? "") };
