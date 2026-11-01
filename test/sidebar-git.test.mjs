@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { painted, plain, theme } from "./helpers.mjs";
-import { createTab } from "../extensions/sidebar/git.ts";
+import { createTab, gitLimits } from "../extensions/sidebar/git.ts";
 import { parseBranchDiff, parseBranches, parseStatus, statusCounts } from "../extensions/sidebar/git-data.ts";
 import { launchDeps, openInEditor } from "../extensions/sidebar/git-launch.ts";
 import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
@@ -199,6 +199,28 @@ test("a git that never answers for one part leaves only that part reading", asyn
 	const text = rows().join("\n");
 	assert.match(text, /Reading log…/);
 	assert.match(text, /Reading status…/);
+});
+
+test("a new folder lists every file in it, as git status --untracked-files=all does; ignored files never show", async () => {
+	const status = (args) => (args.includes("--untracked-files=all") ? "?? design/system.md\n?? design/estudio-ux/03-cursos.html\n?? design/estudio-ux/audit.md\n" : "?? design/\n");
+	const { rows, calls } = await open({ git: repo({ status, numstat: "" }) });
+	const out = rows();
+	assert.ok(calls.some(([line]) => line.includes("status --porcelain=v1 --untracked-files=all")), "every new file asked for");
+	assert.ok(out.some((row) => row.includes("● 3 files changed")));
+	for (const name of ["system.md", "03-cursos.html", "audit.md"]) assert.ok(out.some((row) => row.includes(name) && /U │$/.test(row)), `${name} listed, U`);
+	assert.ok(!out.some((row) => /design\/ +U/.test(row)), "not the folder alone");
+});
+
+test("a working tree with more new files than the list holds shows the first ones and a count of the rest", async (t) => {
+	const saved = { ...gitLimits };
+	gitLimits.files = 3;
+	t.after(() => Object.assign(gitLimits, saved));
+	const status = Array.from({ length: 5 }, (_, i) => `?? build/f${i}.js`).join("\n");
+	const { rows } = await open({ git: repo({ status, numstat: "" }) });
+	const out = rows();
+	assert.ok(out.some((row) => row.includes("● 5 files changed")), "the count is every file");
+	assert.deepEqual(["f0.js", "f1.js", "f2.js", "f3.js"].map((name) => out.some((row) => row.includes(name))), [true, true, true, false]);
+	assert.ok(out.some((row) => /… 2 more/.test(row)), "the rest counted");
 });
 
 test("two cards split the height 50/50: the commit graph on top and the working tree under it", async () => {
