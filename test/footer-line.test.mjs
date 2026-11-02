@@ -4,7 +4,6 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { Loader } from "@earendil-works/pi-tui";
 import { load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
@@ -117,42 +116,7 @@ test("while idle the model stays where the Working row ends, right-aligned and d
 	assert.equal(plain(rows[0]).lastIndexOf("medium"), working.lastIndexOf("medium"), "same column as on the Working row");
 });
 
-// Pi before the Working row moved into the editor's top border: an editor without setWorkingStatusIndicator.
-async function withoutEmbedding(run) {
-	const { setWorkingStatusIndicator } = CustomEditor.prototype;
-	delete CustomEditor.prototype.setWorkingStatusIndicator;
-	try {
-		await run();
-	} finally {
-		CustomEditor.prototype.setWorkingStatusIndicator = setWorkingStatusIndicator;
-	}
-}
-
-test("the prompt draws Pi's Working row in its top border, like Pi's own editor, without the model", async () => {
-	const loaded = await footer({ session: { cwd: "/srv/app" } });
-	const editor = loaded.editor()({ requestRender() {} }, {}, {});
-	assert.equal(editor.embedWorkingStatus, true, "asks Pi to embed the Working row");
-	editor.setWorkingStatusIndicator(loader("working"));
-	const top = plain(editor.render(40)[0]);
-	assert.equal(top, `── ⠋ Working ${"─".repeat(27)}`);
-	editor.setWorkingStatusIndicator(undefined);
-	assert.equal(plain(editor.render(40)[0]), "─".repeat(40), "a plain rule while idle");
-	assert.match(plain(loader("working").render(80)[1]), /claude-opus-5-5 · medium $/, "a Working row on its own row keeps the model");
-});
-
-test("while Pi works or compacts in the editor's border the model stays above the editor", async () => {
-	const loaded = await footer({ session: { cwd: "/srv/app" } });
-	const { component } = modelWidget(loaded);
-	await loaded.emit("agent_start");
-	assert.match(plain(component.render(80)[0]), /^ +claude-opus-5-5 · medium $/);
-	await loaded.emit("session_before_compact");
-	assert.equal(component.render(80).length, 2);
-	await loaded.emit("session_compact");
-	await loaded.emit("agent_end");
-	assert.equal(component.render(80).length, 2);
-});
-
-test("while Pi works or compacts on a Working row of its own the model widget steps aside for it", () => withoutEmbedding(async () => {
+test("while Pi works or compacts the model widget steps aside for the Working row", async () => {
 	const loaded = await footer({ session: { cwd: "/srv/app" } });
 	const { component, renders } = modelWidget(loaded);
 	await loaded.emit("agent_start");
@@ -177,7 +141,7 @@ test("while Pi works or compacts on a Working row of its own the model widget st
 	await loaded.emit("agent_start");
 	await loaded.emit("session_start");
 	assert.equal(component.render(80).length, 2);
-}));
+});
 
 test("the model widget follows model and thinking changes", async () => {
 	const loaded = await footer({ session: { cwd: "/srv/app" } });

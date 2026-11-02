@@ -124,11 +124,8 @@ same; only how it is drawn changes.
   keeps for the job, found among the files Pi holds open on Linux). Elsewhere, or when that log cannot be found,
   the click opens gentle-pi's `/gentle:jobs` list.
 - **One status line** with your folder, branch, changed lines, context, cost and plan usage. The
-  model and its effort stay at the bottom right above the editor at all times, dimmed, on the same
-  row whether Pi works or not.
-- **Pi's `⠋ Working` spinner in the prompt's top rule** (`── ⠋ Working... ─────`), as Pi's own editor
-  draws it, instead of a row of its own above the prompt. On a Pi too old for that, the `Working` row
-  stays above the prompt and the model closes it.
+  model and its effort stay at the bottom right above the editor at all times, dimmed: at the end
+  of the `Working` row while Pi works, and on that same row when it is idle.
 - **A `❯` prompt** and one-row user messages, like Claude Code.
 - **Gentle Shell's `alt+k` command menu** (models, profiles, persona, review mode, doctor…), without
   turning Gentle Shell back on.
@@ -200,7 +197,7 @@ Common choices:
 - `MCP 3/3`: MCP servers online / installed.
 - `⠋ 1 job`: background jobs (bash_background, monitor) still running; the spinner turns while they run.
 - `claude-opus-5-5 · high` (bottom right, above the editor): the model in use and its effort. It is
-  always there, on the same row while Pi works and when it is idle.
+  always there: at the end of the `Working` row while Pi works, on that same row when it is idle.
 
 ## Limits
 
