@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { load, lines, role, theme } from "./helpers.mjs";
+import { load, lines, role, theme, writeConfig } from "./helpers.mjs";
 
 // Pi's edit diff format: "-<n> old", "+<n> new", " <n> context".
 const result = (diff) => ({ content: [{ type: "text", text: "ok" }], details: { diff } });
@@ -11,16 +11,18 @@ async function draw(diff, width = 70) {
 	return renderers.renderResult(result(diff), {}, theme, { args: { path: "src/a.ts" } }).render(width);
 }
 
-test("edit shows the counts and its first two changed lines", async () => {
+test("edit keeps to one row: the counts, with its changed lines behind ctrl+o", async () => {
 	const out = await draw(" 1 keep\n-2 const a = 1;\n+2 const a = 2;\n+3 const b = 3;\n 4 keep");
 	const plainOut = lines({ render: () => out }).map((line) => line.trimEnd());
+	assert.equal(plainOut.length, 1);
 	assert.match(plainOut[0], /^ └ ✓ \+2 -1 +ctrl\+o to expand$/);
-	assert.deepEqual(plainOut.slice(1), ["   -2 const a = 1;", "   +2 const a = 2;"]);
 });
 
-test("an edit with only two changed lines has nothing more to expand", async () => {
+test("a one-line edit is also a single row", async () => {
 	const rendered = await draw("-1 old\n+1 new");
-	assert.deepEqual(lines({ render: () => rendered }).map((line) => line.trimEnd()), [" └ ✓ +1 -1", "   -1 old", "   +1 new"]);
+	const plainOut = lines({ render: () => rendered }).map((line) => line.trimEnd());
+	assert.equal(plainOut.length, 1);
+	assert.match(plainOut[0], /^ └ ✓ \+1 -1 +ctrl\+o to expand$/);
 });
 
 test("an edit without a diff keeps the plain summary", async () => {
@@ -52,8 +54,11 @@ const colorBefore = (line, snippet) => rgbOf(line.slice(0, line.indexOf(snippet)
 const brightness = ([r, g, b]) => r + g + b;
 const themeRgb = (t, name) => [t.colors[name].r, t.colors[name].g, t.colors[name].b];
 
+// Diff rows show under the summary only with Quiet preview lines above 0.
 async function drawWith(t, diff, width = 70) {
+	writeConfig({ quiet: { preview: 3 } });
 	const { tool } = await load();
+	writeConfig({});
 	const renderers = tool("edit", { renderCall() {}, renderResult() {} });
 	return renderers.renderResult(result(diff), {}, t, { args: { path: "src/a.ts" } }).render(width);
 }
@@ -112,7 +117,9 @@ test("a theme switch repaints the diff rows without a reload", async () => {
 	// Pi hands extensions one theme proxy that forwards to the current theme.
 	let current = COLORFUL;
 	const live = new Proxy({}, { get: (_target, key) => current[key] });
+	writeConfig({ quiet: { preview: 3 } });
 	const { tool } = await load();
+	writeConfig({});
 	const component = tool("edit", { renderCall() {}, renderResult() {} }).renderResult(result("-2 a\n+2 b"), {}, live, { args: { path: "src/a.ts" } });
 	assert.deepEqual(colorBefore(component.render(70)[2], "+2 b"), themeRgb(COLORFUL, "toolDiffAdded"));
 	current = GREY;
