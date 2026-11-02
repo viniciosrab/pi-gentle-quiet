@@ -9,8 +9,9 @@
 //   footer  Pi's footer -> " ~/app · main ±2 +3 -1 · Perm: Normal      ctx 󰪟 28% · $1.75 sub"
 //           with the extension statuses (Gentle Shell's bar, without the brand and usage);
 //           gentle-pi's "⧗ 1 job" becomes "⠋ 1 job" with Pi's braille spinner turning while jobs run
-//   model   the model and effort, dim, always at the bottom right above the editor: Pi's " ⠋ Working" row
-//           ends with "      claude-opus-5-5 · high", and while idle the same label holds that row alone
+//   model   the model and effort, dim, always at the bottom right above the editor, working or idle;
+//           Pi's " ⠋ Working" row sits in the prompt's top rule ("── ⠋ Working... ───"), as in Pi's
+//           own editor (on an older Pi it keeps its row, closed by "      claude-opus-5-5 · high")
 //   agents  subagent results -> " ◈ gentle-ai-explore · done" + " └ first line of the answer"
 //   blocks  Todos and Agents panels lose their background, accent bar and
 //           padding rows, line up with that same margin and get a square
@@ -728,10 +729,12 @@ function redraw() {
 // from pi-pretty's PromptEditor without its rounded corners and side borders.
 // "❯ " flush with the margin: Collie (herdr phone bridge) only recognises the
 // pi input box when the icon sits in column 0, as in oh-my-pi's layout.
+// Like Pi's own editor it embeds the Working row: Pi then draws "── ⠋ Working... ───"
+// as the top rule instead of a row of its own above the prompt.
 const PROMPT_WIDTH = 2; // "❯ "
 class PromptEditor extends CustomEditor {
 	constructor(tui, editorTheme, keybindings, options) {
-		super(tui, editorTheme, keybindings, options);
+		super(tui, editorTheme, keybindings, { ...options, embedWorkingStatus: true });
 		this.userPaddingX = super.getPaddingX();
 		super.setPaddingX(this.userPaddingX + PROMPT_WIDTH);
 		attachImagePaste(this, tui);
@@ -2851,8 +2854,15 @@ let piApi; // the extension API, for the MCP tool and server lists
 // Pi's "⠋ Working" row is a Loader of kind "working": the model and its effort close it, right-aligned
 // and dim. The prototype is patched once per Pi process and outlives /reload, so the patch reads the
 // label through a global slot that every load of this module points at its own function.
+// Pi's editors (its own and the prompt above) draw that Loader inside their top rule instead; there the
+// model stays out, flagged while the editor draws the rule, and keeps its row above the editor.
 const WORKING_PATCHED = Symbol.for("gentle-quiet.workingPatched");
 const WORKING_MODEL = Symbol.for("gentle-quiet.workingModel");
+const BORDER_PATCHED = Symbol.for("gentle-quiet.borderPatched");
+const IN_BORDER = Symbol.for("gentle-quiet.inBorder");
+
+/** Pi draws its Working row in the editor's top rule (Pi versions with setWorkingStatusIndicator). */
+const workingInBorder = () => typeof CustomEditor?.prototype?.setWorkingStatusIndicator === "function";
 
 /** "claude-opus-5-5 · high"; "" while no model is known. */
 function modelLabel() {
@@ -2877,6 +2887,19 @@ function workingModel() {
 
 function patchWorkingRow() {
 	globalThis[WORKING_MODEL] = workingModel;
+	const editor = CustomEditor?.prototype;
+	if (typeof editor?.renderTopBorder === "function" && !editor[BORDER_PATCHED]) {
+		const renderTopBorder = editor.renderTopBorder;
+		editor[BORDER_PATCHED] = renderTopBorder;
+		editor.renderTopBorder = function renderTopBorderWithoutModel(...args) {
+			globalThis[IN_BORDER] = true;
+			try {
+				return renderTopBorder.apply(this, args);
+			} finally {
+				globalThis[IN_BORDER] = false;
+			}
+		};
+	}
 	const proto = PiTui.Loader?.prototype;
 	if (typeof proto?.render !== "function" || proto[WORKING_PATCHED]) return;
 	const original = proto.render;
@@ -2884,7 +2907,7 @@ function patchWorkingRow() {
 	proto.render = function render(width) {
 		const rows = original.call(this, width);
 		try {
-			const label = this?.kind === "working" ? globalThis[WORKING_MODEL]?.() : "";
+			const label = this?.kind === "working" && !globalThis[IN_BORDER] ? globalThis[WORKING_MODEL]?.() : "";
 			if (!label || rows?.length !== 2) return rows;
 			const left = rows[1].trimEnd();
 			const gap = width - 1 - visibleWidth(left) - visibleWidth(label);
@@ -2897,7 +2920,8 @@ function patchWorkingRow() {
 }
 
 // While idle, fullscreen Pi drops the Working row and keeps only the blank spacer above the editor, so
-// a widget of [label row, ""] puts the model on that same screen row; while Pi works it draws nothing.
+// a widget of [label row, ""] puts the model on that same screen row; while Pi works on a row of its own
+// it draws nothing. With the Working row in the editor's top rule the model stays there at all times.
 const MODEL_WIDGET = "gentle-quiet:model";
 // A run or a compaction (which can also happen mid-run) is on, so Pi shows its Working or Compacting row.
 const busy = { running: false, compacting: false };
@@ -2912,7 +2936,8 @@ function modelWidget(tui) {
 	modelTui = tui;
 	return {
 		render(width) {
-			const label = busy.running || busy.compacting || !config.statusLine.enabled ? "" : workingModel();
+			const ownRow = (busy.running || busy.compacting) && !workingInBorder();
+			const label = ownRow || !config.statusLine.enabled ? "" : workingModel();
 			const gap = width - 1 - visibleWidth(label);
 			return label && gap >= 0 ? [`${" ".repeat(gap)}${label} `, ""] : [];
 		},

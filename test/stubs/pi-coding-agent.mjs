@@ -1,10 +1,21 @@
 // Minimal stand-in for @earendil-works/pi-coding-agent: just what gentle-quiet imports.
 
-/** Base editor: renders a top rule, the text lines indented by the padding, and a bottom rule. */
+/** Base editor: renders a top rule, the text lines indented by the padding, and a bottom rule. Like Pi's,
+ * an editor built with embedWorkingStatus draws the Working row in its top rule: "── ⠋ Working ────". */
 export class CustomEditor {
-	constructor() {
+	constructor(_tui, _theme, _keybindings, options) {
 		this.paddingX = 0;
 		this.lines = ["hello", "world"];
+		this.embedWorkingStatus = options?.embedWorkingStatus ?? false;
+	}
+	setWorkingStatusIndicator(indicator) {
+		this.workingStatusIndicator = indicator;
+	}
+	renderTopBorder(width) {
+		if (!this.embedWorkingStatus || !this.workingStatusIndicator) return "─".repeat(width);
+		// Pi's StatusIndicator.renderInBorder: the Loader's row, without its left padding and trailing blanks.
+		const status = this.workingStatusIndicator.render(width + 2)[1].slice(1).trimEnd();
+		return `── ${status} ${"─".repeat(Math.max(0, width - [...status].length - 4))}`;
 	}
 	getPaddingX() {
 		return this.paddingX;
@@ -17,7 +28,7 @@ export class CustomEditor {
 	}
 	render(width) {
 		const rule = "─".repeat(width);
-		return [rule, ...this.lines.map((line) => " ".repeat(this.paddingX) + line), rule];
+		return [this.renderTopBorder(width), ...this.lines.map((line) => " ".repeat(this.paddingX) + line), rule];
 	}
 	// Draft editing, like Pi's Editor: the cursor sits at the end of the last line.
 	getText() {
