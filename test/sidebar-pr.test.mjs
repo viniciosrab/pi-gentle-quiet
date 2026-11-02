@@ -260,6 +260,8 @@ test("verdicts: the most serious one wins, in order", () => {
 		[{ merge: "BEHIND" }, "behind"],
 		[{ checks: [run("CI", "COMPLETED", "SUCCESS"), run("docs", "COMPLETED", "SKIPPED")], review: "APPROVED" }, "ready"],
 		[{}, "ready"],
+		[{ threads: [thread("x", { resolved: true })] }, "resolved"],
+		[{ threads: [thread("x", { resolved: true })], review: "REVIEW_REQUIRED", merge: "BLOCKED" }, "review"],
 	];
 	for (const [fields, kind] of cases) assert.equal(verdictOf(pr(fields)).kind, kind, `${JSON.stringify(fields)} → ${kind}`);
 	assert.equal(verdictOf(pr({ threads: [thread("a"), thread("b"), thread("c", { resolved: true })] })).count, 2);
@@ -644,6 +646,18 @@ test("more review threads than were read: the count says so and the PR is never 
 	assert.ok(plain(row("#4 ")).includes("⚠ threads?"));
 	assert.ok(painted(row("#4 "), "warning", "⚠ threads?"));
 	assert.ok(plain(row("[ Fix")).includes("[ Fix 2+ threads with agent ]"));
+});
+
+test("every review thread resolved: the verdict says so and the detail counts them", async () => {
+	const done = node({ number: 7, title: "done", head: "done", threads: [thread("a", { resolved: true }), thread("bb", { resolved: true })] });
+	const waiting = node({ number: 6, title: "waiting", head: "waiting", review: "REVIEW_REQUIRED", merge: "BLOCKED", threads: [thread("a", { resolved: true })] });
+	const { row, rows } = await open({ gh: answer([done, waiting]), git: stubGit({ branch: "done\n" }).git });
+	assert.ok(plain(row("#7 ")).trimEnd().endsWith("◉ ✓ threads resolved │"));
+	assert.ok(painted(row("#7 "), "success", "✓ threads resolved"));
+	assert.ok(plain(row("#6 ")).trimEnd().endsWith("⧗ review │"), "a review still waited on wins over resolved threads");
+	assert.ok(rows().some((line) => /^│ +Threads ✓ 2 resolved +│$/.test(line)), "the resolved ones counted, none listed");
+	assert.ok(painted(row("Threads ✓"), "dim", "Threads") && painted(row("Threads ✓"), "success", "✓ 2 resolved"));
+	assert.ok(!rows().some((line) => line.includes("[ Fix")), "nothing left for the agent");
 });
 
 test("no open pull requests: one row saying so", async () => {

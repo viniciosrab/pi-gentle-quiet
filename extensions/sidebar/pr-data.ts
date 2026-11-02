@@ -180,6 +180,7 @@ function parsePull(item) {
 		review: REVIEW[item?.reviewDecision],
 		checks: parseChecks(contexts),
 		threads,
+		threadsResolved: nodes.filter((node) => node?.isResolved).length,
 		threadsPartial: Number(item?.reviewThreads?.totalCount ?? nodes.length) > nodes.length,
 	};
 }
@@ -247,7 +248,8 @@ export function stackOf(prs, owner) {
 
 /**
  * What a PR waits on, the most serious first: conflicts, ci-failed, changes, threads ({ count, partial }),
- * ci-running, draft, review, blocked, behind, else ready. Threads not all read never count as none.
+ * ci-running, draft, review, blocked, behind, else resolved (review threads, all resolved) or ready. Threads not
+ * all read never count as none.
  */
 export function verdictOf(pr) {
 	const states = pr.checks.map((check) => check.state);
@@ -260,6 +262,7 @@ export function verdictOf(pr) {
 	if (pr.review === "review required") return { kind: "review" };
 	if (pr.merge === "blocked") return { kind: "blocked" };
 	if (pr.merge === "behind") return { kind: "behind" };
+	if (pr.threadsResolved) return { kind: "resolved" };
 	return { kind: "ready" };
 }
 

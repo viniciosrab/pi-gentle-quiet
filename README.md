@@ -94,10 +94,10 @@ same; only how it is drawn changes.
   source, and dims the screen behind the pop-up); **PR** the repository's open pull requests from one `gh api graphql` call (in a fork's clone, where gh reads the
   upstream, only the ones you opened there), drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
-  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
+  ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ threads resolved when every review thread was resolved, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,
   ⧗ CI 5/10, ✗ CI 9/10; skipped ones left out) that stands for a ✗ CI or ⧗ CI verdict; a click on a PR
   expands its detail under its bold title (mergeability, review, then `Checks 2/3` and `Threads 4` over each check and
-  each unresolved thread, and a blank row closing the block) or closes it, several open at once, the current branch's PR (◉) to begin with,
+  each unresolved thread, or `Threads ✓ 2 resolved` when none is left, and a blank row closing the block) or closes it, several open at once, the current branch's PR (◉) to begin with,
   the stack's line running on through the detail of a PR with PRs under it, and a check or a thread
   opens in the browser. On the current branch's PR, [ Fix N threads with agent ] and [ Fix CI ] put the
   threads or the failed checks in Pi's editor for you to send. Files open in your editor (`e` in the preview) in a herdr tab

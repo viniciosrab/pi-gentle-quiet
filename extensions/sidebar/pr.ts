@@ -3,7 +3,7 @@
 //
 // - The title counts the open PRs ("⇄ Pull requests · 4"). Every PR is one row: "#19 <title>" and flush right
 //   its verdict, the most serious of ✗ conflicts, ✗ CI, ✗ changes, ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review,
-//   ⊘ blocked, ↓ behind, else ✓ ready. Before the verdict a PR with checks shows its CI chip, the passed checks
+//   ⊘ blocked, ↓ behind, else ✓ threads resolved (it had review threads, all resolved) or ✓ ready. Before the verdict a PR with checks shows its CI chip, the passed checks
 //   of those that count (skipped ones left out): "✓ CI 10/10", "⧗ CI 5/10", "✗ CI 9/10"; it stands for a ✗ CI
 //   or ⧗ CI verdict, which is not drawn as well. The current branch's PR is marked ◉ before them.
 // - The rows follow the stack: a PR whose base is another open PR's head sits under it ("├ #19", "└ #20").
@@ -11,7 +11,7 @@
 // - The title is bold. Any number of PRs are expanded (▾, the others ▸), the current branch's PR to begin with.
 //   The detail sits under the title, muted: mergeability, review and "no checks" on one row, "Checks 2/3" (dim)
 //   then each check with its state, "Threads 4" (dim) then each unresolved thread (severity, title, file:line;
-//   eight at most, then "+N more"), then the buttons, and a blank row that carries the stack's lines on to the
+//   eight at most, then "+N more"), or "Threads ✓ 2 resolved" when every one is resolved, then the buttons, and a blank row that carries the stack's lines on to the
 //   next PR (none after the last). When PRs sit under it, its detail rows carry the stack's "│" in its marker's
 //   column, down to its first "├" or "└".
 // - On the current branch's PR only, when Pi's editor is there, [ Fix N threads with agent ] and [ Fix CI ]
@@ -50,6 +50,7 @@ const VERDICTS = {
 	review: ["warning", "⧗ review"],
 	blocked: ["warning", "⊘ blocked"],
 	behind: ["warning", "↓ behind"],
+	resolved: ["success", "✓ threads resolved"],
 	ready: ["success", "✓ ready"],
 };
 const CHIPS = { passed: ["success", "✓"], failed: ["error", "✗"], running: ["warning", "⧗"] };
@@ -237,6 +238,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		}
 
 		if (pr.threads.length) push({ left: c("dim", `Threads ${pr.threads.length}${pr.threadsPartial ? "+" : ""}`) });
+		else if (pr.threadsResolved && !pr.threadsPartial) push({ left: `${c("dim", "Threads")} ${c("success", `✓ ${pr.threadsResolved} resolved`)}` });
 
 		for (const thread of pr.threads.slice(0, MAX_THREADS)) {
 			const severity = thread.severity && c(/^P[01]$/.test(thread.severity) ? "error" : "warning", thread.severity);
