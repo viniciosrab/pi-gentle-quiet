@@ -1,4 +1,4 @@
-// The PR tab's data: every open pull request of the repository from one `gh api graphql` call, with its base
+// The PR tab's data: every open pull request of the repository (only yours on a fork's upstream) from one `gh api graphql` call, with its base
 // and head, mergeability, review decision, checks and unresolved review threads; the current branch's PR among
 // them (matched by branch and head repository), its stack, its verdict and the prompts that hand its threads or
 // failed checks to the agent. The process call is asynchronous with a timeout; a failure comes back as a short
@@ -28,11 +28,15 @@ const PR_FIELDS =
 	"commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}} " +
 	"reviewThreads(last:100){totalCount nodes{isResolved path line comments(first:1){nodes{author{login} body url}}}}";
 
-// The newest open PRs, and apart ("mine") the open PRs of the current branch, so its PR shows even past LIMIT.
+// The newest open PRs, apart ("mine") the open PRs of the current branch, so its PR shows even past LIMIT, and
+// ("authored") the open PRs you opened there, which are all a fork's clone lists of its upstream.
 const QUERY =
-	`query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){owner{login} ` +
+	`query($owner:String!,$name:String!,$branch:String!,$q:String!){repository(owner:$owner,name:$name){owner{login} ` +
 	`pullRequests(states:OPEN,first:${LIMIT},orderBy:{field:CREATED_AT,direction:DESC}){nodes{...pr}} ` +
-	`mine:pullRequests(states:OPEN,headRefName:$branch,first:10){nodes{...pr}}}} fragment pr on PullRequest{${PR_FIELDS}}`;
+	`mine:pullRequests(states:OPEN,headRefName:$branch,first:10){nodes{...pr}}} ` +
+	`authored:search(query:$q,type:ISSUE,first:${LIMIT}){nodes{...pr}}} fragment pr on PullRequest{${PR_FIELDS}}`;
+// GitHub's search for your open PRs on the repository gh reads; gh fills in {owner} and {repo}.
+const AUTHORED = "repo:{owner}/{repo} is:pr is:open author:@me";
 
 /** Opens a web link in the browser with xdg-open, detached; false when it cannot start. */
 export function openUrl(url) {
@@ -183,12 +187,15 @@ function parsePull(item) {
 /**
  * The GraphQL answer as { owner, prs } (the repository's owner and its open PRs, newest first, then the current
  * branch's PRs the first page left out), or { problem } when GitHub answered an error or nothing readable.
- * `branch` keeps only the "mine" PRs of that branch; without it they are all kept.
+ * `branch` keeps only the "mine" PRs of that branch; without it they are all kept. `origin` is the owner of the
+ * clone's origin remote: when gh read another repository (a fork's upstream), only the PRs you opened there show.
  */
-export function parsePulls(json, branch = undefined) {
+export function parsePulls(json, branch = undefined, origin = undefined) {
 	const repo = json?.data?.repository;
 	if (!repo) return { owner: undefined, prs: [], problem: json?.errors?.[0]?.message || "unreadable answer" };
-	const prs = (repo.pullRequests?.nodes ?? []).filter(Boolean).map(parsePull);
+	const fork = origin !== undefined && repo.owner?.login !== undefined && origin.toLowerCase() !== repo.owner.login.toLowerCase();
+	const listed = fork ? json?.data?.authored?.nodes : repo.pullRequests?.nodes;
+	const prs = (listed ?? []).filter((item) => item?.number !== undefined).map(parsePull);
 	for (const item of repo.mine?.nodes ?? []) {
 		if (!item || (branch !== undefined && item.headRefName !== branch)) continue;
 		if (!prs.some((pr) => pr.number === item.number)) prs.push(parsePull(item));
@@ -302,7 +309,13 @@ export async function loadPr(host: SidebarHost, cwd) {
 		branch = "";
 	}
 	const remoteUrl = branch ? await upstreamUrl(host, cwd) : undefined;
-	const answer = await gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", `branch=${branch}`, "-f", `query=${QUERY}`], cwd);
+	let originUrl;
+	try {
+		originUrl = (await host.git(["remote", "get-url", "origin"], cwd))?.trim() || undefined;
+	} catch {
+		originUrl = undefined;
+	}
+	const answer = await gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", `branch=${branch}`, "-F", `q=${AUTHORED}`, "-f", `query=${QUERY}`], cwd);
 	if (!answer.ok) {
 		const problem = ghProblem(answer.error, answer.stderr);
 		return { kind: "problem", branch, message: problem === "none" ? "No open pull requests" : problem };
@@ -313,7 +326,7 @@ export async function loadPr(host: SidebarHost, cwd) {
 	} catch {
 		return { kind: "problem", branch, message: "gh: unreadable answer" };
 	}
-	const { owner, prs, problem } = parsePulls(json, branch);
+	const { owner, prs, problem } = parsePulls(json, branch, ownerOfUrl(originUrl));
 	if (problem) return { kind: "problem", branch, message: `gh: ${problem}` };
 	return { kind: "list", branch, owner, prs, current: currentPr(prs, branch, owner, remoteUrl)?.number };
 }

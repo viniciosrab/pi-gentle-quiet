@@ -74,7 +74,7 @@ const P20 = node({
 });
 const P15 = node({ number: 15, title: "chore: bump pi-tui", head: "chore/tui", checks: [run("CI", "COMPLETED", "FAILURE"), run("lint", "IN_PROGRESS")] });
 
-const answer = (nodes, mine = []) => ({ data: { repository: { owner: { login: "o" }, pullRequests: { nodes }, mine: { nodes: mine } } } });
+const answer = (nodes, mine = [], { owner = "o", authored = [] } = {}) => ({ data: { repository: { owner: { login: owner }, pullRequests: { nodes }, mine: { nodes: mine } }, authored: { nodes: authored } } });
 const STACK = answer([P20, P19, P18, P15]);
 
 // What `gh api graphql` answers: an object, a function of the arguments, or { code, stderr } to fail.
@@ -607,6 +607,25 @@ test("a fork's PR with the same branch name is not the current one; the branch's
 	assert.ok(git.calls.includes("remote get-url fork"));
 	assert.equal(currentPr(parsePulls(gh).prs, "feat/prof-keyboard", "o", "https://github.com/someone/r").number, 30, "an https remote");
 	assert.equal(currentPr(parsePulls(gh).prs, "feat/none", "o", undefined), undefined);
+});
+
+test("in a fork the tab lists only your PRs on the repository gh reads (the upstream), not everyone's", async () => {
+	const theirs = node({ number: 240, title: "fix: someone else's work", head: "fix/other", owner: "upstream-dev" });
+	const yours = node({ number: 18, title: "fix: mirror the prompt", head: "fix/mirror", owner: "me" });
+	const gh = answer([theirs, yours], [], { owner: "upstream-org", authored: [yours] });
+	const git = stubGit({ branch: "fix/mirror\n", upstream: "origin/fix/mirror\n", remotes: { origin: "git@github.com:me/pi-claude-bridge.git\n" } });
+	const { numbers, rows, calls } = await open({ gh, git: git.git });
+	assert.deepEqual(numbers(), [18], "your PR only");
+	assert.match(rows().find((line) => line.includes("#18 ")), /▾ #18 .*◉/, "and it is the current branch's");
+	assert.ok(git.calls.includes("remote get-url origin"));
+	const q = calls[0].args.find((arg, i) => calls[0].args[i - 1] === "-F" && arg.startsWith("q="));
+	assert.equal(q, "q=repo:{owner}/{repo} is:pr is:open author:@me", "GitHub's search for your open PRs there");
+	assert.ok(calls[0].args.find((arg) => arg.startsWith("query=")).includes("authored:search(query:$q,type:ISSUE"));
+	// Your own repository (origin is the repository gh reads) still lists every open PR.
+	const own = stubGit({ remotes: { origin: "https://github.com/o/r.git\n" } });
+	assert.deepEqual((await open({ git: own.git })).numbers(), [18, 20, 19, 15]);
+	assert.deepEqual(parsePulls(gh, "fix/mirror", "me").prs.map((pr) => pr.number), [18]);
+	assert.deepEqual(parsePulls(gh, "fix/mirror", "upstream-org").prs.map((pr) => pr.number), [240, 18], "the owner's own clone: everyone's");
 });
 
 test("the current PR past the first 30 still shows, from the branch's own query", async () => {
