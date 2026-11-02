@@ -228,7 +228,7 @@ test("two cards split the height 50/50: the commit graph on top and the working 
 	const out = rows();
 	assert.equal(out.length, 40, "the cards fill the tab");
 	assert.match(out[0], /^┌─+┐$/);
-	assert.match(out[1], /^│ ⎇ Git +\[ Graph \| Branches \] │$/);
+	assert.match(out[1], /^│ ⎇ Git ▲ +\[ Graph \| Branches \] │$/, "the arrow says the card folds, as the Working tree's");
 	const topEnd = out.findIndex((row) => row.startsWith("└"));
 	assert.equal(topEnd + 1, 20, "top card: half of the 40 rows");
 	assert.match(out[20], /^┌/, "the Working tree card right under it, as the MAIN tab's cards: no blank row between");
@@ -309,16 +309,17 @@ test("with TREE's nerd icons each file row starts with the glyph and color TREE 
 	assert.match(out.find((row) => row.includes("Dockerfile")), / Dockerfile +U │$/);
 });
 
-test("a row that does not fit drops the icon before cutting the path; the counts and letter stay", async () => {
+test("a row that does not fit keeps its icon and shortens the folders from the start, the name last; the counts and letter stay", async () => {
 	const git = repo({ status: " M src/components/widget.ts\n", numstat: "1\t1\tsrc/components/widget.ts\n" });
 	// The nerd glyph is one cell (an emoji is two in a terminal), so the widths below hold on either measure.
 	const { rows } = await open({ git, treeIcons: "nerd" }, { width: 39, height: 30 });
-	const icon = nerdIcon("widget.ts").char;
-	const row = (width) => rows(width, 30).find((line) => line.includes("src/comp"));
-	assert.match(row(39), new RegExp(`│ ${esc(icon)} src/components/widget\\.ts \\+1 −1 {2}M │$`), "fits with its icon");
-	for (const width of [38, 37]) assert.match(row(width), /│ src\/components\/widget\.ts +\+1 −1 {2}M │$/, "icon dropped, path whole");
-	assert.match(row(34), /│ src\/components\/widge… \+1 −1 {2}M │$/, "path cut last");
-	assert.ok(!row(34).includes(icon));
+	const icon = esc(nerdIcon("widget.ts").char);
+	const row = (width) => rows(width, 30).find((line) => line.includes("widge"));
+	assert.match(row(39), new RegExp(`│ ${icon} src/components/widget\\.ts \\+1 −1 {2}M │$`), "fits whole");
+	for (const width of [38, 37]) assert.match(row(width), new RegExp(`│ ${icon} …/components/widget\\.ts +\\+1 −1 {2}M │$`), "the first folder gives way, whole folders at a time");
+	for (const width of [34, 26]) assert.match(row(width), new RegExp(`│ ${icon} …/widget\\.ts +\\+1 −1 {2}M │$`), "then every folder");
+	assert.match(row(24), new RegExp(`│ ${icon} widget\\.ts \\+1 −1 {2}M │$`), "then the …/ too");
+	assert.match(row(22), new RegExp(`│ ${icon} widget… \\+1 −1 {2}M │$`), "the name is cut last");
 });
 
 test("the tab opens on the branch list, Branches lit in the toggle", async () => {
@@ -528,11 +529,12 @@ test("a click on a card's title folds it to a summary row and gives its room to 
 	assert.ok(!out.some((row) => row.includes("src/a.ts")));
 	assert.ok(lineOf(/Working tree ▼/) > 30, "the graph card took the room");
 	assert.equal(out.length, 40);
-	assert.equal(click(/⎇ Git/), true);
+	assert.equal(click(/⎇ Git ▲/), true);
 	out = rows();
+	assert.ok(out.some((row) => /│ ⎇ Git ▼ +│$/.test(row)), "folded: the arrow turns");
 	assert.ok(out.some((row) => /│ main · a1b2c3d Add.* ● 1 mod · \+1 staged/.test(row)), "the graph folded to branch and last commit");
 	assert.ok(!out.some((row) => row.includes("Graph | Branches")));
-	click(/⎇ Git/);
+	click(/⎇ Git ▼/);
 	click(/Working tree ▼/);
 	assert.ok(rows().some((row) => row.includes("src/a.ts")));
 });
@@ -560,7 +562,7 @@ test("without the outline the rows are indented and clicks still land on the rig
 	try {
 		const { rows, click } = await open({ outline: false });
 		const out = rows();
-		assert.match(out[0], /^ ⎇ Git +\[ Graph \| Branches \]$/);
+		assert.match(out[0], /^ ⎇ Git ▲ +\[ Graph \| Branches \]$/);
 		assert.match(out.find((row) => row.includes("src/a.ts")), new RegExp(`^ ${DOC} src/a\\.ts +\\+10 −2 {2}M$`), "counts and letter flush right without the outline too");
 		assert.equal(click(/src\/a\.ts/, { at: "+10" }), true);
 		assert.match(launches.runs.at(-1).args.at(-1), /^nvim '\/repo\/src\/a\.ts'$/);

@@ -42,13 +42,26 @@ const FILE_BADGES = {
 
 /**
  * One row of a card: `left` cut to fit, `right` against the right edge; `hit` is what a click on it does.
- * A row with a `narrow` left uses it, before any cut, when `left` does not fit.
+ * A row with `shorten` gets its left from shorten(room), before any cut, when `left` does not fit.
  */
+// The folders of a path (`dir`, with its last "/") in `room` columns: whole, else "…/" and as many of its last
+// folders as fit, else "…/", else nothing.
+function foldersIn(dir, room) {
+	if (visibleWidth(dir) <= room) return dir;
+	let tail = "";
+	for (const folder of dir.slice(0, -1).split("/").reverse()) {
+		const next = `${folder}/${tail}`;
+		if (visibleWidth(next) + 2 > room) break;
+		tail = next;
+	}
+	return room >= 2 ? `…/${tail}` : "";
+}
+
 function fitRow(row, inner) {
 	const right = row.right ?? "";
 	const rightWidth = visibleWidth(right);
 	const room = Math.max(0, inner - (rightWidth ? rightWidth + 1 : 0));
-	const whole = row.narrow !== undefined && visibleWidth(row.left ?? "") > room ? row.narrow : (row.left ?? "");
+	const whole = typeof row.shorten === "function" && visibleWidth(row.left ?? "") > room ? row.shorten(room) : (row.left ?? "");
 	const left = visibleWidth(whole) > room ? truncateToWidth(whole, room, "…") : whole;
 	if (!rightWidth) return { text: left, rightAt: inner };
 	const gap = Math.max(1, inner - visibleWidth(left) - rightWidth);
@@ -137,24 +150,27 @@ export function createTab(host: SidebarHost): SidebarTab {
 	const counts = (file) => [file.added > 0 && ["toolDiffAdded", `+${file.added}`], file.deleted > 0 && ["toolDiffRemoved", `−${file.deleted}`]].filter(Boolean);
 	const countsWidth = (files) => Math.max(0, ...files.map((file) => visibleWidth(counts(file).map(([, text]) => text).join(" "))));
 
-	// Icon and path on the left (the icon goes first when the row is narrow); on the right the counts, padded to
-	// `width` so the status letter, last, lines up across the rows.
+	// Icon and path on the left; when the row is narrow the icon stays and the folders give way from the start
+	// ("…/screens/Editor.tsx"), the name last. On the right the counts, padded to `width` so the status letter,
+	// last, lines up across the rows.
 	const fileRow = (file, width) => {
 		const [role, letter] = FILE_BADGES[file.status] ?? FILE_BADGES.modified;
 		const slash = file.path.lastIndexOf("/");
-		const name = slash < 0 ? c("text", file.path) : `${c("dim", file.path.slice(0, slash + 1))}${c("text", file.path.slice(slash + 1))}`;
+		const base = file.path.slice(slash + 1);
+		const named = (dir) => `${dir ? c("dim", dir) : ""}${c("text", base)}`;
+		const icon = `${fileIcon(base)} `;
 		const parts = counts(file);
 		const shown = parts.map(([tone, text]) => c(tone, text)).join(" ");
 		const pad = " ".repeat(Math.max(0, width - visibleWidth(parts.map(([, text]) => text).join(" "))));
 		return {
-			left: `${fileIcon(file.path.slice(slash + 1))} ${name}`,
-			narrow: name,
+			left: `${icon}${named(file.path.slice(0, slash + 1))}`,
+			shorten: (room) => `${icon}${named(foldersIn(file.path.slice(0, slash + 1), room - visibleWidth(icon) - visibleWidth(base)))}`,
 			right: width ? `${shown}${pad}  ${c(role, letter)}` : c(role, letter),
 			hit: { kind: "file", path: file.path, untracked: file.status === "untracked" },
 		};
 	};
 
-	// The top card: title with the view toggle, then the graph or the branch list (or one summary row, folded).
+	// The top card: title (▲, or ▼ folded, as the Working tree's) with the view toggle, then the graph or the branch list (or one summary row, folded).
 	const graphCard = (snap, width) => {
 		const { repo, graph, status, branches } = snap;
 		const compact = width < COMPACT_WIDTH;
@@ -164,7 +180,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		const bar = toggle.indexOf("|");
 		const head = [
 			{
-				left: title([host.icons?.branch, "Git"].filter(Boolean).join(" ")),
+				left: `${title([host.icons?.branch, "Git"].filter(Boolean).join(" "))} ${c("dim", state.folded.graph ? "▼" : "▲")}`,
 				right: state.folded.graph ? "" : styledToggle,
 				hit: { kind: "title", card: "graph", buttons: state.folded.graph ? [] : [{ from: 0, to: bar, action: "graph" }, { from: bar + 1, to: toggle.length, action: "branches" }] },
 			},
