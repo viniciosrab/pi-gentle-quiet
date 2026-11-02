@@ -156,10 +156,9 @@ export async function changesPreview(file, changes) {
 
 function withRows(content, rows) {
 	const count = (sign) => rows.filter((row) => row.sign === sign).length;
-	// The widest numbers of each column.
+	// The widest line number, in the new file.
 	const last = rows.reduce((most, row) => Math.max(most, row.number ?? 0), 1);
-	const lastOld = rows.reduce((most, row) => Math.max(most, row.old ?? 0), 1);
-	return { ...content, lines: rows.map((row) => row.text), rows, last, lastOld, added: count("+"), removed: count("-"), blocks: changeBlocks(rows) };
+	return { ...content, lines: rows.map((row) => row.text), rows, last, added: count("+"), removed: count("-"), blocks: changeBlocks(rows) };
 }
 
 /** Given text for the preview, as readPreview gives a file's: { lines } or { empty }, { error } when it fails. */
@@ -471,16 +470,15 @@ class FilePreview {
 		return this.rendered.rows;
 	}
 
-	// The source lines wrapped to fit beside their numbers in `inner` columns: { room, digits, oldDigits, rows,
+	// The source lines wrapped to fit beside their numbers in `inner` columns: { room, digits, rows,
 	// starts }, each row { index, part, first } and starts[i] the row line i begins on. Wrapped again only when
 	// the room changes, keeping the line at the view's top there.
 	wrapped(inner) {
 		const content = this.content;
 		const diff = content.rows;
 		const digits = String(diff ? content.last : content.lines.length).length;
-		const oldDigits = diff ? String(content.lastOld).length : 0;
-		// VS Code's gutter: "<old> <new> <sign> " before the code.
-		const room = Math.max(1, inner - digits - 1 - (diff ? oldDigits + 1 + 3 : 0));
+		// A diff's gutter: "<number> <sign> " before the code, the number in the new file.
+		const room = Math.max(1, inner - digits - 1 - (diff ? 2 : 0));
 		if (this.wrap?.room === room) return this.wrap;
 		const kept = this.wrap?.rows[this.top]?.index;
 		const rows = [];
@@ -489,7 +487,7 @@ class FilePreview {
 			wrapCode(code, room).forEach((part, at) => rows.push({ index, part, first: at === 0 }));
 			return start;
 		});
-		this.wrap = { room, digits, oldDigits, rows, starts };
+		this.wrap = { room, digits, rows, starts };
 		if (kept !== undefined) this.top = starts[kept];
 		else if (this.opening !== undefined) this.top = Math.max(0, starts[this.opening] - LEAD); // render keeps it in range
 		this.opening = undefined;
@@ -585,7 +583,7 @@ class FilePreview {
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
 			const diff = content.rows;
-			const { digits, oldDigits } = wrap ?? {};
+			const { digits } = wrap ?? {};
 			const SIGN = { "+": ["toolDiffAdded", "+"], "-": ["toolDiffRemoved", "−"] };
 			const tints = diff ? this.tints() : {};
 			const number = (value, width) => this.paint("dim", value === undefined ? " ".repeat(width) : String(value).padStart(width));
@@ -603,7 +601,7 @@ class FilePreview {
 				const row = diff[at];
 				const [role, mark] = SIGN[row.sign] ?? [];
 				const shown = tints[row.sign]?.faded ? this.paint("dim", line.replace(SGR, "")) : line;
-				const text = `${number(first ? row.old : undefined, oldDigits)} ${number(first ? row.number : undefined, digits)} ${role && first ? this.paint(role, mark) : " "} ${shown}`;
+				const text = `${number(first ? row.number : undefined, digits)} ${role && first ? this.paint(role, mark) : " "} ${shown}`;
 				body.push(role && tints[row.sign] ? { text, tint: tints[row.sign] } : text);
 			}
 			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";

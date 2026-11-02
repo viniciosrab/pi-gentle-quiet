@@ -70,21 +70,21 @@ test("parseFileDiff: a removed line that looks like a header, CRLF, no-newline m
 	assert.equal(parseFileDiff(undefined), undefined);
 });
 
-test("a changed file shows its changes inline as VS Code's: old and new numbers, then the sign, then the code", async () => {
+test("a changed file shows its changes inline as VS Code's: the line number, then the sign, then the code", async () => {
 	const target = file("a.ts", "one\nTWO\ntwo and a half\nthree\nfour\nsix\n");
 	const { text, draw } = await opened(target, { diff: Promise.resolve(SMALL) }, { relPath: "src/a.ts" });
 	const out = text(70);
 	assert.match(out[1], /^▏ Read-only — TypeScript · changes +▕$/);
 	assert.match(out[2], /^▏ src\/a\.ts +▕$/);
 	assert.deepEqual(out.slice(4, 12).map((row) => row.slice(2).trimEnd().replace(/ ▕$/, "").trimEnd()), [
-		"1 1   one",
-		"2   − two",
-		"  2 + TWO",
-		"  3 + two and a half",
-		"3 4   three",
-		"4 5   four",
-		"5   − five",
-		"6 6   six",
+		"1   one",
+		"  − two",
+		"2 + TWO",
+		"3 + two and a half",
+		"4   three",
+		"5   four",
+		"  − five",
+		"6   six",
 	]);
 	assert.match(out.at(-2), /^▏ Esc close · e edit · n\/N change · \+2 −2 · 1-8 \/ 8 +▕$/, "the scroll keys left out where they do not fit");
 	assert.match(out.at(-3), /^▏ +▕$/, "a blank row between the content and the footer");
@@ -92,7 +92,7 @@ test("a changed file shows its changes inline as VS Code's: old and new numbers,
 	const raw = draw(70);
 	assert.ok(painted(raw[5], "toolDiffRemoved", "−") && painted(raw[6], "toolDiffAdded", "+"), "the sign in the diff color");
 	assert.ok(!painted(raw[5], "toolDiffRemoved", "two") && !painted(raw[6], "toolDiffAdded", "TWO"), "the code keeps its own color");
-	assert.ok(painted(raw[5], "dim", "2") && painted(raw[6], "dim", "2"), "numbers dim");
+	assert.ok(painted(raw[6], "dim", "2") && !painted(raw[5], "dim", "2"), "numbers dim, none on a removed row");
 	assert.ok(painted(raw[4], "dim", "1") && !painted(raw[4], "toolDiffAdded"), "unchanged rows carry no diff color");
 	assert.ok(painted(raw.at(-2), "toolDiffAdded", "+2") && painted(raw.at(-2), "toolDiffRemoved", "−2"), "the summary in diff colors");
 });
@@ -132,7 +132,7 @@ test("a changed row is tinted across the whole pop-up width with the theme's dif
 	assert.ok(raw[6].includes(ADDED_TINT) && raw[7].includes(ADDED_TINT), "added: green over black");
 	assert.ok(!/\x1b\[48;/.test(raw[4]) && !/\x1b\[48;/.test(raw[8]), "no tint on unchanged rows");
 	assert.equal(visibleWidth(tinted(raw[6], ADDED_TINT)), 68, "from the left border to the right one");
-	assert.ok(plain(raw[6]).startsWith("▏   2 + TWO"));
+	assert.ok(plain(raw[6]).startsWith("▏ 2 + TWO"));
 	assert.ok(raw[6].endsWith(`\x1b[49m${fgOf("border")}▕\x1b[39m`), "the bg reset before the right border");
 	const codes = raw.join("").match(/\x1b\[48;2;[\d;]+m/g);
 	assert.deepEqual([...new Set(codes)].sort(), [ADDED_TINT, REMOVED_TINT].sort(), "only the two derived tints");
@@ -215,10 +215,10 @@ test("the pop-up opens at the first change, and n/N ] [ jump between change bloc
 	const { component, text } = await opened(target, { diff: Promise.resolve(LONG) }, { rows: 30 });
 	const range = () => text(80).at(-2).match(/(\d+)-(\d+) \/ (\d+)/).slice(1).map(Number);
 	assert.deepEqual(range(), [27, 44, 61], "three rows of context above the first change");
-	assert.ok(text(80).some((row) => /^▏ 30    − L30 /.test(row)) && text(80).some((row) => /^▏    30 \+ X30 /.test(row)));
+	assert.ok(text(80).some((row) => /^▏    − L30 /.test(row)) && text(80).some((row) => /^▏ 30 \+ X30 /.test(row)));
 	assert.equal(component.handleInput("n"), true);
 	assert.deepEqual(range(), [44, 61, 61], "the next block, as far as the end allows");
-	assert.ok(text(80).some((row) => /^▏ 50    − L50 /.test(row)));
+	assert.ok(text(80).some((row) => /^▏    − L50 /.test(row)));
 	assert.equal(component.handleInput("n"), false, "no block after the last");
 	component.handleInput("N");
 	assert.deepEqual(range(), [27, 44, 61]);
@@ -242,11 +242,11 @@ test("a long changed line wraps: the rest under its code, tinted, with no number
 	const diff = [...header("w.ts"), "@@ -1,2 +1,2 @@", " one", `-old ${long}`, `+new ${long}`, ""].join("\n");
 	const { text, draw } = await opened(file("w.ts", "x\n"), { diff: Promise.resolve(diff) }, { with: truecolor });
 	const out = text(60);
-	assert.match(out[5], /^▏ 2   − old word/);
-	assert.match(out[6], /^▏       word/, "the removed line goes on, under its code");
-	const added = out.findIndex((row) => /^▏   2 \+ new word/.test(row));
+	assert.match(out[5], /^▏   − old word/);
+	assert.match(out[6], /^▏     word/, "the removed line goes on, under its code");
+	const added = out.findIndex((row) => /^▏ 2 \+ new word/.test(row));
 	assert.ok(added > 6);
-	assert.match(out[added + 1], /^▏       word/);
+	assert.match(out[added + 1], /^▏     word/);
 	const raw = draw(60);
 	assert.ok(raw[6].includes(REMOVED_TINT) && raw[added + 1].includes(ADDED_TINT), "the wrapped rows keep the tint");
 	assert.ok(!out.join("").includes("…"));
@@ -258,8 +258,8 @@ test("an untracked file shows every line added", async () => {
 	const { text, draw } = await opened(target, { untracked: true }, { with: truecolor });
 	const out = text(70);
 	assert.match(out[1], /Read-only — Text · changes/);
-	assert.match(out[4], /^▏   1 \+ alpha +▕$/, "no old number");
-	assert.match(out[5], /^▏   2 \+ beta +▕$/);
+	assert.match(out[4], /^▏ 1 \+ alpha +▕$/, "one number column");
+	assert.match(out[5], /^▏ 2 \+ beta +▕$/);
 	assert.match(out.at(-2), / \+2 −0 · /);
 	assert.ok(draw(70)[4].includes(ADDED_TINT));
 });
@@ -271,9 +271,9 @@ test("Markdown with changes is shown as source with its diff, never rendered, an
 	const check = () => {
 		const out = text(70);
 		assert.match(out[1], /Read-only — Markdown · changes/);
-		assert.match(out[4], /^▏ 1 1   # Title +▕$/);
-		assert.match(out[5], /^▏ 2   − \*\*old\*\* words +▕$/);
-		assert.match(out[6], /^▏   2 \+ \*\*new\*\* words +▕$/);
+		assert.match(out[4], /^▏ 1   # Title +▕$/);
+		assert.match(out[5], /^▏   − \*\*old\*\* words +▕$/);
+		assert.match(out[6], /^▏ 2 \+ \*\*new\*\* words +▕$/);
 		assert.doesNotMatch(out.at(-2), / m (source|rendered)/);
 	};
 	check();

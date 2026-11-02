@@ -656,9 +656,9 @@ test("a changed file opens with its uncommitted changes inline, from git diff HE
 	assert.ok(calls.some(([args, dir]) => args === `-c core.quotePath=false diff HEAD --no-color --no-ext-diff ${FULL} -- src/a.ts` && dir === "/repo"), "one diff of that file");
 	const out = text();
 	assert.match(out[1], /Read-only — TypeScript · changes/);
-	assert.match(out[4], /^▏ 1 1   keep /);
-	assert.match(out[5], /^▏ 2   − old /);
-	assert.match(out[6], /^▏   2 \+ new /);
+	assert.match(out[4], /^▏ 1   keep /);
+	assert.match(out[5], /^▏   − old /);
+	assert.match(out[6], /^▏ 2 \+ new /);
 	assert.match(out.at(-2), /n\/N change · \+1 −1/);
 });
 
@@ -668,8 +668,8 @@ test("an untracked file opens all added, without asking git for a diff", async (
 	const { preview, calls } = await withOverlay({ git: repo({ toplevel: `${root}\n` }) });
 	const { text } = await preview(/new\.txt/);
 	assert.ok(!calls.some(([args]) => args.includes(FULL)));
-	assert.match(text()[4], /^▏   1 \+ hello /);
-	assert.match(text()[5], /^▏   2 \+ world /);
+	assert.match(text()[4], /^▏ 1 \+ hello /);
+	assert.match(text()[5], /^▏ 2 \+ world /);
 });
 
 test("a changed Markdown file from the GIT tab is its source with the diff, and m does nothing", async () => {
@@ -677,10 +677,10 @@ test("a changed Markdown file from the GIT tab is its source with the diff, and 
 	const { preview } = await withOverlay({ git: repo({ status: " M README.md\n", numstat: "1\t1\tREADME.md\n", filediff: md }) });
 	const { component, text } = await preview(/README\.md/);
 	assert.match(text()[1], /Read-only — Markdown · changes/);
-	assert.match(text()[4], /^▏ 1 1   # Title /);
-	assert.match(text()[6], /^▏   2 \+ \*\*new\*\* /);
+	assert.match(text()[4], /^▏ 1   # Title /);
+	assert.match(text()[6], /^▏ 2 \+ \*\*new\*\* /);
 	assert.equal(component.handleInput("m"), false);
-	assert.match(text()[4], /^▏ 1 1   # Title /);
+	assert.match(text()[4], /^▏ 1   # Title /);
 });
 
 test("when git cannot diff the file the pop-up is the plain preview", async () => {
