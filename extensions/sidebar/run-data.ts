@@ -145,12 +145,43 @@ const newest = (a, b) => (b.startedAt ?? b.createdAt) - (a.startedAt ?? a.create
  * label is (a narrow card drops the labels). Two tasks alike: the newest. undefined for any other row.
  */
 export function rowTask(text, tasks) {
+	return rowCandidates(text, tasks)?.sort(newest)[0]?.id;
+}
+
+// The tasks an Agents row could show, or undefined for a row that is not a working one.
+function rowCandidates(text, tasks) {
 	const status = activeRowStatus(text);
 	if (!status || !Array.isArray(tasks)) return undefined;
 	const row = LEAD.exec(String(text))[2];
 	const working = tasks.filter((task) => task.status === status && shown(row, task.agent));
 	const labelled = working.filter((task) => shown(row, task.label));
-	return (labelled.length ? labelled : working).sort(newest)[0]?.id;
+	return labelled.length ? labelled : working;
+}
+
+const oldest = (a, b) => -newest(a, b);
+
+/**
+ * rowTask for every row of the Agents card at once. gentle-pi draws its rows in start order, so rows alike (the same
+ * agent, label and status) take their tasks oldest first, one each, instead of all opening the newest. A row with
+ * no alike row keeps rowTask's newest.
+ */
+export function rowTasks(texts, tasks) {
+	const alike = new Map(); // the row's matching text -> how many rows show it
+	const keyOf = texts.map((text) => {
+		const candidates = rowCandidates(text, tasks);
+		if (!candidates) return undefined;
+		const key = candidates.map((task) => task.id).sort().join("\n");
+		alike.set(key, (alike.get(key) ?? 0) + 1);
+		return { key, candidates };
+	});
+	const taken = new Set();
+	return keyOf.map((entry) => {
+		if (!entry) return undefined;
+		if (alike.get(entry.key) === 1) return [...entry.candidates].sort(newest)[0]?.id;
+		const next = [...entry.candidates].sort(oldest).find((task) => !taken.has(task.id));
+		if (next) taken.add(next.id);
+		return next?.id;
+	});
 }
 
 // ---------------------------------------------------------------------------

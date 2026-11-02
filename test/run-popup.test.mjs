@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { configFile, load, painted, plain, theme } from "./helpers.mjs";
-import { FinishedRecords, findActivityFile, findJobLog, findSessionByCalls, finishedRowStatus, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, readTaskRecord, recordSessionPath, rowRecord, rowTask, SessionFinder, SessionLog, SessionTail, sessionHash, sessionsDir, tasksDir } from "../extensions/sidebar/run-data.ts";
+import { FinishedRecords, findActivityFile, findJobLog, findSessionByCalls, finishedRowStatus, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, readTaskRecord, recordSessionPath, rowRecord, rowTask, rowTasks, SessionFinder, SessionLog, SessionTail, sessionHash, sessionsDir, tasksDir } from "../extensions/sidebar/run-data.ts";
 import { fallbackThreadItem, openAgentPopup, openJobPopup, sessionLines } from "../extensions/sidebar/run-popup.ts";
 
 const KEYS = { up: "\x1b[A", down: "\x1b[B", pageUp: "\x1b[5~", pageDown: "\x1b[6~", home: "\x1b[H", end: "\x1b[F", escape: "\x1b" };
@@ -110,6 +110,17 @@ test("tasks are parsed with their summary and thread; malformed files give nothi
 	assert.deepEqual(parseActivity(JSON.stringify({ activity: { tasks: [{ summary: { agent: "no id" } }] } })), [], "a task without an id is dropped");
 	const dirty = parseActivity(JSON.stringify({ activity: { tasks: [{ summary: { id: "x", agent: "a" }, thread: { dropped: 0, items: [{ kind: "text", text: "a\x1b[31mred\x07" }] } }] } }));
 	assert.ok(!dirty[0].thread.items[0].text.includes("\x1b"), "control characters never reach the terminal");
+});
+
+test("Agents rows alike, as gentle-pi lists them in start order, each open their own task: the oldest first", () => {
+	const alike = (id, startedAt) => ({ summary: summary(id, "gentle-ai-explore", "assistant reported an error", "running", { createdAt: startedAt - 10, startedAt }), thread: thread([]) });
+	const tasks = parseActivity(JSON.stringify({ activity: { tasks: [alike("e3", now - 3000), alike("e1", now - 9000), alike("e4", now - 1000), alike("e2", now - 6000)] } }));
+	const row = "◔ gentle-ai-explore  assistant reported an error   claude-sonnet-5-5 · medium · 201k · 2m06s";
+	assert.deepEqual(rowTasks(["◈ Agents ▾ Collapse  4 active", "", row, row, row, row], tasks), [undefined, undefined, "e1", "e2", "e3", "e4"], "one task per row, never the same twice");
+	assert.deepEqual(rowTasks([row], tasks), ["e4"], "a lone row still takes the newest, as before");
+	const other = "◔ gentle-ai-worker   other work   1s";
+	const mixed = parseActivity(JSON.stringify({ activity: { tasks: [alike("e1", now - 9000), alike("e2", now - 6000), { summary: summary("w1", "gentle-ai-worker", "other work", "running", { startedAt: now - 7000 }), thread: thread([]) }] } }));
+	assert.deepEqual(rowTasks([row, other, row], mixed), ["e1", "w1", "e2"], "rows of other tasks between them change nothing");
 });
 
 test("readActivity reads a file or says why it cannot", () => {
@@ -396,16 +407,20 @@ const CARD = [
 	"   … 1 more",
 ];
 
-async function agentsCard(sessionId, { tasks = TASKS, custom } = {}) {
+async function agentsCard(sessionId, { tasks = TASKS, custom, card: drawn = CARD } = {}) {
 	if (tasks) presence(presenceRoot, sessionId, [{ incarnation: "i1", heartbeat: now, tasks }]);
 	const opened = [];
 	const loaded = await load({ mode: "tui", session: { id: sessionId }, custom: custom !== undefined ? custom : ((factory, options) => (opened.push({ factory, options }), new Promise(() => {}))) });
 	const seen = [];
-	loaded.ui.setWidget("gentle-agents", () => ({ render: () => CARD, handleMouse: (event) => (seen.push(event), { handled: true, from: "gentle-pi" }) }));
+	loaded.ui.setWidget("gentle-agents", () => ({ render: () => drawn, handleMouse: (event) => (seen.push(event), { handled: true, from: "gentle-pi" }) }));
 	const tui = { terminal: { rows: 30, columns: 120 }, requestRender() {} };
 	const card = loaded.widgets["gentle-agents"](tui, theme);
-	card.render(100); // the first draw asks for the presence file
-	await settle();
+	// The first draw asks for the presence file, read on a timer after it; a draw again once it is read, so the
+	// rows' ↗ come from this session's file and not from what the previous test left.
+	for (let i = 0; i < 2; i++) {
+		card.render(100);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
 	const rows = () => card.render(100).map(plain);
 	const mouse = (type, y, button = "left") => card.handleMouse({ type, button, x: 10, y, width: 100, height: 8, screenX: 10, screenY: y });
 	return { ...loaded, card, rows, mouse, seen, opened, tui };
@@ -471,6 +486,24 @@ test("without a presence file the running rows still get ↗ and a click opens g
 	assert.equal(opened.length, 0);
 	assert.deepEqual(seen, []);
 	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]]);
+});
+
+test("rows alike in the Agents card each open their own subagent, not the same one", async () => {
+	const alike = (id, model, startedAt) => ({ summary: summary(id, "gentle-ai-explore", "assistant reported an error", "running", { model, startedAt }), thread: thread([]) });
+	const tasks = [alike("e2", "claude-bridge/model-two", now - 6000), alike("e1", "claude-bridge/model-one", now - 9000), alike("e3", "claude-bridge/model-three", now - 3000)];
+	const row = "   ◐  gentle-ai-explore  assistant reported an error    claude-sonnet-5-5 · medium · 201k · 2m06s";
+	const { mouse, opened } = await agentsCard("card-alike", { tasks, card: ["   ❀ Agents ▾ Collapse  3 active", row, row, row] });
+	const tui = { terminal: { rows: 30, columns: 120 }, requestRender() {} };
+	const models = [];
+	for (const y of [3, 4, 5]) {
+		const before = opened.length;
+		mouse("click", y);
+		for (let i = 0; i < 50 && opened.length === before; i++) await settle(); // gentle-pi's thread view loads once
+		const popup = opened.at(-1).factory(tui, theme, {}, () => {});
+		models.push(popup.render(80).map(plain).join("\n").match(/model-(one|two|three)/)?.[1]);
+		popup.dispose?.();
+	}
+	assert.deepEqual(models, ["one", "two", "three"], "each row its own task, in start order as gentle-pi lists them");
 });
 
 test("without an overlay UI a click on a ↗ row opens gentle-pi's list", async () => {
