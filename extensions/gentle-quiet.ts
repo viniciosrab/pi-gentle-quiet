@@ -46,7 +46,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { activeRowStatus, findActivityFile, FinishedRecords, finishedRowStatus, JobLogs, jobRows, presenceDir, readActivity, rowRecord, rowTask, SessionFinder } from "./sidebar/run-data.ts";
+import { activeRowStatus, findActivityFile, FinishedRecords, finishedRowStatus, JobLogs, jobRows, presenceDir, readActivity, rowRecord, rowTasks, SessionFinder } from "./sidebar/run-data.ts";
 import { createMusic } from "./sidebar/music.ts";
 import { openAgentPopup, openJobPopup } from "./sidebar/run-popup.ts";
 import { cycleTab, keyInput, moveTab, moveTabTo, normalizeTabOrder, orderedTabs, renderTabBar, slotAt, TAB_BAR_ROWS, TAB_FACTORIES, tabAt, tabLabel } from "./sidebar/tabs.ts";
@@ -2227,8 +2227,10 @@ function refreshRuns() {
 function agentRows(texts) {
 	runs.wantFinished = texts.some((text) => finishedRowStatus(text));
 	if (runs.available === undefined) return undefined;
-	return texts.map((text) => {
-		if (activeRowStatus(text)) return runs.available ? rowTask(text, runs.tasks) : null;
+	// All rows at once: rows alike (four "gentle-ai-explore  assistant reported an error") each get their own task.
+	const working = runs.available ? rowTasks(texts, runs.tasks) : [];
+	return texts.map((text, index) => {
+		if (activeRowStatus(text)) return runs.available ? working[index] : null;
 		return finishedRowStatus(text) ? rowRecord(text, runs.finished) : undefined;
 	});
 }
