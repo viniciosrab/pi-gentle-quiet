@@ -4,11 +4,17 @@ const strip = (text) => text.replace(/\x1b\[[0-9;:]*m/g, "");
 // Like Pi's, control characters take no column.
 export const visibleWidth = (text) => [...strip(text).replace(/[\x00-\x08]/g, "")].length;
 
-// Word wrap on visible width; escape sequences stay attached to their words.
+// Word wrap on visible width; escape sequences stay attached to their words. Like Pi's, a word wider than the
+// width is broken by columns (here only plain words, which is all the tests give it).
 export function wrapTextWithAnsi(text, width) {
 	const lines = [];
 	let line = "";
-	for (const word of text.split(" ")) {
+	const words = text.split(" ").flatMap((word) => {
+		if (visibleWidth(word) <= width || word !== strip(word)) return [word];
+		const chars = [...word];
+		return Array.from({ length: Math.ceil(chars.length / width) }, (_, i) => chars.slice(i * width, (i + 1) * width).join(""));
+	});
+	for (const word of words) {
 		const next = line === "" ? word : `${line} ${word}`;
 		if (line !== "" && visibleWidth(next) > width) {
 			lines.push(line);

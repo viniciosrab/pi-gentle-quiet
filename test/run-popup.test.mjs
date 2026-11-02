@@ -5,7 +5,7 @@ import * as realFs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { configFile, load, painted, plain, theme } from "./helpers.mjs";
+import { configFile, load, painted, plain, theme, writeConfig } from "./helpers.mjs";
 import { FinishedRecords, findActivityFile, findJobLog, findSessionByCalls, finishedRowStatus, JobLogs, jobRows, parseActivity, presenceDir, readActivity, readTail, readTaskRecord, recordSessionPath, rowRecord, rowTask, rowTasks, SessionFinder, SessionLog, SessionTail, sessionHash, sessionsDir, tasksDir } from "../extensions/sidebar/run-data.ts";
 import { fallbackThreadItem, openAgentPopup, openJobPopup, sessionLines } from "../extensions/sidebar/run-popup.ts";
 
@@ -922,14 +922,15 @@ test("session entries become the popup's items: the prompt, thinking, text and e
 // A stand-in for gentle-quiet's tool rows: what the popup hands each tool call to.
 const stubTool = (item, t) => [t.fg("toolTitle", ` TOOL ${item.name} ${item.result ? (item.isError ? "error" : "done") : "running"}`)];
 
-test("the session is drawn in order: the prompt folded and dim, thinking as one Thinking... row, text as Markdown, each tool by the drawing it is given", () => {
+test("the session is drawn in order: the prompt whole and dim, thinking as one Thinking... row, text as Markdown, each tool by the drawing it is given", () => {
 	const { sessions } = agentRoot();
 	const log = new SessionLog(writeSession(sessions, "draw.jsonl", sessionText("d")));
 	log.poll();
 	const raw = sessionLines(log.items, theme, 60, stubTool);
 	const rows = raw.map((row) => plain(row).trimEnd());
 	assert.deepEqual(rows, [
-		"› Implement T34 …",
+		"› Implement T34",
+		"  Read the spec first.",
 		"",
 		"Thinking...",
 		"",
@@ -943,11 +944,21 @@ test("the session is drawn in order: the prompt folded and dim, thinking as one 
 		"",
 		"TOOL bash running",
 	]);
-	assert.ok(painted(raw[0], "dim"), "the prompt dim");
-	assert.ok(painted(raw[2], "dim", "\x1b[3mThinking...") && plain(raw[2]) === "Thinking...", "thinking: one dim italic Thinking... row, as the main view");
-	assert.ok(raw[6].includes("\x1b[1mread\x1b[22m"), "the text through Pi's Markdown");
+	assert.ok(painted(raw[0], "dim") && painted(raw[1], "dim"), "the prompt dim, every line of it");
+	assert.ok(painted(raw[3], "dim", "\x1b[3mThinking...") && plain(raw[3]) === "Thinking...", "thinking: one dim italic Thinking... row, as the main view");
+	assert.ok(raw[7].includes("\x1b[1mread\x1b[22m"), "the text through Pi's Markdown");
 	const broken = sessionLines(log.items, theme, 60, () => { throw new Error("boom"); }).map(plain);
 	assert.ok(broken.some((row) => row.includes("bash")), "a failing drawing falls back to the tool's name");
+});
+
+test("a long prompt is shown whole in the popup, wrapped under its first column", () => {
+	const words = Array.from({ length: 20 }, (_, i) => `word${i + 1}`);
+	const rows = sessionLines([{ kind: "user", text: `${words.join(" ")}\n\nSecond paragraph.`, version: 1 }], theme, 30, stubTool).map((row) => plain(row).trimEnd());
+	assert.match(rows[0], /^› word1 word2/);
+	assert.ok(rows.slice(1, -2).every((row) => /^  word/.test(row)), `wrapped rows two columns in:\n${rows.join("\n")}`);
+	assert.deepEqual(rows.join(" ").split(/\s+/).filter((word) => /^word/.test(word)), words, "every word, none cut");
+	assert.deepEqual(rows.slice(-2), ["", "  Second paragraph."]);
+	assert.ok(rows.every((row) => row.length <= 30));
 });
 
 function sessionPopup({ finder, record, tasks = TASKS, drawTool = stubTool, rows = 60 } = {}) {
@@ -965,7 +976,7 @@ test("with the session file found, the popup draws it under the task header inst
 	const sessionFile = writeSession(sessions, "popup.jsonl", sessionText("p"));
 	const { body, component } = sessionPopup({ finder: { find: () => sessionFile } });
 	assert.match(plain(component.render(80)[1]), /gentle-ai-worker · running/);
-	assert.deepEqual(body(), ["› Implement T34 …", "Thinking...", "TOOL bash done", "Spec read. Writing the tests.", "TOOL read done", "TOOL bash error", "TOOL bash running"]);
+	assert.deepEqual(body(), ["› Implement T34", "  Read the spec first.", "Thinking...", "TOOL bash done", "Spec read. Writing the tests.", "TOOL read done", "TOOL bash error", "TOOL bash running"]);
 	appendFileSync(sessionFile, `${message({ role: "assistant", content: [{ type: "text", text: "All green." }] }, "e9")}\n`);
 	component.refresh();
 	assert.equal(body().at(-1), "All green.", "appended entries show on the next poll");
@@ -1203,6 +1214,26 @@ test("web, memory and codemode calls in the popup are the rows the main conversa
 	assert.ok(!body.some((row) => /^(web_search|fetch_content|mem_search|mem_save)$/.test(row)), "no bare tool name");
 	assert.ok(rows.some((row) => row.includes("\x1b[38;2;78;186;101m●")), "the done web call's fixed green dot");
 	assert.ok(rows.some((row) => row.includes("\x1b[38;2;255;107;128m●")), "the failed one's fixed red dot");
+});
+
+test("a long command, its output and its diff rows wrap in the popup instead of being cut", async (t) => {
+	writeConfig({ quiet: { preview: 3 } }); // read when the extension loads; the preview rows show only above 0
+	t.after(() => writeConfig({}));
+	const words = (stem) => Array.from({ length: 24 }, (_, i) => `${stem}${String(i + 1).padStart(2, "0")}`);
+	const calls = [
+		{ name: "bash", arguments: { command: `echo ${words("alpha").join(" ")}` }, result: { content: [{ type: "text", text: words("beta").join(" ") }] } },
+		{ name: "edit", arguments: { path: "/srv/app/a.ts", edits: [] }, result: { content: [{ type: "text", text: "ok" }], details: { diff: `+12 ${words("gamma").join(" ")}` } } },
+	];
+	const { draw } = await t35Popup("card-wrap", "toolu_wrap_", calls);
+	const { body } = await draw();
+	for (const stem of ["alpha", "beta", "gamma"]) {
+		const seen = body.join(" ").split(/\s+/).filter((word) => word.startsWith(stem));
+		assert.deepEqual(seen, words(stem), `every ${stem} word, none cut:\n${body.join("\n")}`);
+	}
+	const command = body.findIndex((row) => row.startsWith("$ echo alpha01"));
+	assert.ok(command >= 0 && /^ {2}alpha/.test(body[command + 1]), `the command goes on under itself:\n${body.join("\n")}`);
+	assert.ok(!body.some((row) => /(alpha|beta|gamma)\d*…/.test(row)), "nothing cut with …");
+	assert.ok(body.every((row) => row.length <= 76));
 });
 
 test("a running web call in the popup keeps a steady grey dot, and no call of the popup takes the main view's expand hint", async (t) => {

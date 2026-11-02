@@ -1,8 +1,8 @@
 // The TREE tab's file preview: a read-only pop-up over Pi, opened by a click on a file (./tree.ts). An outline
 // in the border color, drawn at the cells' outer edge (▔ ▁ ▏ ▕ and their corners) so no half-cell of the
-// overlay sticks out past it, around "Read-only — <language>", the file's path, then its numbered lines (no
-// wrap, long lines cut with "…", tabs as spaces) and the footer "Esc close · e edit · ↑↓ PgUp/PgDn Home/End
-// · 43-64 / 168". Esc or q closes it, and so does a click anywhere outside it (that click does nothing else);
+// overlay sticks out past it, around "Read-only — <language>", the file's path, then its numbered lines (a long
+// line wraps onto rows under its code with no number, tabs as spaces) and the footer "Esc close · e edit · ↑↓
+// PgUp/PgDn Home/End · 43-64 / 168", the lines in view. Scrolling goes by rows, so a wrapped line can be read whole. Esc or q closes it, and so does a click anywhere outside it (that click does nothing else);
 // ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel three lines; e closes it and opens the
 // file in the editor tab, as a click did before.
 //
@@ -370,9 +370,10 @@ class FilePreview {
 		// Rendered, until m or a failed render; from the GIT tab a Markdown file is its source.
 		this.markdown = !changes && (file === undefined || languageOf(file) === "Markdown");
 		this.rendered = undefined; // { width, rows } of the last Markdown render
+		this.wrap = undefined; // the source lines wrapped at the last width: see wrapped()
 		this.ready = loading.then((content) => {
 			this.content = content.lines ? { ...content, shown: this.colored(content) } : content;
-			if (content.blocks?.length) this.top = Math.max(0, content.blocks[0] - LEAD); // render keeps it in range
+			this.opening = content.blocks?.[0]; // the first change, where the first render puts the view
 			this.redraw();
 		});
 	}
@@ -470,9 +471,34 @@ class FilePreview {
 		return this.rendered.rows;
 	}
 
+	// The source lines wrapped to fit beside their numbers in `inner` columns: { room, digits, oldDigits, rows,
+	// starts }, each row { index, part, first } and starts[i] the row line i begins on. Wrapped again only when
+	// the room changes, keeping the line at the view's top there.
+	wrapped(inner) {
+		const content = this.content;
+		const diff = content.rows;
+		const digits = String(diff ? content.last : content.lines.length).length;
+		const oldDigits = diff ? String(content.lastOld).length : 0;
+		// VS Code's gutter: "<old> <new> <sign> " before the code.
+		const room = Math.max(1, inner - digits - 1 - (diff ? oldDigits + 1 + 3 : 0));
+		if (this.wrap?.room === room) return this.wrap;
+		const kept = this.wrap?.rows[this.top]?.index;
+		const rows = [];
+		const starts = content.shown.map((code, index) => {
+			const start = rows.length;
+			wrapCode(code, room).forEach((part, at) => rows.push({ index, part, first: at === 0 }));
+			return start;
+		});
+		this.wrap = { room, digits, oldDigits, rows, starts };
+		if (kept !== undefined) this.top = starts[kept];
+		else if (this.opening !== undefined) this.top = Math.max(0, starts[this.opening] - LEAD); // render keeps it in range
+		this.opening = undefined;
+		return this.wrap;
+	}
+
 	total() {
 		if (this.markdown && this.rendered) return this.rendered.rows.length;
-		return this.content?.lines?.length ?? 0;
+		return this.wrap?.rows.length ?? this.content?.lines?.length ?? 0;
 	}
 
 	toggleMarkdown() {
@@ -486,7 +512,7 @@ class FilePreview {
 	// The next (dir 1) or previous (-1) change, by where the view would stand on it.
 	jump(dir) {
 		const blocks = this.content?.blocks ?? [];
-		const stops = blocks.map((start) => Math.max(0, Math.min(start - LEAD, this.total() - this.page())));
+		const stops = blocks.map((start) => Math.max(0, Math.min((this.wrap?.starts[start] ?? start) - LEAD, this.total() - this.page())));
 		const stop = dir > 0 ? stops.find((at) => at > this.top) : stops.findLast((at) => at < this.top);
 		return stop === undefined ? false : this.scrollTo(stop);
 	}
@@ -554,15 +580,12 @@ class FilePreview {
 		else if (content.empty) body.push(text("muted", this.file === undefined ? "(empty)" : "(empty file)"));
 		else {
 			const rows = this.markdownRows(inner);
+			const wrap = rows ? undefined : this.wrapped(inner);
 			const total = this.total();
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
 			const diff = content.rows;
-			const digits = String(diff ? content.last : total).length;
-			const oldDigits = diff ? String(content.lastOld).length : 0;
-			// VS Code's gutter: "<old> <new> <sign> " before the code.
-			const gutter = diff ? oldDigits + 1 + 3 : 0;
-			const room = Math.max(1, inner - digits - 1 - gutter);
+			const { digits, oldDigits } = wrap ?? {};
 			const SIGN = { "+": ["toolDiffAdded", "+"], "-": ["toolDiffRemoved", "−"] };
 			const tints = diff ? this.tints() : {};
 			const number = (value, width) => this.paint("dim", value === undefined ? " ".repeat(width) : String(value).padStart(width));
@@ -571,22 +594,24 @@ class FilePreview {
 					body.push(rows[index]);
 					continue;
 				}
-				const code = content.shown[index];
-				const line = visibleWidth(code) > room ? truncateToWidth(code, room, "…") : code;
+				// A wrapped row goes on under its line's code, with the numbers and the sign left blank.
+				const { index: at, part: line, first } = wrap.rows[index];
 				if (!diff) {
-					body.push(`${number(index + 1, digits)} ${line}`);
+					body.push(`${number(first ? at + 1 : undefined, digits)} ${line}`);
 					continue;
 				}
-				const row = diff[index];
+				const row = diff[at];
 				const [role, mark] = SIGN[row.sign] ?? [];
 				const shown = tints[row.sign]?.faded ? this.paint("dim", line.replace(SGR, "")) : line;
-				const text = `${number(row.old, oldDigits)} ${number(row.number, digits)} ${role ? this.paint(role, mark) : " "} ${shown}`;
+				const text = `${number(first ? row.old : undefined, oldDigits)} ${number(first ? row.number : undefined, digits)} ${role && first ? this.paint(role, mark) : " "} ${shown}`;
 				body.push(role && tints[row.sign] ? { text, tint: tints[row.sign] } : text);
 			}
 			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";
 			const changes = diff ? [["dim", " · n/N change · "], ["toolDiffAdded", `+${content.added}`], ["dim", " "], ["toolDiffRemoved", `−${content.removed}`]] : [];
 			const keys = " · ↑↓ PgUp/PgDn Home/End";
-			range = [["dim", toggle], ...changes, ["dim", keys], ["dim", ` · ${this.top + 1}-${to} / ${total}`]];
+			// The source's range names lines, wherever their wrapped rows begin and end.
+			const shown = wrap && to > this.top ? `${wrap.rows[this.top].index + 1}-${wrap.rows[to - 1].index + 1} / ${content.lines.length}` : `${this.top + 1}-${to} / ${total}`;
+			range = [["dim", toggle], ...changes, ["dim", keys], ["dim", ` · ${shown}`]];
 			// The scroll keys give way first, so the range stays.
 			const width = visibleWidth(`Esc close${this.onEdit ? " · e edit" : ""}`) + visibleWidth(range.map(([, part]) => part).join(""));
 			if (width > inner) range = range.filter(([, part]) => part !== keys);
@@ -610,6 +635,22 @@ class FilePreview {
 		this.closed = true;
 		this.unwrapMouse();
 	}
+}
+
+// A line of code as the rows it wraps onto, `room` columns each: Pi's ANSI-aware word wrap, which breaks a word
+// wider than the room by columns. Where this Pi has none, the line is cut with "…" as before.
+function wrapCode(code, room) {
+	if (visibleWidth(code) <= room) return [code];
+	try {
+		const wrap = PiTui.wrapTextWithAnsi;
+		if (typeof wrap === "function") {
+			const parts = wrap(code, room);
+			if (Array.isArray(parts) && parts.length) return parts.map((part) => (visibleWidth(part) > room ? truncateToWidth(part, room, "…") : part));
+		}
+	} catch {
+		// a wrap that fails: cut instead
+	}
+	return [truncateToWidth(code, room, "…")];
 }
 
 /** The pop-up's width on a terminal `columns` wide: 65% of it, between 60 and 125 columns, so lines stay readable. */

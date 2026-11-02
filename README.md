@@ -17,9 +17,9 @@ same; only how it is drawn changes.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors, headed like the Status card: the title bold, then a blank row.
 - **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
-  status, model and elapsed time, then what it does in this conversation's own look: its prompt folded to one dim
-  line, thinking folded to one "Thinking..." row as in the main conversation, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
-  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends); web calls keep
+  status, model and elapsed time, then what it does in this conversation's own look: its whole prompt in dim,
+  thinking folded to one "Thinking..." row as in the main conversation, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
+  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends), long rows wrapped instead of cut; web calls keep
   pi-web-access's row behind the status dot (lit, without blinking), memory calls the memory row
   (`search “x”`, `└ ✓ 3 results`), codemode its calls and sources, as in the conversation. It reads the
   subagent's own Pi session (`~/.pi/agent/gentle-agents/sessions/*.jsonl`, found by one of its tool call ids)
@@ -90,7 +90,7 @@ same; only how it is drawn changes.
   some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ <name>`) with git badges and `[ ↗ ]`, which opens your editor (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
-  wheel scroll, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
+  wheel scroll, long lines wrap under their code, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source, and dims the screen behind the pop-up); **PR** the repository's open pull requests from one `gh api graphql` call (in a fork's clone, where gh reads the
   upstream, only the ones you opened there), drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,

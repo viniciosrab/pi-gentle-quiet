@@ -1597,11 +1597,20 @@ function diffStyles(t) {
 	return styles;
 }
 
-function diffRow({ diff, text }, width, t) {
-	const plain = truncateToWidth(`  ${text}`, Math.max(1, width - 1), "…");
+// A diff row, cut with "…" to the width, or with `wrap` its rest under its code, past the sign and number.
+function diffRows({ diff, text }, width, t, wrap = false) {
+	const room = Math.max(1, width - 1);
+	const row = `  ${text}`;
+	const parts = wrap ? hangUnder(row, room, Math.min(room - 1, 2 + (/^[+-]\s*\d+\s/.exec(text)?.[0].length ?? 0))) : [truncateToWidth(row, room, "…")];
 	const style = diffStyles(t)[diff];
-	return style ? ` ${style.paint(plain)}` : ` ${plain}`;
+	return parts.map((plain) => (style ? ` ${style.paint(plain)}` : ` ${plain}`));
 }
+
+// Columns a row's text starts at: its leading spaces, then past a "└ " or "$ " mark.
+const leadOf = (row) => {
+	const plain = row.replace(/\x1b\[[0-9;:]*m/g, "");
+	return Math.min(12, /^\s*(?:[└$] )?/u.exec(plain)[0].length);
+};
 
 // Pi's own hint, so a rebound expand key shows its actual binding.
 function expandHint(t) {
@@ -1632,15 +1641,19 @@ function orderOf(toolCallId, finished) {
 
 const hintVisible = (order) => config.quiet.hint === "all" || (config.quiet.hint === "last" && order === latestFinished);
 
-function quietResultComponent({ summary, hint: available, rest }, order, t) {
+// With `wrap` (a subagent's pop-up, which has room to scroll) a row too long goes on under its text instead of
+// being cut with "…".
+function quietResultComponent({ summary, hint: available, rest }, order, t, wrap = false) {
 	return {
 		render(width) {
 			const hint = available && hintVisible(order) ? available : "";
 			const lines = [];
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
-			lines.push(hint && gap >= 2 ? `${left}${" ".repeat(gap)}${hint} ` : truncateToWidth(left, width, "…"));
-			for (const line of rest) lines.push(typeof line === "object" ? diffRow(line, width, t) : truncateToWidth(` ${line}`, width, "…"));
+			const fit = (row) => (wrap ? hangUnder(row, width, leadOf(row)) : [truncateToWidth(row, width, "…")]);
+			if (hint && gap >= 2) lines.push(`${left}${" ".repeat(gap)}${hint} `);
+			else lines.push(...fit(left));
+			for (const line of rest) lines.push(...(typeof line === "object" ? diffRows(line, width, t, wrap) : fit(` ${line}`)));
 			return lines;
 		},
 		invalidate() {},
@@ -1881,14 +1894,15 @@ function popupRendererRows(item, t, width, args, result) {
 // A subagent's tool call in its pop-up (./sidebar/run-popup.ts), as the conversation draws it with quietRenderers:
 // quietCall's row, then quietResultText's summary and preview under the └ ("running…" until its result arrives).
 // Web and memory calls go through their own renderers (popupRendererRows); MCP tools without one stay quiet rows.
-// No expand hint: the pop-up has no ctrl+o.
+// No expand hint: the pop-up has no ctrl+o. Rows too long wrap under their text rather than being cut, as the pop-up scrolls.
 function popupToolRows(item, t, width) {
 	const args = item.args && typeof item.args === "object" ? item.args : {};
 	const result = item.result ? { ...item.result, isError: item.isError } : { content: [] };
 	const own = popupRendererRows(item, t, width, args, result);
 	if (own) return own;
 	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
-	return [truncateToWidth(` ${quietCall(item.name, args, t)}`, width, "…"), ...quietResultComponent({ ...rows, hint: "" }, -1, t).render(width)];
+	const call = ` ${quietCall(item.name, args, t)}`;
+	return [...hangUnder(call, width, leadOf(call)), ...quietResultComponent({ ...rows, hint: "" }, -1, t, true).render(width)];
 }
 
 // The "$ command" and read rows: one row at the full width, cut with "…", so a call and its result take two

@@ -154,12 +154,34 @@ test("a short file is drawn whole and its footer counts all its lines", async ()
 	assert.equal(out.length, 10);
 });
 
-test("long lines are cut with an ellipsis instead of wrapping", async () => {
-	const { text } = await preview(`${"x".repeat(200)}\nshort\n`, { name: "a.ts" });
+test("long lines wrap onto rows under the code, with no number and nothing cut", async () => {
+	const { text } = await preview(`${"x".repeat(120)}\nshort\n`, { name: "a.ts" });
 	const out = text(60);
-	assert.equal(out.length, 9);
-	assert.match(out[4], /^▏ 1 x+… ▕$/);
+	// 56 columns inside the frame, "1 " of them the number: 54 of code a row.
+	assert.equal(out.length, 11);
+	assert.equal(out[4], `▏ 1 ${"x".repeat(54)} ▕`);
+	assert.equal(out[5], `▏   ${"x".repeat(54)} ▕`, "a wrapped row lines up with the code, without a number");
+	assert.match(out[6], /^▏   x{12} +▕$/);
+	assert.match(out[7], /^▏ 2 short +▕$/);
+	assert.ok(!out.join("").includes("…"));
+	assert.match(out.at(-2), /· 1-2 \/ 2 +▕$/, "the footer counts lines, not rows");
 	assert.ok(out.every((row) => [...row].length === 60));
+});
+
+test("scrolling moves a row at a time through wrapped lines, and the footer names the lines in view", async () => {
+	const body = Array.from({ length: 40 }, (_, i) => `${i + 1} ${"word ".repeat(30).trim()}`).join("\n");
+	const { component, text } = await preview(body, { name: "a.txt", rows: 30 });
+	const range = () => text(60).at(-2).match(/(\d+)-(\d+) \/ 40/).slice(1).map(Number);
+	const first = text(60)[4];
+	assert.match(first, /^▏  1 1 word/);
+	component.handleInput(KEYS.down);
+	assert.match(text(60)[4], /^▏    word/, "the top row is now the wrapped rest of line 1");
+	assert.equal(range()[0], 1);
+	component.handleInput("G");
+	assert.equal(range()[1], 40);
+	assert.match(text(60).at(-4), /^▏    word( word)* +▕$/, "the last row is the end of line 40");
+	component.handleInput("g");
+	assert.equal(text(60)[4], first);
 });
 
 test("a binary file, an empty file and a missing file get one row", async () => {

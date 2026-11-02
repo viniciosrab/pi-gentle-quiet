@@ -237,6 +237,22 @@ test("the pop-up opens at the first change, and n/N ] [ jump between change bloc
 	assert.match(text(80).at(-2), /n\/N change · \+1 −2 ·/);
 });
 
+test("a long changed line wraps: the rest under its code, tinted, with no numbers or sign", async () => {
+	const long = "word ".repeat(30).trim();
+	const diff = [...header("w.ts"), "@@ -1,2 +1,2 @@", " one", `-old ${long}`, `+new ${long}`, ""].join("\n");
+	const { text, draw } = await opened(file("w.ts", "x\n"), { diff: Promise.resolve(diff) }, { with: truecolor });
+	const out = text(60);
+	assert.match(out[5], /^▏ 2   − old word/);
+	assert.match(out[6], /^▏       word/, "the removed line goes on, under its code");
+	const added = out.findIndex((row) => /^▏   2 \+ new word/.test(row));
+	assert.ok(added > 6);
+	assert.match(out[added + 1], /^▏       word/);
+	const raw = draw(60);
+	assert.ok(raw[6].includes(REMOVED_TINT) && raw[added + 1].includes(ADDED_TINT), "the wrapped rows keep the tint");
+	assert.ok(!out.join("").includes("…"));
+	assert.match(out.at(-2), /· 1-3 \/ 3 +▕$/);
+});
+
 test("an untracked file shows every line added", async () => {
 	const target = file("new.txt", "alpha\nbeta\n");
 	const { text, draw } = await opened(target, { untracked: true }, { with: truecolor });

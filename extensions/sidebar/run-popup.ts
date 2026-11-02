@@ -353,7 +353,7 @@ export function threadLines(thread, theme, width, lib) {
 }
 
 // A subagent's own session (./run-data.ts SessionLog), drawn as the main conversation draws its messages: each
-// user message folded to its first line (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
+// user message whole and dim, wrapped (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
 // call by `drawTool(item, theme, width)` (gentle-quiet's quiet rows), a blank row between them. Every row starts at
 // the pop-up's own edge, the header's column: the conversation's one-column margin is taken off the tool rows.
 
@@ -377,16 +377,17 @@ function markdownRows(text, width) {
 	return String(text).split("\n").flatMap((line) => (line ? wrap(line, width) : [""]));
 }
 
-function folded(text) {
-	const lines = String(text).split("\n");
-	const first = lines.find((line) => line.trim()) ?? "";
-	return lines.filter((line) => line.trim()).length > 1 ? `${first.trim()} …` : first.trim();
+// The prompt whole, dim: "› " before its first row, every other row two columns in, so it reads as one block.
+function promptRows(theme, text, width) {
+	const room = Math.max(1, width - 2);
+	const lines = String(text).replace(/^\s*\n|\s+$/g, "").split("\n");
+	return lines.flatMap((line, index) => (line.trim() ? wrap(line.trimEnd(), room) : [""]).map((part, at) => paint(theme, "dim", `${index === 0 && at === 0 ? "› " : part ? "  " : ""}${part}`)));
 }
 
 function sessionItem(item, theme, width, drawTool) {
 	switch (item.kind) {
 		case "user":
-			return [paint(theme, "dim", truncateToWidth(`› ${folded(item.text)}`, width, "…"))];
+			return promptRows(theme, item.text, width);
 		case "thinking":
 			// Folded as the main conversation shows hidden thinking: one dim italic row, not the text.
 			return [paint(theme, "dim", "\x1b[3mThinking...\x1b[23m")];
