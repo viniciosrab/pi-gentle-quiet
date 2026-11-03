@@ -198,7 +198,8 @@ Common choices:
   **Status** → Status line context tokens off keeps only the percent.
 - `sub`: the model runs on a subscription.
 - `claude 5h 󰪢 62% · week 󰪟 31%`: your plan usage (Claude or Codex), each window with its own ring. It appears after the first response
-  and follows subagents too. **Status** → Status line weekly usage off keeps only the 5h window.
+  and follows subagents too. With several Claude accounts ([pi-claude-accounts](https://github.com/viniciosrab/pi-claude-accounts)), each
+  window shows only the account it runs on. **Status** → Status line weekly usage off keeps only the 5h window.
 - `MCP 3/3`: MCP servers online / installed.
 - `⠋ 1 job`: background jobs (bash_background, monitor) still running; the spinner turns while they run.
 - `claude-opus-5-5 · high` (bottom right, above the editor): the model in use and its effort. It is
