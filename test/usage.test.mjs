@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { configFile, load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
@@ -120,31 +121,85 @@ const usageFile = path.join(path.dirname(configFile), "gentle-quiet-usage.json")
 const readUsageFile = () => JSON.parse(readFileSync(usageFile, "utf8"));
 const writeUsageFile = (value) => writeFileSync(usageFile, JSON.stringify(value));
 
+// claude-accounts gives each Pi process its Claude account through this variable; the file keys a
+// Claude reading by a fingerprint of it, never the token itself.
+const TOKEN = "CLAUDE_CODE_OAUTH_TOKEN";
+const onAccount = (token) => (process.env[TOKEN] = token);
+const fingerprint = (token) => createHash("sha256").update(token).digest("hex").slice(0, 12);
+const sharedKey = (provider, token) => `${provider}#${fingerprint(token)}`;
+const reading = (five, week, at = Date.now() + 1000) => {
+	const reset = (now() + 7200) * 1000;
+	return { name: "claude", at, windows: [{ label: "5h", percent: five, resetAt: reset }, { label: "week", percent: week, resetAt: reset }] };
+};
+
 test("a reading is shared with the other Pi processes through the usage file", async () => {
+	onAccount("token-share");
 	const { emit } = await start("claude-bridge-share");
+	await emit("agent_start");
 	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.55, 0.25) });
-	const shared = readUsageFile()["claude-bridge-share"];
+	const shared = readUsageFile()[sharedKey("claude-bridge-share", "token-share")];
 	assert.equal(shared.name, "claude");
 	assert.deepEqual(shared.windows.map((window) => [window.label, Math.round(window.percent)]), [["5h", 55], ["week", 25]]);
 });
 
 test("a subagent's newer reading shows in the main footer before the subagent returns", async () => {
+	onAccount("token-child");
 	const { emit, line } = await start("claude-bridge-child");
+	await emit("agent_start");
 	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
-	const reset = (now() + 7200) * 1000;
-	writeUsageFile({
-		...readUsageFile(),
-		"claude-bridge-child": { name: "claude", at: Date.now() + 1000, windows: [{ label: "5h", percent: 67, resetAt: reset }, { label: "week", percent: 38, resetAt: reset }] },
-	});
+	writeUsageFile({ ...readUsageFile(), [sharedKey("claude-bridge-child", "token-child")]: reading(67, 38) });
 	assert.match(plain(line()), /claude 5h \u{F0AA2} 67% · week \u{F0AA0} 38% $/u);
 });
 
+test("a newer reading another window made on a different account never shows in this one", async () => {
+	onAccount("token-mine");
+	const { emit, line } = await start("claude-bridge-accounts");
+	await emit("agent_start");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.07) });
+	writeUsageFile({
+		...readUsageFile(),
+		[sharedKey("claude-bridge-accounts", "token-other")]: reading(9, 45),
+		// What versions before the account key wrote: no way to tell whose account it was.
+		"claude-bridge-accounts": reading(24, 45),
+	});
+	assert.match(plain(line()), /claude 5h \u{F0AA0} 40% · week \S+ 7% $/u);
+});
+
+test("a reading after claude-accounts switched mid-run belongs to the account the run started on", async () => {
+	onAccount("token-full");
+	const { emit, line } = await start("claude-bridge-switch");
+	await emit("agent_start");
+	// claude-accounts moves the session at 95%, but this run's Claude Code process keeps its token.
+	onAccount("token-fresh");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.96, 0.2) });
+	assert.match(plain(line()), /claude 5h \u{F0AA5} 96%/u, "the run that just answered");
+	assert.ok(readUsageFile()[sharedKey("claude-bridge-switch", "token-full")], "shared as the full account's");
+	assert.equal(readUsageFile()[sharedKey("claude-bridge-switch", "token-fresh")], undefined);
+	await emit("agent_start");
+	assert.doesNotMatch(plain(line()), /claude/, "the next run is on an account with no reading yet");
+});
+
+test("the retry after a failed response belongs to the account claude-accounts moved it to", async () => {
+	onAccount("token-limit");
+	const { emit, line } = await start("claude-bridge-retry");
+	await emit("agent_start");
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
+	onAccount("token-spare");
+	await emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "limit reached" } });
+	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.03, 0.1) });
+	assert.match(plain(line()), /claude 5h \S+ 3%/u);
+	assert.ok(readUsageFile()[sharedKey("claude-bridge-retry", "token-spare")]);
+	assert.equal(Math.round(readUsageFile()[sharedKey("claude-bridge-retry", "token-limit")].windows[0].percent), 40, "the failed run's reading stays its own");
+});
+
 test("an older reading in the file does not replace a newer one of this process", async () => {
+	onAccount("token-older");
 	const { emit, line } = await start("claude-bridge-older");
+	await emit("agent_start");
 	await emit("after_provider_response", { status: 200, headers: claudeHeaders(0.4, 0.2) });
 	writeUsageFile({
 		...readUsageFile(),
-		"claude-bridge-older": { name: "claude", at: 1, windows: [{ label: "5h", percent: 90, resetAt: null }] },
+		[sharedKey("claude-bridge-older", "token-older")]: { name: "claude", at: 1, windows: [{ label: "5h", percent: 90, resetAt: null }] },
 	});
 	assert.match(plain(line()), /claude 5h \u{F0AA0} 40% · week \u{F0A9F} 20% $/u);
 });

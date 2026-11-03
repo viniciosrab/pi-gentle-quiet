@@ -42,6 +42,7 @@ import { CustomEditor, getAgentDir, keyHint, UserMessageComponent } from "@earen
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -3026,7 +3027,7 @@ function modelWidget(tui) {
 // Plan usage: 5h / week windows from rate-limit response headers
 // ---------------------------------------------------------------------------
 
-const usageByProvider = new Map(); // provider -> { name, windows: [{ label, percent, resetAt (ms) | null }] }
+const usageByProvider = new Map(); // usage key -> { name, windows: [{ label, percent, resetAt (ms) | null }] }
 const ANTHROPIC_WINDOWS = [["5h", 18000], ["7d", 604800]];
 
 function windowLabel(seconds) {
@@ -3058,6 +3059,30 @@ function parseUsageHeaders(headers) {
 	return { name, windows };
 }
 
+// The Claude account a reading belongs to. claude-accounts gives each Pi process an account by
+// exporting its token, so two windows, or a window and its subagent, can run on different accounts
+// and a reading of one must never show as the other's. Only a fingerprint of the token is kept.
+const ACCOUNT_ENV = "CLAUDE_CODE_OAUTH_TOKEN";
+const accountNow = () => {
+	const token = process.env[ACCOUNT_ENV];
+	return token ? createHash("sha256").update(token).digest("hex").slice(0, 12) : "login";
+};
+// The account of the Claude Code process answering this run: it keeps the token it started with
+// even after claude-accounts moves the session at 95%, until the next run. A failed response is
+// retried by a new process, on whatever account claude-accounts moved the session to.
+let runAccount;
+let runAccountStale = true;
+function startRunAccount() {
+	runAccount = accountNow();
+	runAccountStale = false;
+}
+function readingAccount() {
+	if (runAccountStale || runAccount === undefined) startRunAccount();
+	return runAccount;
+}
+/** Claude readings are keyed by account; other providers (Codex) by provider alone. */
+const usageKey = (provider, name, account) => (name === "claude" ? `${provider}#${account}` : provider);
+
 // Every subagent is its own Pi process, so its readings never reach this one's events. Each process
 // shares its readings through this file and takes the newer ones it finds there (`at`, ms).
 const USAGE_FILE = path.join(AGENT_DIR, "gentle-quiet-usage.json");
@@ -3085,20 +3110,20 @@ function syncUsage() {
 	if (stamp === usageFileStamp) return false;
 	usageFileStamp = stamp;
 	let changed = false;
-	for (const [provider, usage] of Object.entries(readUsageFile())) {
+	for (const [key, usage] of Object.entries(readUsageFile())) {
 		if (!Array.isArray(usage?.windows) || !Number.isFinite(usage.at)) continue;
-		if ((usageByProvider.get(provider)?.at ?? -Infinity) >= usage.at) continue;
-		usageByProvider.set(provider, { name: String(usage.name ?? ""), windows: usage.windows, at: usage.at });
+		if ((usageByProvider.get(key)?.at ?? -Infinity) >= usage.at) continue;
+		usageByProvider.set(key, { name: String(usage.name ?? ""), windows: usage.windows, at: usage.at });
 		changed = true;
 	}
 	return changed;
 }
 
-function shareUsage(provider, usage) {
+function shareUsage(key, usage) {
 	try {
 		mkdirSync(AGENT_DIR, { recursive: true });
 		const tmp = `${USAGE_FILE}.${process.pid}.tmp`;
-		writeFileSync(tmp, JSON.stringify({ ...readUsageFile(), [provider]: usage }));
+		writeFileSync(tmp, JSON.stringify({ ...readUsageFile(), [key]: usage }));
 		renameSync(tmp, USAGE_FILE);
 	} catch {
 		// sharing is best effort: this process still shows its own reading
@@ -3122,15 +3147,19 @@ function recordUsage(headers) {
 	const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)]));
 	const usage = { ...parseUsageHeaders(lower), at: Date.now() };
 	if (!usage.windows.length) return;
-	usageByProvider.set(provider, usage);
-	shareUsage(provider, usage);
+	const key = usageKey(provider, usage.name, readingAccount());
+	usageByProvider.set(key, usage);
+	shareUsage(key, usage);
 	footerTui?.requestRender?.();
 }
 
-/** The active provider's plan name and windows that have not reset yet. */
+/** The active provider's plan name and windows that have not reset yet, of this window's account. */
 function currentUsage(ctx) {
 	syncUsage();
-	const usage = usageByProvider.get(ctx?.model?.provider);
+	const provider = ctx?.model?.provider;
+	const plain = usageByProvider.get(provider);
+	// A Claude reading under the bare provider key comes from a version that did not record its account.
+	const usage = usageByProvider.get(usageKey(provider, "claude", runAccount ?? accountNow())) ?? (plain?.name === "claude" ? undefined : plain);
 	if (!usage) return { name: "", windows: [] };
 	return { name: usage.name, windows: usage.windows.filter((window) => window.resetAt === null || window.resetAt > Date.now()) };
 }
@@ -3895,6 +3924,11 @@ export default async function (pi) {
 	// Rate-limit headers arrive with each provider response (claude-bridge rebuilds Claude Code's
 	// rate_limit_event as the unified headers), so no credentials or extra requests are needed.
 	pi.on("after_provider_response", (event) => recordUsage(event?.headers));
+	// claude-accounts picks the run's account before the run starts and moves a failed run's retry.
+	pi.on("agent_start", () => startRunAccount());
+	pi.on("message_end", (event) => {
+		if (event?.message?.role === "assistant" && event.message.stopReason === "error") runAccountStale = true;
+	});
 	pi.on("session_start", (_event, ctx) => {
 		config = loadConfig();
 		liveCtx = ctx;
