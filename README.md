@@ -6,7 +6,9 @@ same; only how it is drawn changes.
 
 ## What you get
 
-- **Quiet tool rows.** Each call is one row plus a one-line result. `ctrl+o` shows the full output.
+- **Quiet tool rows.** Each call is one row plus a one-line result; a `$ command` wraps to three rows at most.
+  A count of output kept behind `ctrl+o` starts with `+` (`└ + 12 lines · 1.4s`), a result with nothing more
+  to see with `✓`. `ctrl+o` shows the full output and the whole command.
   Calls and messages Pi still draws in a background box start at the same column as these rows, not at the user message's.
   In fullscreen, Pi's scrollbar gets a column of its own at the right edge instead of painting over the last column of the rows.
 - **Web calls without the box.** pi-web-access's `fetch`, `search`, `get_content` and `source_check` keep their own
@@ -19,7 +21,7 @@ same; only how it is drawn changes.
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
   status, model and elapsed time, then what it does in this conversation's own look: its whole prompt in dim,
   thinking folded to one "Thinking..." row as in the main conversation, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
-  `└ ✓ 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends), long rows wrapped instead of cut; web calls keep
+  `└ + 12 lines · 1.4s`, `└ ✗ exit 1` with its last lines, or `└ running…` until it ends), long rows wrapped instead of cut; web calls keep
   pi-web-access's row behind the status dot (lit, without blinking), memory calls the memory row
   (`search “x”`, `└ ✓ 3 results`), codemode its calls and sources, as in the conversation. It reads the
   subagent's own Pi session (`~/.pi/agent/gentle-agents/sessions/*.jsonl`, found by one of its tool call ids)

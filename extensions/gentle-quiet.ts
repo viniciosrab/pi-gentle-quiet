@@ -1427,7 +1427,9 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 	const text = textOf(result);
 	const lines = outputLines(text);
 	const isError = context.isError || result?.isError;
-	const ok = (summary) => join(fg(t, "success", "✓"), fg(t, "dim", join(summary, seconds(context.durationMs) && `· ${seconds(context.durationMs)}`)));
+	const ok = (summary, mark = fg(t, "success", "✓")) => join(mark, fg(t, "dim", join(summary, seconds(context.durationMs) && `· ${seconds(context.durationMs)}`)));
+	// A count of output rows kept behind ctrl+o says there is more to see, not that something succeeded: a "+".
+	const more = (summary) => ok(summary, fg(t, "dim", "+"));
 	if (toolName === "codemode") return codemodeSummary(result, context, t, isError);
 	if (isError) {
 		const code = /Command exited with code (\d+)/.exec(text)?.[1];
@@ -1438,10 +1440,10 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 	switch (toolName) {
 		case "read": {
 			if ((result?.content ?? []).some((c) => c?.type === "image")) return { summary: ok("image") };
-			return { summary: ok(plural(lines.length, "line")), preview: lines };
+			return { summary: (lines.length ? more : ok)(plural(lines.length, "line")), preview: lines };
 		}
 		case "bash":
-			return { summary: ok(lines.length ? plural(lines.length, "line") : "no output"), preview: lines, keepEnd: true };
+			return { summary: lines.length ? more(plural(lines.length, "line")) : ok("no output"), preview: lines, keepEnd: true };
 		case "edit": {
 			const { added, removed } = diffCounts(result?.details?.diff);
 			const style = diffStyles(t);
@@ -1453,11 +1455,11 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(`${plural(written, "line")} written`) };
 		}
 		case "grep":
-			return { summary: ok(lines.length ? plural(lines.length, "match", "matches") : "no matches"), preview: lines };
+			return { summary: lines.length ? more(plural(lines.length, "match", "matches")) : ok("no matches"), preview: lines };
 		case "find":
-			return { summary: ok(lines.length ? plural(lines.length, "file") : "no files"), preview: lines };
+			return { summary: lines.length ? more(plural(lines.length, "file")) : ok("no files"), preview: lines };
 		case "ls":
-			return { summary: ok(lines.length ? plural(lines.length, "entry", "entries") : "empty"), preview: lines };
+			return { summary: lines.length ? more(plural(lines.length, "entry", "entries")) : ok("empty"), preview: lines };
 		case "bash_background": {
 			const id = /\bStarted background job (\S+)\s/.exec(text)?.[1];
 			return { summary: ok(id ? `${id} started` : firstLine(lines[0] ?? "started", 80)) };
@@ -1490,7 +1492,7 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(firstLine(first ?? "done", 80)), preview: steps.filter((step) => step !== first) };
 		}
 		default:
-			return { summary: ok(lines.length ? plural(lines.length, "line") : "done"), preview: lines, keepEnd: true };
+			return { summary: lines.length ? more(plural(lines.length, "line")) : ok("done"), preview: lines, keepEnd: true };
 	}
 }
 
@@ -1517,7 +1519,7 @@ function quietResultText(toolName, result, options, context, t) {
 			? shown.map((line) => `  ${line}`)
 			: info.diff
 				? shown.map((line) => ({ diff: line[0], text: firstLine(line, 200) }))
-				: shown.map((line) => `  ${color(firstLine(line, 200))}`),
+				: shown.map((line) => `  ${color(firstLine(line.replace(/ *\t[\t ]*/g, " "), 200))}`), // tabs would open a gap
 	};
 }
 
@@ -1651,9 +1653,17 @@ function quietResultComponent({ summary, hint: available, rest }, order, t, wrap
 			const left = ` ${summary}`;
 			const gap = width - visibleWidth(left) - visibleWidth(hint) - 1;
 			const fit = (row) => (wrap ? hangUnder(row, width, leadOf(row)) : [truncateToWidth(row, width, "…")]);
-			if (hint && gap >= 2) lines.push(`${left}${" ".repeat(gap)}${hint} `);
+			const below = rest.flatMap((line) => (typeof line === "object" ? diffRows(line, width, t, wrap) : fit(` ${line}`)));
+			// The hint ends the block: on the summary row alone, else on the last preview row, cut to make room.
+			if (hint && gap >= 2 && !below.length) lines.push(`${left}${" ".repeat(gap)}${hint} `);
 			else lines.push(...fit(left));
-			for (const line of rest) lines.push(...(typeof line === "object" ? diffRows(line, width, t, wrap) : fit(` ${line}`)));
+			lines.push(...below);
+			const room = width - visibleWidth(hint) - 3;
+			if (hint && below.length && room >= 10) {
+				const last = lines.pop().replace(/\s+$/, "");
+				const cut = visibleWidth(last) > room ? truncateToWidth(last, room, "…") : last;
+				lines.push(`${cut}${" ".repeat(width - visibleWidth(cut) - visibleWidth(hint) - 1)}${hint} `);
+			}
 			return lines;
 		},
 		invalidate() {},
@@ -1894,19 +1904,20 @@ function popupRendererRows(item, t, width, args, result) {
 // A subagent's tool call in its pop-up (./sidebar/run-popup.ts), as the conversation draws it with quietRenderers:
 // quietCall's row, then quietResultText's summary and preview under the └ ("running…" until its result arrives).
 // Web and memory calls go through their own renderers (popupRendererRows); MCP tools without one stay quiet rows.
-// No expand hint: the pop-up has no ctrl+o. Rows too long wrap under their text rather than being cut, as the pop-up scrolls.
+// No expand hint: the pop-up has no ctrl+o. Rows too long wrap under their text rather than being cut, as the pop-up scrolls;
+// a wrapped call's second row starts with the └ and its summary follows its last row (linkFirst).
 function popupToolRows(item, t, width) {
 	const args = item.args && typeof item.args === "object" ? item.args : {};
 	const result = item.result ? { ...item.result, isError: item.isError } : { content: [] };
 	const own = popupRendererRows(item, t, width, args, result);
 	if (own) return own;
 	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
-	const call = ` ${quietCall(item.name, args, t)}`;
-	return [...hangUnder(call, width, leadOf(call)), ...quietResultComponent({ ...rows, hint: "" }, -1, t, true).render(width)];
+	const [first, ...rest] = commandRows(quietCall(item.name, args, t), width, true);
+	return [first, ...linkFirst(rest, quietResultComponent({ ...rows, hint: "" }, -1, t, true).render(width), t)];
 }
 
-// The "$ command" and read rows: one row at the full width, cut with "…", so a call and its result take two
-// rows. (Web calls keep pi-web-access's own rows.)
+// The read row: one row at the full width, cut with "…", so a call and its result take two rows. (Web calls
+// keep pi-web-access's own rows.)
 function oneRow(text) {
 	return {
 		render(width) {
@@ -1915,20 +1926,91 @@ function oneRow(text) {
 		invalidate() {},
 	};
 }
-const commandRow = oneRow;
 const readRow = oneRow;
+
+// A "$ command" wraps under its text, past the "$ ", to COMMAND_ROWS rows at most, the last cut with "…"; ctrl+o
+// (`all`) shows it whole.
+const COMMAND_ROWS = 3;
+const unindent = (row) => row.replace(/^((?:\x1b\[[0-9;:]*m)*)\s+/, "$1");
+// Each row filled: a row breaks at its last space only when that leaves it at least half full, else inside the
+// word (a long path stays on the "$" row instead of leaving it bare). With `max` rows the last is cut with "…".
+function fillRows(text, room, lead, max = Infinity) {
+	const rows = [];
+	let rest = text;
+	while (visibleWidth(rest) > 0) {
+		const size = Math.max(2, rows.length ? room - lead : room);
+		if (visibleWidth(rest) <= size) {
+			rows.push(rest);
+			break;
+		}
+		if (rows.length === max - 1) {
+			rows.push(truncateToWidth(rest, size, "…"));
+			break;
+		}
+		const plain = (row) => row.replace(/\x1b\[[0-9;:]*m/g, "");
+		const head = plain(PiTui.sliceByColumn(rest, 0, size, true));
+		const space = head.lastIndexOf(" ");
+		const atSpace = plain(PiTui.sliceByColumn(rest, size, 1, true)) === " ";
+		const cut = atSpace || space < size / 2 ? size : space + 1;
+		const row = PiTui.sliceByColumn(rest, 0, cut, true);
+		const taken = Math.max(1, visibleWidth(row));
+		rows.push(row.replace(/\s+((?:\x1b\[[0-9;:]*m)*)$/, "$1"));
+		rest = unindent(PiTui.sliceByColumn(rest, taken, visibleWidth(rest), true));
+	}
+	return rows.length ? rows : [text];
+}
+
+function commandRows(text, width, all = false) {
+	const room = Math.max(1, width - 1); // Pi's one-column margin
+	const lead = leadOf(text);
+	const trimmed = text.replace(/(?:\s|\x1b\[[0-9;:]*m)+$/u, (tail) => tail.replace(/\s+/gu, ""));
+	const [first, ...rest] = typeof PiTui.sliceByColumn === "function" ? fillRows(trimmed, room, lead, all ? Infinity : COMMAND_ROWS) : [truncateToWidth(trimmed, room, "…")];
+	return [` ${first}`, ...rest.map((row) => ` ${" ".repeat(lead)}${row}`)];
+}
+
+// A wrapped command's rows past its first with its result's rows: the └ starts the command's second row, so it
+// stays at the top, and the summary ("✓ 2 lines", the expand hint) comes after the command's last row, without it.
+function linkFirst(rest, result, t) {
+	if (!rest.length || !result.length || !/^ {3}/.test(rest[0])) return [...rest, ...result];
+	const [summary, ...after] = result;
+	return [rest[0].replace(/^ {3}/, ` ${fg(t, "dim", LINK)} `), ...rest.slice(1), summary.replace(LINK, " "), ...after];
+}
+
+// The command's rows. Once its result is drawn (renderResult sets state.quietBelow, shared by the row's two
+// renderers) only the first stays here: the result draws the rest under the └ (linkFirst).
+function commandRow(text, context = {}) {
+	return {
+		render(width) {
+			const rows = commandRows(text, width, context.expanded);
+			return context.state?.quietBelow ? rows.slice(0, 1) : rows;
+		},
+		invalidate() {},
+	};
+}
+
+// The result's rows under the rest of its command (commandRow).
+function belowCommand(component, text, expanded, t) {
+	return {
+		render(width) {
+			return linkFirst(commandRows(text, width, expanded).slice(1), component.render(width), t);
+		},
+		invalidate() {},
+	};
+}
 
 function quietRenderers(toolName, renderers) {
 	return {
 		...renderers,
 		renderShell: "self", // no tool background box; the rows carry Pi's margin themselves
-		renderCall(args, t) {
-			if (toolName === "bash" || toolName === "bash_background") return commandRow(quietCall(toolName, args, t));
+		renderCall(args, t, context = {}) {
+			if (toolName === "bash" || toolName === "bash_background") return commandRow(quietCall(toolName, args, t), context);
 			if (toolName === "read") return readRow(quietCall(toolName, args, t));
 			return new Text(quietCall(toolName, args, t), 1, 0);
 		},
 		renderResult(result, options = {}, t, context = {}) {
 			const state = context.state && typeof context.state === "object" ? context.state : undefined;
+			const command = (toolName === "bash" || toolName === "bash_background") && state;
+			if (command) state.quietBelow = false;
 			if (options.expanded && !options.isPartial && typeof renderers.renderResult === "function") {
 				try {
 					// Pi's renderer reuses its own previous component only, never ours.
@@ -1944,7 +2026,10 @@ function quietRenderers(toolName, renderers) {
 				return new Text(textOf(result).replace(/\s+$/, ""), 1, 0);
 			}
 			const order = orderOf(context.toolCallId, !options.isPartial);
-			return quietResultComponent(quietResultText(toolName, result, options, context, t), order, t);
+			const quiet = quietResultComponent(quietResultText(toolName, result, options, context, t), order, t);
+			if (!command) return quiet;
+			state.quietBelow = true;
+			return belowCommand(quiet, quietCall(toolName, context.args ?? {}, t), options.expanded, t);
 		},
 	};
 }

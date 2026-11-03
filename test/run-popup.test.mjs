@@ -1231,7 +1231,9 @@ test("a long command, its output and its diff rows wrap in the popup instead of 
 		assert.deepEqual(seen, words(stem), `every ${stem} word, none cut:\n${body.join("\n")}`);
 	}
 	const command = body.findIndex((row) => row.startsWith("$ echo alpha01"));
-	assert.ok(command >= 0 && /^ {2}alpha/.test(body[command + 1]), `the command goes on under itself:\n${body.join("\n")}`);
+	assert.ok(command >= 0 && /^└ alpha/.test(body[command + 1]), `the └ starts the command's second row:\n${body.join("\n")}`);
+	const summary = body.findIndex((row) => /^ {2}\+ 1 line/.test(row));
+	assert.ok(summary > command + 1 && body.slice(command + 2, summary).every((row) => /^ {2}alpha/.test(row)), `the summary after the command's last row, without the └:\n${body.join("\n")}`);
 	assert.ok(!body.some((row) => /(alpha|beta|gamma)\d*…/.test(row)), "nothing cut with …");
 	assert.ok(body.every((row) => row.length <= 76));
 });
