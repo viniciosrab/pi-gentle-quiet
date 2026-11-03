@@ -22,7 +22,7 @@ test("quiet tools render without Pi's tool box", async () => {
 test("read collapses to the path and a line count with the expand hint", async () => {
 	const out = await draw("read", { path: "/tmp/app.ts", offset: 10, limit: 3 }, text("a\nb\nc"));
 	assert.equal(out[0], " read /tmp/app.ts:10-12");
-	assert.match(out[1], /^ └ ✓ 3 lines +ctrl\+o to expand$/);
+	assert.match(out[1], /^ └ \+ 3 lines +ctrl\+o to expand$/);
 });
 
 test("bash failures show the exit code and the last output line, without a hint", async () => {
@@ -36,10 +36,17 @@ test("empty and running calls show no expand hint", async () => {
 });
 
 test("summaries for grep, find, ls and write", async () => {
-	assert.match((await draw("grep", { pattern: "x", path: "src" }, text("a:1\nb:2")))[1], /✓ 2 matches/);
+	assert.match((await draw("grep", { pattern: "x", path: "src" }, text("a:1\nb:2")))[1], /\+ 2 matches/);
 	assert.match((await draw("find", { pattern: "*.md" }, text("")))[1], /✓ no files/);
-	assert.match((await draw("ls", { path: "." }, text("a")))[1], /✓ 1 entry/);
+	assert.match((await draw("ls", { path: "." }, text("a")))[1], /\+ 1 entry/);
 	assert.match((await draw("write", { path: "b.md", content: "x\ny" }, text("ok")))[1], /✓ 2 lines written +ctrl\+o to expand/);
+});
+
+test("a count of hidden output rows takes a +, not a ✓; a call with nothing hidden keeps its ✓", async () => {
+	assert.match((await draw("bash", { command: "ls" }, text("a\nb")))[1], /^ └ \+ 2 lines +ctrl\+o to expand$/);
+	assert.match((await draw("bash", { command: "true" }, text("")))[1], /^ └ ✓ no output$/);
+	assert.match((await draw("read", { path: "/tmp/a.png" }, { content: [{ type: "image", data: "", mimeType: "image/png" }] }))[1], /^ └ ✓ image$/);
+	assert.match((await draw("find", { pattern: "*.md" }, text("a.md")))[1], /^ └ \+ 1 file/);
 });
 
 test("expanded calls show Pi's own output on the margin, without backgrounds", async () => {
@@ -85,8 +92,8 @@ test("codemode summarizes child calls and lists failures", async () => {
 	];
 	const out = await draw("codemode", { code: "a\nb" }, { content: [], details: { calls } });
 	assert.equal(out[0], " codemode 2 lines");
-	assert.match(out[1], /^ └ ✗ 1 of 2 calls failed +ctrl\+o to expand$/);
-	assert.equal(out[2], "   ✗ supabase/list_tables permission denied");
+	assert.equal(out[1], " └ ✗ 1 of 2 calls failed");
+	assert.match(out[2], /^   ✗ supabase\/list_tables permission denied +ctrl\+o to expand$/, "the hint ends the block");
 	const ok = await draw("codemode", { code: "a" }, { content: [], details: { calls: [calls[0]] } }, {}, { durationMs: 1400 });
 	assert.match(ok[1], /✓ 1 call · context7 · 1\.4s/);
 });
@@ -160,14 +167,58 @@ test("the tones option cycles claude → theme → soft → claude", async () =>
 	writeConfig({});
 });
 
-test("a long $ command fills one row and is cut with …, so the call and its result take two rows", async () => {
+test("a failed command's output row has no tab gap, and the expand hint ends the block on that row, cut to make room", async () => {
+	const long = `>\t\t\treturn { summary: ${"x".repeat(120)} }`;
+	const out = await draw("bash", { command: "diff a b" }, text(`first\n${long}\nCommand exited with code 1`, { isError: true }), {}, { isError: true });
+	assert.equal(out.length, 3, out.join("\n"));
+	assert.equal(out[1], " └ ✗ exit 1", "the summary row alone");
+	assert.match(out[2], /^ {3}> return \{ summary: x+… +ctrl\+o to expand$/, out[2]);
+	assert.ok(out[2].length <= 70);
+});
+
+test("a $ command whose first word is longer than the row starts on the $ row, filling it, not under it", async () => {
 	const { tool } = await load();
-	const command = Array.from({ length: 40 }, (_, i) => `step${i}`).join(" && ");
-	const rows = tool("bash", native).renderCall({ command }, theme).render(120).map((row) => plain(row));
-	assert.equal(rows.length, 1, "one row, never wrapped");
-	assert.equal(rows[0].length, 120, "the full width");
-	assert.ok(rows[0].startsWith(" $ step0 && ") && rows[0].endsWith("…"));
-	assert.deepEqual(tool("bash", native).renderCall({ command: "ls" }, theme).render(120).map((row) => plain(row)), [" $ ls"]);
+	const word = `f=/home/user/${"node_modules/pkg/".repeat(10)}tool-execution.js`;
+	const rows = tool("bash", native).renderCall({ command: `${word}; sed -n 70,100p $f` }, theme, { state: {} }).render(80).map((row) => plain(row));
+	assert.ok(rows[0].startsWith(" $ f=/home/user/node_modules/"), `the command on the $ row:\n${rows.join("\n")}`);
+	assert.equal(rows[0].length, 80, "the $ row filled");
+	assert.ok(rows.slice(1).every((row) => /^ {3}\S/.test(row) && row.length <= 80), rows.join("\n"));
+	assert.equal(rows.map((row) => row.trim()).join("").replace(/^\$ /, "").replace(/\s/g, ""), `${word};sed-n70,100p$f`, "nothing lost");
+});
+
+const steps = (count) => Array.from({ length: count }, (_, i) => `step${i}`).join(" && ");
+
+test("a long $ command wraps under itself to three rows at most, the third cut with …", async () => {
+	const { tool } = await load();
+	const rows = tool("bash", native).renderCall({ command: steps(40) }, theme, { state: {} }).render(120).map((row) => plain(row));
+	assert.equal(rows.length, 3, rows.join("\n"));
+	assert.ok(rows[0].startsWith(" $ step0 && "), rows[0]);
+	assert.ok(rows.slice(1).every((row) => /^ {3}\S/.test(row)), `the rest under the command's text:\n${rows.join("\n")}`);
+	assert.ok(rows[2].endsWith("…") && rows.every((row) => row.length <= 120), rows.join("\n"));
+	assert.deepEqual(tool("bash", native).renderCall({ command: "ls" }, theme, { state: {} }).render(120).map((row) => plain(row)), [" $ ls"]);
+});
+
+test("once its result is drawn, a wrapped $ command's second row starts with the └, and its summary and hint come after its last row", async () => {
+	const { tool } = await load();
+	const renderers = tool("bash", native);
+	const context = { args: { command: steps(16) }, state: {} };
+	const call = renderers.renderCall(context.args, theme, context);
+	const result = renderers.renderResult(text("a\nb"), { isPartial: false }, theme, context);
+	const rows = [...call.render(120), ...result.render(120)].map((row) => plain(row).trimEnd());
+	assert.equal(rows.length, 3, rows.join("\n"));
+	assert.ok(rows[0].startsWith(" $ step0 && "), rows.join("\n"));
+	assert.ok(/^ └ \S/.test(rows[1]) && rows[1].endsWith("step15"), `the └ starts the command's second row:\n${rows.join("\n")}`);
+	assert.match(rows[2], /^ {3}\+ 2 lines +ctrl\+o to expand$/, "the summary last, without the └");
+	assert.equal([rows[0], rows[1]].join(" ").replace("└", "").split(/\s+/).filter((word) => /^step\d+$/.test(word)).length, 16, "no step lost");
+});
+
+test("a running $ command with no result yet shows its rows together, and ctrl+o shows the command whole", async () => {
+	const { tool } = await load();
+	const renderers = tool("bash", native);
+	const running = renderers.renderCall({ command: steps(16) }, theme, { state: {} }).render(120).map((row) => plain(row));
+	assert.equal(running.length, 2, running.join("\n"));
+	const expanded = renderers.renderCall({ command: steps(40) }, theme, { state: {}, expanded: true }).render(120).map((row) => plain(row));
+	assert.ok(expanded.length > 3 && !expanded.some((row) => row.endsWith("…")), expanded.join("\n"));
 });
 
 test("a long read path stays on one row, cut with …", async () => {

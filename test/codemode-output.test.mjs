@@ -23,12 +23,19 @@ test("by default the script's output stays hidden: the call and its summary take
 });
 
 test("with output lines turned on, the script's output shows under the summary, without Pi's bookkeeping header", async () => {
-	assert.deepEqual((await draw(finished('{"ok":"ok"}'), { quiet: { codemodeOutput: 3 } })).slice(1), ['   {"ok":"ok"}']);
-	assert.deepEqual((await draw(finished("a\nb\nc\nd\ne"), { quiet: { codemodeOutput: 3 } })).slice(1), ["   a", "   b", "   c", "   … 2 more lines"]);
+	const one = (await draw(finished('{"ok":"ok"}'), { quiet: { codemodeOutput: 3 } })).slice(1);
+	assert.equal(one.length, 1);
+	assert.match(one[0], /^   \{"ok":"ok"\} +ctrl\+o to expand$/, "the hint ends the block, on its last row");
+	const many = (await draw(finished("a\nb\nc\nd\ne"), { quiet: { codemodeOutput: 3 } })).slice(1);
+	assert.deepEqual(many.slice(0, 3), ["   a", "   b", "   c"]);
+	assert.match(many[3], /^   … 2 more lines +ctrl\+o to expand$/);
 });
 
 test("the number of output lines is configurable, and 0 hides them", async () => {
-	assert.deepEqual((await draw(finished("a\nb\nc"), { quiet: { codemodeOutput: 1 } })).slice(1), ["   a", "   … 2 more lines"]);
+	const rows = (await draw(finished("a\nb\nc"), { quiet: { codemodeOutput: 1 } })).slice(1);
+	assert.equal(rows[0], "   a");
+	assert.match(rows[1], /^   … 2 more lines +ctrl\+o to expand$/);
+	assert.equal(rows.length, 2);
 	assert.equal((await draw(finished("a\nb\nc"), { quiet: { codemodeOutput: 0 } })).length, 1);
 });
 
@@ -39,7 +46,9 @@ test("an empty output shows no rows", async () => {
 test("failed calls are listed before the output", async () => {
 	const result = finished("done", { details: { calls: [{ name: "read", status: "error", error: "ENOENT" }] } });
 	const out = await draw(result, { quiet: { codemodeOutput: 3 } });
-	assert.deepEqual(out.slice(1), ["   ✗ read ENOENT", "   done"]);
+	assert.equal(out[1], "   ✗ read ENOENT");
+	assert.match(out[2], /^   done +ctrl\+o to expand$/);
+	assert.equal(out.length, 3);
 });
 
 test("a script that threw shows its error in the summary only", async () => {

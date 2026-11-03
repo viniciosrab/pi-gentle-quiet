@@ -30,6 +30,10 @@ export function truncateToWidth(text, width, ellipsis = "…") {
 	return [...strip(text)].slice(0, Math.max(0, width - 1)).join("") + ellipsis;
 }
 
+export function sliceByColumn(text, start, length) {
+	return [...strip(text)].slice(start, start + length).join("");
+}
+
 export class Text {
 	constructor(text = "", paddingX = 0) {
 		this.text = text;
