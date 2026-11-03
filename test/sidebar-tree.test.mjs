@@ -41,9 +41,17 @@ function boxed(rows, width) {
 	return [line(`┌${"─".repeat(inner + 2)}┐`), ...rows.map((row) => `${line("│")} ${fit(row, inner)} ${line("│")}`), line(`└${"─".repeat(inner + 2)}┘`)];
 }
 
+// An agent dir whose TREE memory has src open in `cwd`: every folder starts closed in a project never seen, so the
+// tests that draw an open src start from this one.
+function srcOpen(cwd) {
+	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+	writeFileSync(path.join(agentDir, "gentle-quiet-tree.json"), JSON.stringify({ [cwd]: { expanded: ["src"], at: 1 } }));
+	return agentDir;
+}
+
 // A stand-in for gentle-quiet's SidebarHost; `git` answers by the first git argument after any "-c" pair.
 // `fg` replaces the theme painting; treeHidden is the setting, which setTreeHidden saves (recorded in calls.saved).
-function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = false, fg, agentDir = "/nowhere" } = {}) {
+function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = false, fg, agentDir = cwd ? srcOpen(cwd) : "/nowhere" } = {}) {
 	const calls = { git: [], renders: 0, saved: [] };
 	const host = {
 		theme,
@@ -401,8 +409,8 @@ const savedFolders = (agentDir) => {
 };
 
 test("the folders opened and closed are remembered for the project: a new tab opens them as they were left", async (t) => {
-	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
 	const root = project(FILES);
+	const agentDir = srcOpen(root);
 	const first = await opened({ cwd: root, git: STATUS(""), agentDir });
 	const line = (name) => first.rows().findIndex((row) => row.includes(` ${name} (`));
 	first.tab.handleClick(line("src"), "left", 10);
@@ -420,9 +428,9 @@ test("the folders opened and closed are remembered for the project: a new tab op
 	assert.ok(again.rows().some((row) => row.includes("guide.md")));
 });
 
-test("right click's close-all is remembered too, and another project keeps the default (src open)", async (t) => {
-	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+test("right click's close-all is remembered too, and a project never seen opens with every folder closed", async (t) => {
 	const root = project(FILES);
+	const agentDir = srcOpen(root);
 	const first = await opened({ cwd: root, git: STATUS(""), agentDir });
 	first.tab.handleClick(5, "right", 4);
 	await until(() => !first.rows().some((row) => row.includes("index.ts")), "everything collapsed");
@@ -436,16 +444,17 @@ test("right click's close-all is remembered too, and another project keeps the d
 
 	const other = await opened({ cwd: project(FILES, "other-app"), git: STATUS(""), agentDir });
 	t.after(() => other.tab.dispose());
-	assert.ok(other.rows().some((row) => row.includes("📂 src")), "a project never seen opens src");
+	assert.ok(other.rows().some((row) => row.includes("📁 src")), "a project never seen opens nothing, not even src");
+	assert.ok(!other.rows().some((row) => row.includes("📂")));
 });
 
-test("an unreadable or broken memory file leaves the default, and the tree still works", async (t) => {
+test("an unreadable or broken memory file leaves the default (every folder closed), and the tree still works", async (t) => {
 	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
 	writeFileSync(memoryFile(agentDir), "{ not json");
 	const { tab, rows } = await opened({ cwd: project(FILES), git: STATUS(""), agentDir });
 	t.after(() => tab.dispose());
-	assert.ok(rows().some((row) => row.includes("📂 src")));
-	assert.ok(rows().some((row) => row.includes("index.ts")));
+	assert.ok(rows().some((row) => row.includes("📁 src")));
+	assert.ok(!rows().some((row) => row.includes("index.ts")));
 });
 
 // A Pi context whose ui.custom records the overlays it is asked for.

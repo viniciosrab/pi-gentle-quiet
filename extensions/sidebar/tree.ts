@@ -1,8 +1,8 @@
 // The TREE tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's
 // project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ <project>   [ ↗ ]"
 // in the card title style, then the project's tree with git badges on the right ("M", "U",
-// "A", "!" on files, "●" on folders holding a change). Only src is open at first; after that each project opens with the folders
-// that were left open in it, saved in <Pi agent dir>/gentle-quiet-tree.json (./tree-memory.ts) on each toggle. The row icons are emoji
+// "A", "!" on files, "●" on folders holding a change). Every folder is closed at first; after that each project opens with the
+// folders that were left open in it, saved in <Pi agent dir>/gentle-quiet-tree.json (./tree-memory.ts) on each toggle. The row icons are emoji
 // (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), the icons Neo-tree draws in LazyVim
 // (./nerd-icons.ts): mini.icons' glyph for the file, Neo-tree's folders, one cell of the terminal's Nerd Font,
 // painted with a theme role.
@@ -49,8 +49,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		git: parseGitStatus(""),
 		gitFailed: false,
 		ignored: new Set(),
-		expanded: new Set(["src"]),
-		firstScan: true,
+		expanded: new Set(),
 		loaded: false, // the project's saved folders were read
 		scroll: 0,
 		selected: undefined,
@@ -88,8 +87,8 @@ export function createTab(host: SidebarHost): SidebarTab {
 	};
 
 	const reset = (cwd) => {
-		Object.assign(state, { cwd, noCwd: false, name: undefined, prefix: undefined, tree: undefined, error: undefined, git: parseGitStatus(""), gitFailed: false, firstScan: true, loaded: false, scroll: 0, selected: undefined, signature: "" });
-		state.expanded = new Set(["src"]);
+		Object.assign(state, { cwd, noCwd: false, name: undefined, prefix: undefined, tree: undefined, error: undefined, git: parseGitStatus(""), gitFailed: false, loaded: false, scroll: 0, selected: undefined, signature: "" });
+		state.expanded = new Set();
 		state.version++;
 	};
 
@@ -108,10 +107,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			const saved = await loadExpanded(host.agentDir, cwd).catch(() => undefined);
 			if (state.disposed || cwd !== state.cwd) return;
 			state.loaded = true;
-			if (saved) {
-				state.expanded = saved;
-				state.firstScan = false;
-			}
+			if (saved) state.expanded = saved;
 		}
 		const quiet = (promise) => Promise.resolve().then(() => promise).catch(() => undefined);
 		const showHidden = host.treeHidden === true;
@@ -127,10 +123,6 @@ export function createTab(host: SidebarHost): SidebarTab {
 		if (typeof prefix === "string") state.prefix = prefix.trim();
 		state.tree = read.tree;
 		state.error = read.error;
-		if (state.firstScan && read.tree) {
-			state.firstScan = false;
-			if (!read.tree.some((node) => node.isDirectory && node.relPath === "src")) state.expanded.delete("src");
-		}
 		state.gitFailed = typeof status !== "string";
 		state.git = parseGitStatus(status ?? "", state.prefix ?? "");
 		const shape = (nodes) => [nodes?.hiddenCount ?? 0, (nodes ?? []).map((node) => [node.relPath, node.itemCount, node.hidden === true, shape(node.children)])];
