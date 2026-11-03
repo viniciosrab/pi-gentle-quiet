@@ -117,7 +117,7 @@ same; only how it is drawn changes.
   `dist`, `.git`…) are hidden, and each folder level that hid some ends with a dim "(n hidden items)" row.
   Click that row, or set **Blocks** → Tree hidden items: show in `/gentle-quiet`, to list them (dim); the
   setting is saved.
-- **TREE remembers its open folders.** Only `src` is open the first time; after that each project opens
+- **TREE remembers its open folders.** Every folder is closed the first time; after that each project opens
   with the folders you left open or closed (a click, or a right click's close/open all), saved per project
   folder in `<Pi agent dir>/gentle-quiet-tree.json`.
 - **Gentle Shell's Jobs card.** In the side column, running background jobs get a card on top, newest
