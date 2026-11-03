@@ -1,7 +1,8 @@
 // The TREE tab of gentle-quiet's side column (the contract is in ./tabs.ts), after pi-cinlodev-cute's
 // project explorer (src/tree/tree-card.ts): one card filling the column, headed "⌂ <project>   [ ↗ ]"
 // in the card title style, then the project's tree with git badges on the right ("M", "U",
-// "A", "!" on files, "●" on folders holding a change). Only src is open at first. The row icons are emoji
+// "A", "!" on files, "●" on folders holding a change). Only src is open at first; after that each project opens with the folders
+// that were left open in it, saved in <Pi agent dir>/gentle-quiet-tree.json (./tree-memory.ts) on each toggle. The row icons are emoji
 // (📁 📂 📄), or with /gentle-quiet's Tree icons on nerd (host.treeIcons), the icons Neo-tree draws in LazyVim
 // (./nerd-icons.ts): mini.icons' glyph for the file, Neo-tree's folders, one cell of the terminal's Nerd Font,
 // painted with a theme role.
@@ -21,6 +22,7 @@ import path from "node:path";
 import type { SidebarHost, SidebarTab } from "./tabs.ts";
 import { launchDeps } from "./tree-launch.ts";
 import { nerdIcon } from "./nerd-icons.ts";
+import { loadExpanded, saveExpanded } from "./tree-memory.ts";
 import { openPreview } from "./tree-preview.ts";
 import { collectDirs, flattenTree, parseGitStatus, parseIgnored, projectName, scanTree } from "./tree-scan.ts";
 
@@ -49,6 +51,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 		ignored: new Set(),
 		expanded: new Set(["src"]),
 		firstScan: true,
+		loaded: false, // the project's saved folders were read
 		scroll: 0,
 		selected: undefined,
 		notice: undefined,
@@ -85,7 +88,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 	};
 
 	const reset = (cwd) => {
-		Object.assign(state, { cwd, noCwd: false, name: undefined, prefix: undefined, tree: undefined, error: undefined, git: parseGitStatus(""), gitFailed: false, firstScan: true, scroll: 0, selected: undefined, signature: "" });
+		Object.assign(state, { cwd, noCwd: false, name: undefined, prefix: undefined, tree: undefined, error: undefined, git: parseGitStatus(""), gitFailed: false, firstScan: true, loaded: false, scroll: 0, selected: undefined, signature: "" });
 		state.expanded = new Set(["src"]);
 		state.version++;
 	};
@@ -101,6 +104,15 @@ export function createTab(host: SidebarHost): SidebarTab {
 			return;
 		}
 		if (cwd !== state.cwd) reset(cwd);
+		if (!state.loaded) {
+			const saved = await loadExpanded(host.agentDir, cwd).catch(() => undefined);
+			if (state.disposed || cwd !== state.cwd) return;
+			state.loaded = true;
+			if (saved) {
+				state.expanded = saved;
+				state.firstScan = false;
+			}
+		}
 		const quiet = (promise) => Promise.resolve().then(() => promise).catch(() => undefined);
 		const showHidden = host.treeHidden === true;
 		const ignored = quiet(host.git(IGNORED_ARGS, cwd)).then(parseIgnored);
@@ -158,6 +170,12 @@ export function createTab(host: SidebarHost): SidebarTab {
 		refresh();
 	};
 
+	// A folder opened or closed by hand: read again and save the open folders for the project.
+	const remember = () => {
+		if (state.cwd) saveExpanded(host.agentDir, state.cwd, state.expanded);
+		toggled();
+	};
+
 	const toggled = () => {
 		state.version++;
 		host.requestRender();
@@ -186,7 +204,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 	const toggleAll = () => {
 		if (state.expanded.size > 0) {
 			state.expanded.clear();
-			toggled();
+			remember();
 			return;
 		}
 		const cwd = state.cwd;
@@ -195,7 +213,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			.then((tree) => {
 				if (state.disposed || cwd !== state.cwd) return;
 				state.expanded = collectDirs(tree);
-				toggled();
+				remember();
 			})
 			.catch(() => undefined);
 	};
@@ -303,7 +321,7 @@ export function createTab(host: SidebarHost): SidebarTab {
 			if (node.isDirectory) {
 				if (state.expanded.has(node.relPath)) state.expanded.delete(node.relPath);
 				else state.expanded.add(node.relPath);
-				toggled();
+				remember();
 				return true;
 			}
 			state.selected = node.relPath;

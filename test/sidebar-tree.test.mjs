@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -43,7 +43,7 @@ function boxed(rows, width) {
 
 // A stand-in for gentle-quiet's SidebarHost; `git` answers by the first git argument after any "-c" pair.
 // `fg` replaces the theme painting; treeHidden is the setting, which setTreeHidden saves (recorded in calls.saved).
-function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = false, fg } = {}) {
+function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = false, fg, agentDir = "/nowhere" } = {}) {
 	const calls = { git: [], renders: 0, saved: [] };
 	const host = {
 		theme,
@@ -55,7 +55,7 @@ function fakeHost({ cwd, git = {}, border = true, ctx, treeIcons, treeHidden = f
 		cwd: () => cwd,
 		ctx: () => ctx,
 		pi: undefined,
-		agentDir: "/nowhere",
+		agentDir,
 		requestRender: () => calls.renders++,
 		git: async (args) => {
 			calls.git.push(args);
@@ -388,6 +388,64 @@ test("a click on a folder toggles it and asks for a redraw", async (t) => {
 	assert.equal(tab.handleClick(line("src"), "left", 10), true);
 	await until(() => !rows().some((row) => row.includes("index.ts")), "src collapsed");
 	assert.match(rows()[line("src")], /📁 src/);
+});
+
+// The folders a click opens or closes are saved per project in <agentDir>/gentle-quiet-tree.json.
+const memoryFile = (agentDir) => path.join(agentDir, "gentle-quiet-tree.json");
+const savedFolders = (agentDir) => {
+	try {
+		return JSON.parse(readFileSync(memoryFile(agentDir), "utf8"));
+	} catch {
+		return undefined;
+	}
+};
+
+test("the folders opened and closed are remembered for the project: a new tab opens them as they were left", async (t) => {
+	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+	const root = project(FILES);
+	const first = await opened({ cwd: root, git: STATUS(""), agentDir });
+	const line = (name) => first.rows().findIndex((row) => row.includes(` ${name} (`));
+	first.tab.handleClick(line("src"), "left", 10);
+	await until(() => !first.rows().some((row) => row.includes("index.ts")), "src collapsed");
+	first.tab.handleClick(line("docs"), "left", 10);
+	await until(() => first.rows().some((row) => row.includes("guide.md")), "docs expanded");
+	await until(() => JSON.stringify(savedFolders(agentDir)?.[root]?.expanded) === JSON.stringify(["docs"]), "the folders saved");
+	first.tab.dispose();
+
+	const again = await opened({ cwd: root, git: STATUS(""), agentDir });
+	t.after(() => again.tab.dispose());
+	assert.ok(again.rows().some((row) => row.includes("📁 src")), "src stays closed");
+	assert.ok(!again.rows().some((row) => row.includes("index.ts")));
+	assert.ok(again.rows().some((row) => row.includes("📂 docs")), "docs opens again");
+	assert.ok(again.rows().some((row) => row.includes("guide.md")));
+});
+
+test("right click's close-all is remembered too, and another project keeps the default (src open)", async (t) => {
+	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+	const root = project(FILES);
+	const first = await opened({ cwd: root, git: STATUS(""), agentDir });
+	first.tab.handleClick(5, "right", 4);
+	await until(() => !first.rows().some((row) => row.includes("index.ts")), "everything collapsed");
+	await until(() => JSON.stringify(savedFolders(agentDir)?.[root]?.expanded) === "[]", "the empty set saved");
+	first.tab.dispose();
+
+	const again = await opened({ cwd: root, git: STATUS(""), agentDir });
+	t.after(() => again.tab.dispose());
+	assert.ok(again.rows().some((row) => row.includes("📁 src")), "nothing opens on its own");
+	assert.ok(!again.rows().some((row) => row.includes("📂")));
+
+	const other = await opened({ cwd: project(FILES, "other-app"), git: STATUS(""), agentDir });
+	t.after(() => other.tab.dispose());
+	assert.ok(other.rows().some((row) => row.includes("📂 src")), "a project never seen opens src");
+});
+
+test("an unreadable or broken memory file leaves the default, and the tree still works", async (t) => {
+	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+	writeFileSync(memoryFile(agentDir), "{ not json");
+	const { tab, rows } = await opened({ cwd: project(FILES), git: STATUS(""), agentDir });
+	t.after(() => tab.dispose());
+	assert.ok(rows().some((row) => row.includes("📂 src")));
+	assert.ok(rows().some((row) => row.includes("index.ts")));
 });
 
 // A Pi context whose ui.custom records the overlays it is asked for.
