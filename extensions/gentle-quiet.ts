@@ -1279,6 +1279,17 @@ const shortPath = (value) => {
 	const text = typeof value === "string" ? value : "";
 	return text.startsWith(HOME) ? `~${text.slice(HOME.length)}` : text;
 };
+// A path fitted to `max` columns by dropping its first folders ("~/…/sidebar/run-popup.ts"); the file name stays.
+const fitPath = (text, max) => {
+	if (!(max >= 0) || visibleWidth(text) <= max) return text;
+	const root = /^(~\/|\/)?/.exec(text)[0];
+	const names = text.slice(root.length).split("/");
+	for (let keep = names.length - 1; keep >= 1; keep--) {
+		const candidate = `${root}…/${names.slice(-keep).join("/")}`;
+		if (visibleWidth(candidate) <= max || keep === 1) return candidate;
+	}
+	return text; // no folder to drop
+};
 // The status line names only the working folder: "~/name" inside home, "~" for home, "/" for the root.
 const folderName = (value) => {
 	const text = typeof value === "string" ? value : "";
@@ -1310,37 +1321,59 @@ const callTones = (t) => config.tools.tones === "theme"
 		? { title: (text) => fg(t, "toolTitle", text), arg: (text) => fg(t, "muted", text), command: (text) => fg(t, "muted", text) }
 		: { title: CALL_TITLE, arg: CALL_ARG, command: CALL_ARG };
 
-function quietCall(toolName, args = {}, t) {
+// A leading "cd <folder> &&" (or ";") says where the command runs, context rather than the command: dim, and a
+// folder more than two names deep under ~ or / cut to its last ("~/…/worktree"), unless `whole` (ctrl+o).
+const CD_PREFIX = /^cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(&&|;)/u;
+function shortFolder(folder, whole) {
+	const quote = /^["']/.test(folder) ? folder[0] : "";
+	if (whole) return folder;
+	const bare = shortPath(quote ? folder.slice(1, -1) : folder);
+	const deep = /^(~?)\/(?:[^/]+\/){2,}([^/]+)\/?$/u.exec(bare);
+	return `${quote}${deep ? `${deep[1]}/…/${deep[2]}` : bare}${quote}`;
+}
+function commandText(command, tones, t, whole) {
+	const text = firstLine(command, Infinity);
+	const cd = CD_PREFIX.exec(text);
+	if (!cd) return tones.command(`$ ${text}`);
+	const rest = text.slice(cd[0].length).replace(/^\s+/, "");
+	const prefix = `cd ${shortFolder(cd[1], whole)}${cd[2] === ";" ? ";" : " &&"}`;
+	return `${tones.command("$ ")}${fg(t, "dim", prefix)}${rest ? tones.command(` ${rest}`) : ""}`;
+}
+
+// `fit` (callRow) fits the row to its width: `path` columns for the path, `arg` for a pattern, query or label.
+function quietCall(toolName, args = {}, t, whole = false, fit = {}) {
 	const tones = callTones(t);
 	const title = tones.title;
 	const accent = tones.arg;
 	const dim = (text) => fg(t, "dim", text);
+	const place = (value) => fitPath(shortPath(value), fit.path);
+	const cut = (value) => (fit.arg === undefined ? value : truncateToWidth(value, Math.max(1, fit.arg), "…"));
 	switch (toolName) {
 		case "read": {
 			const range = args.offset !== undefined || args.limit !== undefined
 				? fg(t, "warning", `:${args.offset ?? 1}${args.limit !== undefined ? `-${(args.offset ?? 1) + args.limit - 1}` : ""}`)
 				: "";
-			return `${title("read")} ${accent(shortPath(args.path ?? args.file_path))}${range}`;
+			return `${title("read")} ${accent(place(args.path ?? args.file_path))}${range}`;
 		}
 		case "bash": // regular weight, like Claude Code's "$ command" row; commandRow fits it to the width
-			return tones.command(`$ ${firstLine(args.command, Infinity)}`);
+			return commandText(args.command, tones, t, whole);
 		case "bash_background":
-			return join(tones.command(`$ ${firstLine(args.command, Infinity)}`), dim("· background"));
+			return join(commandText(args.command, tones, t, whole), dim("· background"));
 		case "monitor":
-			return join(title("monitor"), accent(firstLine(args.label ?? args.command ?? "")));
+			return join(title("monitor"), accent(cut(firstLine(args.label ?? args.command ?? "", Infinity))));
 		case "job_stop":
-			return join(title("job_stop"), accent(String(args.job_id ?? "")));
+			return join(title("job_stop"), accent(cut(String(args.job_id ?? ""))));
 		case "edit":
 		case "write":
-			return `${title(toolName)} ${accent(shortPath(args.path ?? args.file_path))}`;
+			return `${title(toolName)} ${accent(place(args.path ?? args.file_path))}`;
 		case "grep":
-			return join(title("grep"), accent(`/${args.pattern ?? ""}/`), dim(`in ${shortPath(args.path) || "."}`), args.glob && dim(`(${args.glob})`));
+			return join(title("grep"), accent(`/${cut(String(args.pattern ?? ""))}/`), dim(`in ${place(args.path) || "."}`), args.glob && dim(`(${args.glob})`));
 		case "find":
-			return join(title("find"), accent(args.pattern ?? ""), dim(`in ${shortPath(args.path) || "."}`));
+			return join(title("find"), accent(cut(String(args.pattern ?? ""))), dim(`in ${place(args.path) || "."}`));
 		case "ls":
-			return join(title("ls"), accent(shortPath(args.path) || "."));
+			return join(title("ls"), accent(place(args.path) || "."));
 		case "codegraph":
-			return join(title("codegraph"), accent(String(args.operation ?? "")), args.query && dim(`"${firstLine(args.query, 80)}"`));
+			return join(title("codegraph"), accent(String(args.operation ?? "")), args.query && dim(`"${cut(firstLine(args.query, Infinity))}"`));
 		case "codemode": {
 			const code = String(args.code ?? "");
 			const lines = code.split("\n").filter((line) => line.trim() !== "").length;
@@ -1429,8 +1462,10 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 	const lines = outputLines(text);
 	const isError = context.isError || result?.isError;
 	const ok = (summary, mark = fg(t, "success", "✓")) => join(mark, fg(t, "dim", join(summary, seconds(context.durationMs) && `· ${seconds(context.durationMs)}`)));
-	// A count of output rows kept behind ctrl+o says there is more to see, not that something succeeded: a "+".
-	const more = (summary) => ok(summary, fg(t, "dim", "+"));
+	// A command's output rows kept behind ctrl+o say there is more to see, not that something succeeded: a "+".
+	// With preview rows showing every line nothing is kept, so it keeps its ✓. What a read or a search found is
+	// its result: a ✓.
+	const more = (summary) => (lines.length > config.quiet.preview ? ok(summary, fg(t, "dim", "+")) : ok(summary));
 	if (toolName === "codemode") return codemodeSummary(result, context, t, isError);
 	if (isError) {
 		const code = /Command exited with code (\d+)/.exec(text)?.[1];
@@ -1441,7 +1476,7 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 	switch (toolName) {
 		case "read": {
 			if ((result?.content ?? []).some((c) => c?.type === "image")) return { summary: ok("image") };
-			return { summary: (lines.length ? more : ok)(plural(lines.length, "line")), preview: lines };
+			return { summary: ok(plural(lines.length, "line")), preview: lines };
 		}
 		case "bash":
 			return { summary: lines.length ? more(plural(lines.length, "line")) : ok("no output"), preview: lines, keepEnd: true };
@@ -1456,11 +1491,11 @@ function quietSummary(toolName, result, args = {}, context = {}, t) {
 			return { summary: ok(`${plural(written, "line")} written`) };
 		}
 		case "grep":
-			return { summary: lines.length ? more(plural(lines.length, "match", "matches")) : ok("no matches"), preview: lines };
+			return { summary: lines.length ? ok(plural(lines.length, "match", "matches")) : ok("no matches"), preview: lines };
 		case "find":
-			return { summary: lines.length ? more(plural(lines.length, "file")) : ok("no files"), preview: lines };
+			return { summary: lines.length ? ok(plural(lines.length, "file")) : ok("no files"), preview: lines };
 		case "ls":
-			return { summary: lines.length ? more(plural(lines.length, "entry", "entries")) : ok("empty"), preview: lines };
+			return { summary: lines.length ? ok(plural(lines.length, "entry", "entries")) : ok("empty"), preview: lines };
 		case "bash_background": {
 			const id = /\bStarted background job (\S+)\s/.exec(text)?.[1];
 			return { summary: ok(id ? `${id} started` : firstLine(lines[0] ?? "started", 80)) };
@@ -1512,6 +1547,11 @@ function quietResultText(toolName, result, options, context, t) {
 	const color = (line) => fg(t, info.color ?? "dim", line);
 	// Something stays hidden: more output than the preview, or written content.
 	const hidden = info.hidden ?? (source.length > shown.length || (toolName === "write" && String(context.args?.content ?? "") !== ""));
+	// A failure's one forced output line (no preview rows) joins its summary.
+	if (info.minPreview && config.quiet.preview <= 0 && shown.length === 1 && !info.fixed && !info.diff) {
+		const line = color(`· ${firstLine(shown[0].replace(/ *\t[\t ]*/g, " "), 200)}`);
+		return { summary: `${prefix} ${join(info.summary, line)}`, hint: hidden ? expandHint(t) : "", rest: [] };
+	}
 	return {
 		summary: `${prefix} ${info.summary}`,
 		hint: hidden ? expandHint(t) : "",
@@ -1656,10 +1696,13 @@ function quietResultComponent({ summary, hint: available, rest }, order, t, wrap
 			const fit = (row) => (wrap ? hangUnder(row, width, leadOf(row)) : [truncateToWidth(row, width, "…")]);
 			const below = rest.flatMap((line) => (typeof line === "object" ? diffRows(line, width, t, wrap) : fit(` ${line}`)));
 			// The hint ends the block: on the summary row alone, else on the last preview row, cut to make room.
-			if (hint && gap >= 2 && !below.length) lines.push(`${left}${" ".repeat(gap)}${hint} `);
-			else lines.push(...fit(left));
-			lines.push(...below);
 			const room = width - visibleWidth(hint) - 3;
+			if (hint && gap >= 2 && !below.length) lines.push(`${left}${" ".repeat(gap)}${hint} `);
+			else if (hint && !below.length && room >= 10 && !wrap) {
+				const cut = truncateToWidth(left, room, "…");
+				lines.push(`${cut}${" ".repeat(width - visibleWidth(cut) - visibleWidth(hint) - 1)}${hint} `);
+			} else lines.push(...fit(left));
+			lines.push(...below);
 			if (hint && below.length && room >= 10) {
 				const last = lines.pop().replace(/\s+$/, "");
 				const cut = visibleWidth(last) > room ? truncateToWidth(last, room, "…") : last;
@@ -1913,21 +1956,57 @@ function popupToolRows(item, t, width) {
 	const own = popupRendererRows(item, t, width, args, result);
 	if (own) return own;
 	const rows = quietResultText(item.name, result, { isPartial: !item.result, expanded: false }, { args, isError: item.isError, durationMs: item.durationMs }, t);
-	const [first, ...rest] = commandRows(quietCall(item.name, args, t), width, true);
+	const [first, ...rest] = commandRows(quietCall(item.name, args, t, true), width, true);
 	return [first, ...linkFirst(rest, quietResultComponent({ ...rows, hint: "" }, -1, t, true).render(width), t)];
 }
 
-// The read row: one row at the full width, cut with "…", so a call and its result take two rows. (Web calls
-// keep pi-web-access's own rows.)
-function oneRow(text) {
+// A call row other than a "$ command": one row at the full width, so a call and its result take two rows. A path
+// too long loses its first folders, then a pattern, query or label is cut with "…", then the row is; ctrl+o
+// (context.expanded) shows it whole, wrapped under its argument. (Web calls keep pi-web-access's own rows.)
+const PATH_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
+const callArg = (toolName, args) => {
+	switch (toolName) {
+		case "grep":
+		case "find":
+			return String(args.pattern ?? "");
+		case "codegraph":
+			return args.query ? firstLine(args.query, Infinity) : "";
+		case "monitor":
+			return firstLine(args.label ?? args.command ?? "", Infinity);
+		case "job_stop":
+			return String(args.job_id ?? "");
+		default:
+			return "";
+	}
+};
+function callRow(toolName, args = {}, t, context = {}) {
 	return {
 		render(width) {
-			return [` ${truncateToWidth(text, Math.max(1, width - 1), "…")}`];
+			const room = Math.max(1, width - 1); // Pi's one-column margin
+			let text = quietCall(toolName, args, t);
+			if (context.expanded) {
+				if (typeof PiTui.sliceByColumn !== "function") return [` ${text}`];
+				const plain = text.replace(/\x1b\[[0-9;:]*m/g, "");
+				const lead = Math.min(12, /^\S*\s?/u.exec(plain)[0].length);
+				const [first, ...rest] = fillRows(text, room, lead);
+				return [` ${first}`, ...rest.map((row) => ` ${" ".repeat(lead)}${row}`)];
+			}
+			const fit = {};
+			const file = PATH_TOOLS.has(toolName) ? shortPath(args.path ?? args.file_path) : "";
+			if (visibleWidth(text) > room && file) {
+				fit.path = Math.max(0, visibleWidth(file) - (visibleWidth(text) - room));
+				text = quietCall(toolName, args, t, false, fit);
+			}
+			const arg = callArg(toolName, args);
+			if (visibleWidth(text) > room && arg) {
+				fit.arg = Math.max(1, visibleWidth(arg) - (visibleWidth(text) - room));
+				text = quietCall(toolName, args, t, false, fit);
+			}
+			return [` ${truncateToWidth(text, room, "…")}`];
 		},
 		invalidate() {},
 	};
 }
-const readRow = oneRow;
 
 // A "$ command" wraps under its text, past the "$ ", to COMMAND_ROWS rows at most, the last cut with "…"; ctrl+o
 // (`all`) shows it whole.
@@ -2004,9 +2083,8 @@ function quietRenderers(toolName, renderers) {
 		...renderers,
 		renderShell: "self", // no tool background box; the rows carry Pi's margin themselves
 		renderCall(args, t, context = {}) {
-			if (toolName === "bash" || toolName === "bash_background") return commandRow(quietCall(toolName, args, t), context);
-			if (toolName === "read") return readRow(quietCall(toolName, args, t));
-			return new Text(quietCall(toolName, args, t), 1, 0);
+			if (toolName === "bash" || toolName === "bash_background") return commandRow(quietCall(toolName, args, t, context.expanded), context);
+			return callRow(toolName, args, t, context);
 		},
 		renderResult(result, options = {}, t, context = {}) {
 			const state = context.state && typeof context.state === "object" ? context.state : undefined;
@@ -2030,7 +2108,7 @@ function quietRenderers(toolName, renderers) {
 			const quiet = quietResultComponent(quietResultText(toolName, result, options, context, t), order, t);
 			if (!command) return quiet;
 			state.quietBelow = true;
-			return belowCommand(quiet, quietCall(toolName, context.args ?? {}, t), options.expanded, t);
+			return belowCommand(quiet, quietCall(toolName, context.args ?? {}, t, options.expanded), options.expanded, t);
 		},
 	};
 }
@@ -2405,7 +2483,9 @@ function memoryRenderers(chrome, toolName, renderers) {
 			const arg = chrome.compactToolArg?.(toolName, args) ?? "";
 			const tones = callTones(t);
 			const title = tones.title(join(config.icons.memory, name));
-			return flattened(new Text(join(title, arg && tones.arg(arg)), 0, 0), toolOptions("memory"));
+			const text = join(title, arg && tones.arg(arg));
+			// One row, cut with "…", like the quiet call rows.
+			return flattened({ render: (width) => [truncateToWidth(text, width, "…")], invalidate() {} }, toolOptions("memory"));
 		},
 		renderResult(result, options = {}, t, context = {}) {
 			const text = chrome.renderResultText(toolName, result, {

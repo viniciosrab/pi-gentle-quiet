@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { load, lines, painted, theme } from "./helpers.mjs";
+import { load, lines, painted, plain, theme } from "./helpers.mjs";
 
 // gentle-quiet reads gentle-engram's chrome module from the agent dir's npm tree.
 const engramDir = path.join(process.env.GENTLE_QUIET_TEST_AGENT_DIR, "npm/node_modules/gentle-engram");
@@ -24,4 +24,12 @@ test("memory errors keep their message in the error color", async () => {
 	const renderers = tool("mem_stats", { renderCall() {}, renderResult() {} });
 	const out = renderers.renderResult({ content: [{ type: "text", text: "offline" }], isError: true }, {}, theme, { isError: true }).render(80)[0];
 	assert.ok(painted(out, "error", "✗ offline"));
+});
+
+test("a memory call too long for the row stays on one row, cut with …", async () => {
+	const { tool } = await load();
+	const renderers = tool("mem_search", { renderCall() {}, renderResult() {} });
+	const rows = renderers.renderCall({ query: "where did we decide the quiet tool rows marks and the cd prefix" }, theme).render(40).map((row) => plain(row));
+	assert.equal(rows.length, 1, rows.join("\n"));
+	assert.ok(rows[0].startsWith(" \u{100000} search “where") && rows[0].endsWith("…") && [...rows[0]].length <= 40, rows[0]);
 });

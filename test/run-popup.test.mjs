@@ -1089,7 +1089,7 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	];
 	const shown = body.filter((row) => expected.includes(row));
 	assert.deepEqual(shown, expected, `the main view's rows, in order:\n${body.join("\n")}`);
-	assert.ok(expected.includes("$ git status --short") && expected.includes("└ ✗ exit 1") && expected.includes("└ running…"), "the rows compared are the quiet ones");
+	assert.ok(expected.includes("$ git status --short") && expected.includes("└ ✗ exit 1 · boom") && expected.includes("└ running…"), "the rows compared are the quiet ones");
 	assert.ok(body.includes("Thinking..."), "thinking folded as the main view shows it");
 	assert.ok(!body.some((row) => row.includes("Reading the spec first.")), "the thinking text itself is not shown");
 	assert.ok(body.includes("Spec read. Writing the tests."), "text");
@@ -1232,7 +1232,7 @@ test("a long command, its output and its diff rows wrap in the popup instead of 
 	}
 	const command = body.findIndex((row) => row.startsWith("$ echo alpha01"));
 	assert.ok(command >= 0 && /^└ alpha/.test(body[command + 1]), `the └ starts the command's second row:\n${body.join("\n")}`);
-	const summary = body.findIndex((row) => /^ {2}\+ 1 line/.test(row));
+	const summary = body.findIndex((row) => /^ {2}✓ 1 line/.test(row)); // its one line shown below: nothing kept
 	assert.ok(summary > command + 1 && body.slice(command + 2, summary).every((row) => /^ {2}alpha/.test(row)), `the summary after the command's last row, without the └:\n${body.join("\n")}`);
 	assert.ok(!body.some((row) => /(alpha|beta|gamma)\d*…/.test(row)), "nothing cut with …");
 	assert.ok(body.every((row) => row.length <= 76));

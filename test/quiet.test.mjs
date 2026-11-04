@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import os from "node:os";
 import { test } from "node:test";
 import { load, lines, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
@@ -19,15 +20,25 @@ test("quiet tools render without Pi's tool box", async () => {
 	assert.equal(tool("read", native).renderShell, "self");
 });
 
-test("read collapses to the path and a line count with the expand hint", async () => {
+test("read collapses to the path and a ✓ line count with the expand hint", async () => {
 	const out = await draw("read", { path: "/tmp/app.ts", offset: 10, limit: 3 }, text("a\nb\nc"));
 	assert.equal(out[0], " read /tmp/app.ts:10-12");
-	assert.match(out[1], /^ └ \+ 3 lines +ctrl\+o to expand$/);
+	assert.match(out[1], /^ └ ✓ 3 lines +ctrl\+o to expand$/);
 });
 
-test("bash failures show the exit code and the last output line, without a hint", async () => {
+test("bash failures show the exit code and the last output line on one row, without a hint", async () => {
 	const out = await draw("bash", { command: "false" }, text("boom\nCommand exited with code 1", { isError: true }), {}, { isError: true });
-	assert.deepEqual(out, [" $ false", " └ ✗ exit 1", "   boom"]);
+	assert.deepEqual(out, [" $ false", " └ ✗ exit 1 · boom"]);
+	const { tool } = await load();
+	const row = tool("bash", native).renderResult(text("boom\nCommand exited with code 1", { isError: true }), {}, theme, { args: { command: "false" }, isError: true }).render(70)[0];
+	assert.ok(painted(row, "error", "· boom"), "the output line in the error color");
+});
+
+test("with preview rows on, a failure keeps its output rows under the summary", async () => {
+	writeConfig({ quiet: { preview: 3 } });
+	const out = await draw("bash", { command: "false" }, text("one\ntwo\nCommand exited with code 1", { isError: true }), {}, { isError: true });
+	writeConfig({});
+	assert.deepEqual(out, [" $ false", " └ ✗ exit 1", "   one", "   two"]);
 });
 
 test("empty and running calls show no expand hint", async () => {
@@ -36,17 +47,28 @@ test("empty and running calls show no expand hint", async () => {
 });
 
 test("summaries for grep, find, ls and write", async () => {
-	assert.match((await draw("grep", { pattern: "x", path: "src" }, text("a:1\nb:2")))[1], /\+ 2 matches/);
+	assert.match((await draw("grep", { pattern: "x", path: "src" }, text("a:1\nb:2")))[1], /^ └ ✓ 2 matches/);
 	assert.match((await draw("find", { pattern: "*.md" }, text("")))[1], /✓ no files/);
-	assert.match((await draw("ls", { path: "." }, text("a")))[1], /\+ 1 entry/);
+	assert.match((await draw("ls", { path: "." }, text("a")))[1], /^ └ ✓ 1 entry/);
 	assert.match((await draw("write", { path: "b.md", content: "x\ny" }, text("ok")))[1], /✓ 2 lines written +ctrl\+o to expand/);
 });
 
-test("a count of hidden output rows takes a +, not a ✓; a call with nothing hidden keeps its ✓", async () => {
+test("a command's hidden output takes a +; what a read or a search found keeps its ✓", async () => {
 	assert.match((await draw("bash", { command: "ls" }, text("a\nb")))[1], /^ └ \+ 2 lines +ctrl\+o to expand$/);
 	assert.match((await draw("bash", { command: "true" }, text("")))[1], /^ └ ✓ no output$/);
 	assert.match((await draw("read", { path: "/tmp/a.png" }, { content: [{ type: "image", data: "", mimeType: "image/png" }] }))[1], /^ └ ✓ image$/);
-	assert.match((await draw("find", { pattern: "*.md" }, text("a.md")))[1], /^ └ \+ 1 file/);
+	assert.match((await draw("find", { pattern: "*.md" }, text("a.md")))[1], /^ └ ✓ 1 file/);
+});
+
+test("with preview rows showing every output line, nothing is hidden: the command keeps its ✓", async () => {
+	writeConfig({ quiet: { preview: 3 } });
+	const out = await draw("bash", { command: "ls" }, text("a\nb"));
+	writeConfig({});
+	assert.deepEqual(out, [" $ ls", " └ ✓ 2 lines", "   a", "   b"]);
+	writeConfig({ quiet: { preview: 1 } });
+	const more = await draw("bash", { command: "ls" }, text("a\nb"));
+	writeConfig({});
+	assert.deepEqual([more[1], more[2].replace(/ +/g, " ")], [" └ + 2 lines", " b ctrl+o to expand"], "one row shown, one kept");
 });
 
 test("expanded calls show Pi's own output on the margin, without backgrounds", async () => {
@@ -167,13 +189,12 @@ test("the tones option cycles claude → theme → soft → claude", async () =>
 	writeConfig({});
 });
 
-test("a failed command's output row has no tab gap, and the expand hint ends the block on that row, cut to make room", async () => {
+test("a failed command's output line has no tab gap, and the expand hint ends its row, cut to make room", async () => {
 	const long = `>\t\t\treturn { summary: ${"x".repeat(120)} }`;
 	const out = await draw("bash", { command: "diff a b" }, text(`first\n${long}\nCommand exited with code 1`, { isError: true }), {}, { isError: true });
-	assert.equal(out.length, 3, out.join("\n"));
-	assert.equal(out[1], " └ ✗ exit 1", "the summary row alone");
-	assert.match(out[2], /^ {3}> return \{ summary: x+… +ctrl\+o to expand$/, out[2]);
-	assert.ok(out[2].length <= 70);
+	assert.equal(out.length, 2, out.join("\n"));
+	assert.match(out[1], /^ └ ✗ exit 1 · > return \{ summary: x+… +ctrl\+o to expand$/, out[1]);
+	assert.ok(out[1].length <= 70);
 });
 
 test("a $ command whose first word is longer than the row starts on the $ row, filling it, not under it", async () => {
@@ -221,12 +242,85 @@ test("a running $ command with no result yet shows its rows together, and ctrl+o
 	assert.ok(expanded.length > 3 && !expanded.some((row) => row.endsWith("…")), expanded.join("\n"));
 });
 
-test("a long read path stays on one row, cut with …", async () => {
+test("a leading cd is dim context, its deep folder cut to the last name; ctrl+o shows it whole", async () => {
 	const { tool } = await load();
-	const file = `/tmp/${"segment-".repeat(15)}end/images/4.png`;
-	const rows = tool("read", native).renderCall({ path: file }, theme).render(80).map((row) => plain(row));
-	assert.equal(rows.length, 1);
-	assert.equal(rows[0].length, 80);
-	assert.ok(rows[0].startsWith(" read /tmp/segment-") && rows[0].endsWith("…"));
-	assert.deepEqual(tool("read", native).renderCall({ path: "/tmp/a.ts" }, theme).render(80).map((row) => plain(row)), [" read /tmp/a.ts"]);
+	const renderers = tool("bash", native);
+	const call = (command, context = { state: {} }) => renderers.renderCall({ command }, theme, context).render(200);
+	const deep = `${os.homedir()}/.herdr/worktrees/gentle-shell/worktree-calm-forest-6059`;
+	const [row] = call(`cd ${deep} && gh label list`);
+	assert.equal(plain(row), " $ cd ~/…/worktree-calm-forest-6059 && gh label list");
+	assert.ok(painted(row, "dim", "cd ~/…/worktree-calm-forest-6059 &&"), "the cd prefix in dim");
+	assert.ok(!painted(row, "dim", " gh label list"), "the command itself not dim");
+	assert.equal(plain(call("cd /srv/apps/shop/api; make")[0]), " $ cd /…/api; make");
+	assert.equal(plain(call('cd "/srv/my apps/shop/api" && make')[0]), ' $ cd "/…/api" && make');
+	// Short folders and commands without a leading cd stay as they are.
+	assert.equal(plain(call("cd /tmp && ls")[0]), " $ cd /tmp && ls");
+	assert.equal(plain(call(`cd ${os.homedir()}/code/shop && ls`)[0]), " $ cd ~/code/shop && ls");
+	assert.equal(plain(call("echo cd /srv/apps/shop/api && ls")[0]), " $ echo cd /srv/apps/shop/api && ls");
+	assert.equal(plain(call("cd ../apps/shop/api && ls")[0]), " $ cd ../apps/shop/api && ls");
+	// Expanded, the folder is whole, still dim.
+	const [whole] = call(`cd ${deep} && gh label list`, { state: {}, expanded: true });
+	assert.equal(plain(whole), ` $ cd ${deep} && gh label list`);
+	assert.ok(painted(whole, "dim", `cd ${deep} &&`));
+});
+
+test("a wrapped command with a leading cd keeps the short folder once its result is drawn", async () => {
+	const { tool } = await load();
+	const renderers = tool("bash", native);
+	const context = { args: { command: `cd /srv/apps/shop/api && ${steps(16)}` }, state: {} };
+	const call = renderers.renderCall(context.args, theme, context);
+	const result = renderers.renderResult(text("a\nb"), { isPartial: false }, theme, context);
+	const rows = [...call.render(120), ...result.render(120)].map((row) => plain(row).trimEnd());
+	assert.ok(rows[0].startsWith(" $ cd /…/api && step0 && "), rows.join("\n"));
+	assert.ok(/^ └ \S/.test(rows[1]), rows.join("\n"));
+	assert.equal(rows.join(" ").replace("└", "").split(/\s+/).filter((word) => /^step\d+$/.test(word)).length, 16, "no step lost");
+});
+
+const DEEP = `${os.homedir()}/.herdr/worktrees/pi-gentle-quiet/worktree-brave-field-0c10/extensions/sidebar`;
+const callRows = async (name, args, width = 80, context = {}) => {
+	const { tool } = await load();
+	return tool(name, native).renderCall(args, theme, context).render(width).map((row) => plain(row));
+};
+
+test("a long read path stays on one row, its first folders dropped so the file name stays", async () => {
+	const rows = await callRows("read", { path: `/tmp/${"segment-".repeat(15)}end/images/4.png`, offset: 10, limit: 5 });
+	assert.deepEqual(rows, [" read /…/images/4.png:10-14"]);
+	assert.deepEqual(await callRows("read", { path: `${DEEP}/run-popup.ts` }), [" read ~/…/worktree-brave-field-0c10/extensions/sidebar/run-popup.ts"]);
+	assert.deepEqual(await callRows("read", { path: "/tmp/a.ts" }), [" read /tmp/a.ts"]);
+});
+
+test("edit, write, find and ls keep their call on one row, the path cut from its start", async () => {
+	assert.deepEqual(await callRows("edit", { path: `${DEEP}/run-popup.ts` }, 60), [" edit ~/…/extensions/sidebar/run-popup.ts"]);
+	assert.deepEqual(await callRows("write", { path: `${DEEP}/run-popup.ts` }, 40), [" write ~/…/sidebar/run-popup.ts"]);
+	assert.deepEqual(await callRows("find", { pattern: "**/*.ts", path: DEEP }, 50), [" find **/*.ts in ~/…/extensions/sidebar"]);
+	assert.deepEqual(await callRows("ls", { path: DEEP }, 40), [" ls ~/…/extensions/sidebar"]);
+	assert.deepEqual(await callRows("edit", { path: "/tmp/a.ts" }), [" edit /tmp/a.ts"]);
+	// A file name longer than the row is cut at its end.
+	const [row, ...more] = await callRows("edit", { path: `/tmp/${"x".repeat(100)}.ts` }, 40);
+	assert.deepEqual(more, []);
+	assert.ok(row.startsWith(" edit /…/xxx") && row.endsWith("…") && row.length === 40, row);
+});
+
+test("a long grep pattern is cut with … after its path is, keeping the folder and glob", async () => {
+	const rows = await callRows("grep", { pattern: "renderCall\\(args, t, context = \\{\\}\\)|renderResult\\(result, options", path: DEEP, glob: "*.ts" }, 80);
+	assert.equal(rows.length, 1, rows.join("\n"));
+	assert.ok(rows[0].length <= 80, rows[0]);
+	assert.match(rows[0], /^ grep \/renderCall.*…\/ in ~\/…\/sidebar \(\*\.ts\)$/, rows[0]);
+});
+
+test("codegraph queries and monitor labels too long for the row are cut with …", async () => {
+	const query = await callRows("codegraph", { operation: "query", query: "where does the quiet tool renderer decide between the check mark and the plus mark" }, 60);
+	assert.equal(query.length, 1);
+	assert.match(query[0], /^ codegraph query "where does .*…"$/, query[0]);
+	assert.ok(query[0].length <= 60);
+	const monitor = await callRows("monitor", { label: "CI checks for PR 1842 on viniciosrab/pi-gentle-quiet while the release workflow runs" }, 60);
+	assert.equal(monitor.length, 1);
+	assert.ok(monitor[0].startsWith(" monitor CI checks") && monitor[0].endsWith("…") && monitor[0].length === 60, monitor[0]);
+});
+
+test("ctrl+o shows a call row whole, wrapped under its argument", async () => {
+	const rows = await callRows("edit", { path: `${DEEP}/run-popup.ts` }, 60, { expanded: true });
+	assert.ok(rows.length > 1 && rows.every((row) => row.length <= 60), rows.join("\n"));
+	assert.ok(rows.slice(1).every((row) => /^ {6}\S/.test(row)), `the rest under the path:\n${rows.join("\n")}`);
+	assert.equal(rows.map((row) => row.trim()).join(""), `edit ${DEEP.replace(os.homedir(), "~")}/run-popup.ts`, "nothing lost");
 });
