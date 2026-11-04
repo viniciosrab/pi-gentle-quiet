@@ -2697,7 +2697,9 @@ function estimatedCost(ctx, message) {
 function sessionTotals(ctx) {
 	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
 	if (entries.length === totalsCache.count && totalsCache.entries === entries.at(-1) && totalsCache.estimate === config.statusLine.estimateCost) return totalsCache.totals;
-	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined };
+	// cacheWarm: a call before the last one read or wrote the cache, so the last call's hit rate says whether it was reused.
+	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined, cacheWarm: false };
+	let cachedBefore = false;
 	const add = (usage) => {
 		if (!usage) return;
 		totals.input += usage.input || 0;
@@ -2714,6 +2716,8 @@ function sessionTotals(ctx) {
 			if (!(message.usage.cost?.total > 0)) totals.cost += estimatedCost(ctx, message);
 			const prompt = (message.usage.input || 0) + (message.usage.cacheRead || 0) + (message.usage.cacheWrite || 0);
 			totals.cacheHit = prompt > 0 ? ((message.usage.cacheRead || 0) / prompt) * 100 : undefined;
+			totals.cacheWarm = cachedBefore;
+			cachedBefore ||= Boolean(message.usage.cacheRead || message.usage.cacheWrite);
 		} else if (entry?.type === "message" && message?.role === "toolResult") add(message.usage);
 		else if (entry?.type === "branch_summary" || entry?.type === "compaction") add(entry.usage);
 	}
@@ -2843,6 +2847,8 @@ function footerTotals(ctx) {
 	return { ...own, ...Object.fromEntries(TOTAL_KEYS.map((key) => [key, own[key] + others[key]])) };
 }
 
+const CACHE_OK_PERCENT = 50;
+
 // Pi's token format: 950, 1.2k, 50k, 2.0M, 33M.
 function formatTokens(count) {
 	if (count < 1000) return String(count);
@@ -2940,8 +2946,10 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	const spent = { sent: totals.input + totals.cacheRead + totals.cacheWrite, output: totals.output };
-	return { sep, project, branchText, location, tokens, spent, plan, allWindows, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
+	// The last call's cache: "ok" when it read at least half its prompt from the cache, "low" when it did not. Left
+	// out on the first call (nothing to reuse yet) and with a provider that never caches.
+	const cache = totals.cacheWarm && totals.cacheHit !== undefined ? (totals.cacheHit >= CACHE_OK_PERCENT ? "ok" : "low") : "";
+	return { sep, project, branchText, location, tokens, cache, plan, allWindows, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
 }
 
 // Statuses sit on the left after the location, Perm first (the model closes the Working row
@@ -2982,11 +2990,11 @@ function statusLineRows(t, footerData, width, options) {
 
 // In the side column the status line is two cards on top, Gentle Shell's Status and Context cards in this
 // style. Status: the location under a label column, then a blank row and the statuses, one per row (an
-// empty section is left out). Context: "56k / 200k tokens" with the ctx gauge on the right, a bar across
-// the card in the gauge's color, then the tokens spent ("in 43k · out 200") with, on the right, the plan windows ("plan 5h 38% ·
-// wk 31%") or the cost when there is no plan usage; a row whose data is missing is left out. A row too long
-// for the card is cut, never wrapped; on the tokens spent row the left part goes first, so the plan or the
-// cost stays whole unless it alone does not fit. No model: it closes the Working row.
+// empty section is left out). Context: "56k / 200k tokens · cache ok" with the ctx gauge on the right, a bar
+// across the card in the gauge's color, then the plan windows ("5h 5% · resets 2h10m" on the left, "week 10% · 4d"
+// flush right) or the cost when there is no plan usage; a row whose data is missing is left out. A row too long
+// for the card is cut, never wrapped; its left part goes first, so the percent, the other windows or the cost
+// stay whole unless they alone do not fit. No model: it closes the Working row.
 function statusCardRows(t, footerData, width, options) {
 	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
 	const inner = outlined ? width - BOX_CHROME : width - 1;
@@ -3027,23 +3035,39 @@ function statusCardRows(t, footerData, width, options) {
 	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
 	const filled = percent === null ? 0 : Math.round((Math.max(0, Math.min(100, percent)) / 100) * inner);
 	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");
-	// "in 43k · out 200": every token sent, the cache's included, then the output. The status line's tokens and
-	// usage settings shorten the line under the editor, not this row.
-	const { sent, output } = p.spent;
-	const spent = !(sent || output) ? "" : `${fg(t, "muted", "in")} ${fg(t, "text", formatTokens(sent))} ${fg(t, "muted", "·")} ${fg(t, "muted", "out")} ${fg(t, "text", formatTokens(output))}`;
-	const cost = p.costText && `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}`;
 	// On a plan its windows take the cost's place: the calls cost nothing more, the plan's windows are what
-	// they spend. A window near its limit warns as the gauge does.
-	const planWindow = ({ label, percent }) => `${fg(t, "muted", label === "week" ? "wk" : label)} ${fg(t, percent >= 80 ? gaugeTone(percent) : "text", `${Math.round(percent)}%`)}`;
-	const plan = p.allWindows.length ? `${fg(t, "muted", "plan")} ${p.allWindows.map(planWindow).join(` ${fg(t, "muted", "·")} `)}` : "";
-	const spend = plan || cost;
+	// they spend. The first window with its reset on the left, the others flush right; a window near its limit
+	// warns as the gauge does.
+	const windowText = ({ label, percent, resetAt }, resetLabel) => {
+		const reset = resetIn(resetAt);
+		return [
+			`${fg(t, "muted", label)} ${fg(t, percent >= 80 ? gaugeTone(percent) : "text", `${Math.round(percent)}%`)}`,
+			reset && [resetLabel && fg(t, "muted", resetLabel), fg(t, "text", reset)].filter(Boolean).join(" "),
+		].filter(Boolean).join(` ${fg(t, "muted", "·")} `);
+	};
+	const [firstWindow, ...otherWindows] = p.allWindows;
+	const planLeft = firstWindow ? windowText(firstWindow, "resets") : "";
+	const planRight = otherWindows.map((other) => windowText(other)).join(` ${fg(t, "muted", "·")} `);
+	const cost = !firstWindow && p.costText ? `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}` : "";
+	const cacheText = p.cache && ` ${fg(t, "muted", "·")} ${fg(t, "muted", "cache")} ${fg(t, p.cache === "ok" ? "text" : "warning", p.cache)}`;
 	const context = [
 		...title("Context"),
-		spread(figures, percentText),
+		spread(`${figures}${cacheText}`, percentText, true),
 		bar,
-		(spent || spend) && spread(spent, spend, true),
+		(planLeft || planRight || cost) && spread(planLeft, planRight || cost, true),
 	].filter((line, index) => index < 2 || line);
 	return [...draw(status), ...draw(context)];
+}
+
+/** A plan window's reset, compact: "45m", "2h10m", "4d", "1d6h"; "" with no reset time. */
+function resetIn(resetAt, now = Date.now()) {
+	if (!resetAt) return "";
+	const minutes = Math.max(1, Math.ceil((resetAt - now) / 60_000));
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return minutes % 60 ? `${hours}h${minutes % 60}m` : `${hours}h`;
+	const days = Math.floor(hours / 24);
+	return hours % 24 ? `${days}d${hours % 24}h` : `${days}d`;
 }
 
 let piThinking; // pi.getThinkingLevel, bound at load
