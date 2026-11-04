@@ -30,7 +30,8 @@ same; only how it is drawn changes.
   (`search “x”`, `└ ✓ 3 results`), codemode its calls and sources, as in the conversation. It reads the
   subagent's own Pi session (`~/.pi/agent/gentle-agents/sessions/*.jsonl`, found by one of its tool call ids)
   about twice a second, only what was appended, and follows the end while the subagent works; `↑↓` `PgUp/PgDn`
-  `Home/End` or the wheel scroll, `End` or `f` follows again, `Esc`/`q` or a click outside closes it. Before its
+  `Home/End` or the wheel scroll, and so does the scrollbar at its right edge when the thread does not fit (drag
+  its thumb or click its track, as Pi's own, whose thumb also grows under the pointer; the thread glides to where the pointer puts it instead of jumping), `End` or `f` follows again, `Esc`/`q` or a click outside closes it. Before its
   first tool call, or when its session cannot be read, the pop-up shows gentle-pi's thread from its presence file,
   drawn with gentle-pi's own renderer as the `alt+k` window draws it. A finished subagent's row (`✓`, `✗`, `–`)
   ends with `↗` too when its task record names its session, and opens the same pop-up, marked finished or failed.
@@ -60,7 +61,8 @@ same; only how it is drawn changes.
   `󰋑 Favorites` (counted from `favorites.toml`, so a toggle changes it at once) and cliamp's categories, each
   with its track count (`1 track`, `2 tracks`); `↑↓` (or `k`/`j`) and `Enter`, or a click, opens one's tracks,
   each with its heart, where `Enter` or a click plays a track, `f` toggles its heart and `Esc`, `←` or `h` go
-  back. A click on the artist and track row opens the tracks of the category playing.
+  back. A list longer than the pop-up has a scrollbar at its right edge to drag or click (its thumb grows under the pointer, as Pi's); it glides the list to where the pointer puts it, instead of jumping, and
+  leaves the cursor where it is. A click on the artist and track row opens the tracks of the category playing.
   `q` or a click outside closes the pop-up. With cliamp installed and no player running the card is one row,
   `▶ Start cliamp`: a click starts `cliamp --daemon`, cliamp with no window of its own, detached from Pi, then
   draws the card and opens the categories; it keeps playing after Pi closes. Nothing starts it by itself, and
@@ -81,12 +83,14 @@ same; only how it is drawn changes.
   numbers (in the new file), then `+` on added lines and `−` on removed ones, which stand where they were with no number, each changed row tinted across the
   pop-up with the theme's diff color (its added/removed color blended over the background, or its success/error
   background on themes without truecolor) under the code's own highlighting; it opens at the first change, `n`/`N` or `]`/`[`
-  for the next or previous one, `+n −n` in the footer; a file longer than the pop-up gets an overview ruler at its right edge, as VS Code's beside
-  its scrollbar: a green `█` where lines were added, a red `█` where they were removed, `▌` where both, and a dim `│` where the view is; Markdown shows as its source there, rendered
+  for the next or previous one, `+n −n` in the footer; a file longer than the pop-up gets an overview ruler at its right edge that is also its scrollbar, in one column as VS Code's:
+  a green `🮊` (a ¾ block at the right of the cell) where lines were added, a red `▒` where they were removed, a red `▞` where both (in a monochrome theme the removed
+  marks are gray, as removed lines are), in full color, and the view as the scrollbar's thumb, to drag or click (a drag or a click glides the view to the pointer's position instead of jumping): a 60% see-through gray
+  two columns wide (the ruler and the blank column before it, both taking the mouse), laid over the marks as VS Code's scrollbar slider, so they show through it dimmed and it shows beside the narrower added mark; Markdown shows as its source there, rendered
   only in TREE, and Pi's screen behind stays as it is. A branch
   lists its diff with HEAD, and its files open with that branch's changes); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
   usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile
-  selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
+  selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row (with a scrollbar to drag or click when the models do not fit, its thumb growing under the pointer as Pi's, the list gliding to the pointer's position instead of jumping), a click
   on its effort steps to the next level that model allows; edits stay unsaved (•, ● N unsaved, in warning) until
   `[ Save ]`. `[ Use in this session ]` binds the profile to this session (◉), saving unsaved edits first; leaving a profile
   with unsaved edits asks Save and switch, Discard or Stay. `[ Make default ]` (the default for new sessions is marked ●) saves and opens `/gentle:profiles`, where
@@ -102,7 +106,8 @@ same; only how it is drawn changes.
   some are pending), the last session handoff folded to one row (its title unfolds it, a click on it opens the whole summary in the pop-up), and the memories
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ <name>`) with git badges and `[ ↗ ]`, which opens your editor (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
-  wheel scroll, long lines wrap under their code, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
+  wheel scroll, and a file that does not fit has a scrollbar at the pop-up's right edge to drag or click, as Pi's own, its thumb growing under the pointer and the file gliding to the pointer's position instead of jumping (the same in MEM's pop-up);
+  long lines wrap under their code, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
   source, and dims the screen behind the pop-up, in TREE only); **PR** the repository's open pull requests from one `gh api graphql` call (in a fork's clone, where gh reads the
   upstream, only the ones you opened there), drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,

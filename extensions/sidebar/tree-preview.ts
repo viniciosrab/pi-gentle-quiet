@@ -4,7 +4,9 @@
 // line wraps onto rows under its code with no number, tabs as spaces) and the footer "Esc close · e edit · ↑↓
 // PgUp/PgDn Home/End · 43-64 / 168", the lines in view. Scrolling goes by rows, so a wrapped line can be read whole. Esc or q closes it, and so does a click anywhere outside it (that click does nothing else);
 // ↑↓ j k a line, PgUp/PgDn a page, Home/End (g/G) the ends, the wheel three lines; e closes it and opens the
-// file in the editor tab, as a click did before.
+// file in the editor tab, as a click did before. A body longer than the view has a scrollbar in the column before
+// the right stroke (./scrollbar.ts), to drag or click as Pi's own, its thumb growing under the pointer as Pi's,
+// and is drawn a column narrower, apart from it.
 //
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
 // theme) but with code blocks framed instead of fenced and "•" bullets, without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
@@ -20,10 +22,17 @@
 // and "-" on removed ones, which stand where they were removed from with no number, both painted in the theme's
 // toolDiffAdded / toolDiffRemoved. It opens at the first change; n/N (or ] and [) jump to the next or previous
 // change, and the footer shows "+12 −3". A Markdown file is its source there, never rendered (no m). When the
-// file is longer than the view, the last column before the right stroke is an overview ruler, as VS Code's beside
-// its scrollbar: each of its rows stands for an equal slice of the file, a green █ where that slice adds lines, a
-// red █ where it removes them, ▌ red on green where it does both, and a dim │ where the view is. When git
-// gives no diff (no change, a binary file, a failure) it is the plain preview.
+// file is longer than the view, the last column before the right stroke is an overview ruler that is also the
+// scrollbar, one column as VS Code's: each of its rows stands for an equal slice of the file, a green ¾ block at the
+// right of the cell where that slice adds lines, a red ▒ where it removes them, a red ▞ where it does both (in a
+// monochrome theme the removed marks are dim gray, as removed rows are), all in full color, and the scrollbar's thumb
+// where the view is, with no glyph of its own: a 60% see-through gray (the theme's scrollbarThumb) laid over those
+// cells and their marks, two columns wide (the ruler and the gap before it), as VS Code's scrollbar slider, so the
+// marks under it show dimmed toward it and it shows in
+// the quarter beside an added mark (the theme's selectedBg behind the cells where it has no truecolor
+// scrollbarThumb). It is dragged and clicked as the scrollbar, gliding the view as it does; it does not grow on
+// hover, as the thin scrollbars do, having no thumb glyph. When git gives no diff (no change, a binary
+// file, a failure) it is the plain preview.
 //
 // At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
 // row. Pi's highlighter colors the code when this Pi exports it; otherwise the lines are plain.
@@ -35,6 +44,7 @@ import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/
 import { open } from "node:fs/promises";
 import path from "node:path";
 import { addedRows, changeBlocks, parseFileDiff } from "./diff-preview.ts";
+import { Scrollbar, scrollbarGeometry, shadeOf } from "./scrollbar.ts";
 
 /** How much of a file is read, how much is checked for NUL bytes, and up to what size it is highlighted. */
 export const previewLimits = { maxBytes: 1024 * 1024, sniffBytes: 8192, highlightBytes: 256 * 1024 };
@@ -76,6 +86,8 @@ const CHROME = 7; // top, title, path, blank row, blank row over the footer, foo
 const WHEEL_LINES = 3;
 const LEAD = 3; // rows shown above a change the view jumps to
 const TINT = 0.25; // how much of the theme's diff color a changed row's background takes
+const THUMB_ALPHA = 0.6; // how opaque the overview ruler's thumb is over the marks, as VS Code's scrollbarSlider
+const ADDED_MARK = "\u{1FB8A}"; // the ruler's added mark, a right three-quarters block: the thumb shows beside it
 
 // Whether an SGR's parameters reset the background: a full reset ("", 0) or 49. The arguments of a 38/48/58
 // color (5;n or 2;r;g;b) are skipped, so the 0 of "38;5;0" is a color, not a reset.
@@ -288,7 +300,8 @@ function closeOnOutsidePress(tui, preview) {
 	if (typeof original !== "function") return () => {};
 	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
 	const wrapped = function (event) {
-		const routed = original.call(this, event);
+		// The pointer leaving the pop-up ends its scrollbar's hover: Pi sends it nothing then.
+		const routed = preview.scrollbar ? preview.scrollbar.routed(() => original.call(this, event), () => preview.redraw()) : original.call(this, event);
 		if (routed?.hit || event?.type !== "press" || preview.closed) return routed;
 		try {
 			const top = tui.getTopmostVisibleOverlay?.();
@@ -375,6 +388,8 @@ class FilePreview {
 		this.markdown = !changes && (file === undefined || languageOf(file) === "Markdown");
 		this.rendered = undefined; // { width, rows } of the last Markdown render
 		this.wrap = undefined; // the source lines wrapped at the last width: see wrapped()
+		this.scrollbar = new Scrollbar();
+		this.barFor = undefined; // { key, bar }: whether the body needs the scrollbar at a width, page and view
 		this.ready = loading.then((content) => {
 			this.content = content.lines ? { ...content, shown: this.colored(content) } : content;
 			this.opening = content.blocks?.[0]; // the first change, where the first render puts the view
@@ -531,6 +546,7 @@ class FilePreview {
 	close(edit = false) {
 		if (this.closed) return;
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
@@ -552,22 +568,41 @@ class FilePreview {
 	}
 
 	handleMouse(event) {
+		const bar = this.scrollbar.handleMouse(event, this.top, (top) => this.scrollTo(top), () => this.top);
+		if (bar) return bar;
 		if (event?.type !== "wheel" || !event.wheelDelta) return undefined;
 		this.scrollTo(this.top + (event.wheelDelta > 0 ? WHEEL_LINES : -WHEEL_LINES));
 		return { handled: true, render: true };
 	}
 
+	// Whether the body does not fit at `inner` columns, so the scrollbar shows: measured one column narrower, as it
+	// is drawn beside the bar (narrower only adds rows, so a body that fits there fits at the full width too). Measured
+	// again only when the width, the page or the view (rendered or source) changes.
+	needsBar(inner) {
+		const page = this.page();
+		if (this.barFor?.key !== `${inner}:${page}:${this.markdown}`) {
+			const rows = this.markdownRows(inner - 1);
+			const count = rows ? rows.length : this.wrapped(inner - 1).rows.length;
+			this.barFor = { key: `${inner}:${page}:${this.markdown}`, bar: count > page };
+		}
+		return this.barFor.bar;
+	}
+
 	render(width) {
 		const inner = Math.max(1, width - 4);
+		const column = width - 2; // the scrollbar's
 		// A row between the side strokes; a { text, tint } row has the tint behind it from stroke to stroke, set again
 		// after every escape inside it so a reset in the highlighted code does not end it. `ruler`, one cell, takes the
-		// last column before the right stroke, outside the tint.
+		// last column before the right stroke, outside the tint: the scrollbar, or a diff's overview ruler. A ruler's
+		// { cell, gap } takes the blank column before it too, outside the tint: its thumb, two columns wide.
 		const fit = (row, ruler) => {
+			const { cell, gap } = ruler !== null && typeof ruler === "object" ? ruler : { cell: ruler };
+			const room = gap === undefined ? inner : inner - 1;
 			const line = typeof row === "string" ? row : row.text;
-			const cut = visibleWidth(line) > inner ? truncateToWidth(line, inner, "…") : line;
-			let middle = ` ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))}${ruler === undefined ? " " : ""}`;
+			const cut = visibleWidth(line) > room ? truncateToWidth(line, room, "…") : line;
+			let middle = ` ${cut}${" ".repeat(Math.max(0, room - visibleWidth(cut)))}${cell === undefined ? " " : ""}`;
 			if (row?.tint) middle = `${row.tint.open}${middle.replace(/\x1b\[([0-9;:]*)m/g, (sgr, params) => (endsBackground(params) ? sgr + row.tint.open : sgr))}\x1b[49m`;
-			return `${this.paint("border", EDGE.left)}${middle}${ruler ?? ""}${this.paint("border", EDGE.right)}`;
+			return `${this.paint("border", EDGE.left)}${middle}${gap ?? ""}${cell ?? ""}${this.paint("border", EDGE.right)}`;
 		};
 		// Plain text cut before it is painted, so the color reaches the "…".
 		const text = (role, plain, bold = false) => {
@@ -577,7 +612,7 @@ class FilePreview {
 		const content = this.content;
 		const cut = content?.cut ? ` · first ${sizeLabel(content.cut)}` : "";
 		const body = [];
-		let ruler = []; // the overview ruler's cell for each body row, when the file is longer than the view
+		let ruler = []; // the scrollbar's (a diff's overview ruler's) cell for each body row, when the file is longer than the view
 		let range = []; // the footer after "Esc close · e edit", as [role, text] parts
 		if (!content) body.push(text("dim", "Reading…"));
 		else if (content.error) body.push(text("warning", `${this.file === undefined ? "Cannot read" : "Cannot read the file"}: ${content.error}`));
@@ -585,9 +620,10 @@ class FilePreview {
 		else if (content.empty) body.push(text("muted", this.file === undefined ? "(empty)" : "(empty file)"));
 		else {
 			const diff = content.rows;
-			const rows = this.markdownRows(inner);
-			// A diff's code keeps one column apart from the ruler's.
-			const wrap = rows ? undefined : this.wrapped(diff ? inner - 1 : inner);
+			// The body keeps one column apart from the scrollbar's, a diff's always, as its ruler's.
+			const room = diff || this.needsBar(inner) ? inner - 1 : inner;
+			const rows = diff ? undefined : this.markdownRows(room);
+			const wrap = rows ? undefined : this.wrapped(room);
 			const total = this.total();
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
@@ -612,7 +648,11 @@ class FilePreview {
 				const text = `${number(first ? row.number : undefined, digits)} ${role && first ? this.paint(role, mark) : " "} ${shown}`;
 				body.push(role && tints[row.sign] ? { text, tint: tints[row.sign] } : text);
 			}
-			if (diff && wrap && total > to - this.top) ruler = this.ruler(wrap, total, to - this.top, to, tints);
+			const place = { column, trackTop: 4, height: to - this.top, total, top: this.top }; // under top, title, path, blank
+			if (diff && wrap) {
+				this.scrollbar.place({ ...place, hover: false, width: 2 }, this.theme); // no thumb glyph to grow; two columns
+				if (total > to - this.top) ruler = this.ruler(wrap, total, to - this.top);
+			} else ruler = this.scrollbar.place(place, this.theme) ?? [];
 			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";
 			const changes = diff ? [["dim", " · n/N change · "], ["toolDiffAdded", `+${content.added}`], ["dim", " "], ["toolDiffRemoved", `−${content.removed}`]] : [];
 			const keys = " · ↑↓ PgUp/PgDn Home/End";
@@ -635,19 +675,36 @@ class FilePreview {
 		];
 	}
 
-	// The overview ruler's `height` cells for a diff of `total` wrapped rows whose view is [top, to): cell i stands
-	// for rows [i·total/height, (i+1)·total/height). A green █ where they add, a red █ where they remove, ▌ red on
-	// the full added color where they do both (on its tint where the theme has no truecolor one), a dim │ in view.
-	ruler(wrap, total, height, to, tints) {
+	// The overview ruler's `height` cells for a diff of `total` wrapped rows, which is the scrollbar too: cell i stands
+	// for rows [i·total/height, (i+1)·total/height). As VS Code's: a ¾ block (ADDED_MARK) at the cell's right in
+	// toolDiffAdded where they add, narrower than the cell so the thumb shows beside it as VS Code's lane, a ▒ in
+	// toolDiffRemoved where they remove, a ▞ in the removed color where they do both. In a monochrome theme the removed
+	// marks are dim, as removed rows are (tints), so they stay apart from the added ones. The marks are in full color;
+	// the thumb (./scrollbar.ts) is a see-through layer over them, as VS Code's scrollbarSlider, with no glyph of its
+	// own, two columns wide: the theme's scrollbarThumb at THUMB_ALPHA over the terminal's background (as tints guesses
+	// it) behind the ruler's cell and the blank gap before it (a thumb row is { cell, gap }), and a mark under it
+	// halfway toward that background, so it shows through the slider dimmed, covered. Without a truecolor
+	// scrollbarThumb to blend the thumb is the theme's selectedBg behind both cells and the marks stay plain.
+	ruler(wrap, total, height) {
 		const diff = this.content.rows;
-		const theme = this.theme;
-		let both;
-		try {
-			const rgb = (theme.getColorMode?.() ?? "truecolor") === "truecolor" ? themeRgb(theme, "toolDiffAdded") : undefined;
-			both = rgb ? `\x1b[48;2;${rgb.join(";")}m` : tints["+"]?.open;
-		} catch {
-			both = undefined;
-		}
+		const geometry = scrollbarGeometry(height, total, this.top);
+		const removedRole = this.tints()["-"]?.faded ? "dim" : "toolDiffRemoved";
+		const rgbOf = (role) => {
+			try {
+				return (this.theme.getColorMode?.() ?? "truecolor") === "truecolor" ? themeRgb(this.theme, role) : undefined;
+			} catch {
+				return undefined;
+			}
+		};
+		const thumbRgb = rgbOf("scrollbarThumb");
+		const blend = (under, over, alpha) => under.map((channel, i) => Math.round(channel + (over[i] - channel) * alpha));
+		const base = this.theme?.appearance === "light" ? 255 : 0;
+		const slid = thumbRgb ? blend([base, base, base], thumbRgb, THUMB_ALPHA) : undefined; // the thumb cell's background
+		const shade = slid ? `\x1b[48;2;${slid.join(";")}m` : shadeOf(this.theme);
+		const mark = (role, glyph, thumb) => {
+			const rgb = thumb && slid ? rgbOf(role) : undefined;
+			return rgb ? `\x1b[38;2;${blend(rgb, slid, 0.5).join(";")}m${glyph}\x1b[39m` : this.paint(role, glyph);
+		};
 		return Array.from({ length: height }, (_, cell) => {
 			const from = Math.floor((cell * total) / height);
 			const end = Math.max(from + 1, Math.floor(((cell + 1) * total) / height));
@@ -658,10 +715,9 @@ class FilePreview {
 				if (sign === "+") added = true;
 				else if (sign === "-") removed = true;
 			}
-			if (added && removed) return both ? `${both}${this.paint("toolDiffRemoved", "▌")}\x1b[49m` : this.paint("toolDiffRemoved", "▌");
-			if (added) return this.paint("toolDiffAdded", "█");
-			if (removed) return this.paint("toolDiffRemoved", "█");
-			return from < to && end > this.top ? this.paint("dim", "│") : " ";
+			const thumb = geometry && this.scrollbar.onThumb(geometry, cell);
+			const shown = added && removed ? mark(removedRole, "▞", thumb) : added ? mark("toolDiffAdded", ADDED_MARK, thumb) : removed ? mark(removedRole, "▒", thumb) : " ";
+			return thumb && shade ? { cell: `${shade}${shown}\x1b[49m`, gap: `${shade} \x1b[49m` } : shown;
 		});
 	}
 
@@ -670,6 +726,7 @@ class FilePreview {
 	// Pi disposes the component when it closes the overlay, by whatever path.
 	dispose() {
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 	}
 }

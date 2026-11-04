@@ -70,7 +70,7 @@ test("title, language, path, numbered lines and the footer range in a square out
 	assert.match(out[1], /^▏ Read-only — JavaScript +▕$/);
 	assert.match(out[2], /^▏ src\/app\.js +▕$/);
 	assert.match(out[3], /^▏ +▕$/);
-	assert.match(out[4], /^▏   1 const line1 = 1; +▕$/, "numbers right-aligned to the widest");
+	assert.match(out[4], /^▏   1 const line1 = 1; +\u{1FB75}▕$/u, "numbers right-aligned to the widest; 168 lines: the scrollbar before the right stroke");
 	assert.match(out[5], /^▏   2 const line2 = 2;/);
 	// 30 rows * 85% = 25 rows for the overlay, 6 of them chrome: 19 lines of code.
 	assert.equal(out.length, 25);
@@ -179,7 +179,7 @@ test("scrolling moves a row at a time through wrapped lines, and the footer name
 	assert.equal(range()[0], 1);
 	component.handleInput("G");
 	assert.equal(range()[1], 40);
-	assert.match(text(60).at(-4), /^▏    word( word)* +▕$/, "the last row is the end of line 40");
+	assert.match(text(60).at(-4), /^▏    word( word)* +\u{1FB75}▕$/u, "the last row is the end of line 40");
 	component.handleInput("g");
 	assert.equal(text(60)[4], first);
 });
@@ -308,7 +308,7 @@ test("toggling with m starts the other view from its top", async () => {
 	assert.match(text(90).at(-2), / 19-36 \/ 159 /, "the rendered rows scroll by pages");
 	component.handleInput("m");
 	assert.match(text(90).at(-2), / m rendered · .* 1-18 \/ 159 /);
-	assert.match(text(90)[4], /^▏   1 Paragraph 1\. +▕$/);
+	assert.match(text(90)[4], /^▏   1 Paragraph 1\. +\u{1FB75}▕$/u);
 });
 
 test("without Markdown rendering a Markdown file falls back to its numbered source", async (t) => {
