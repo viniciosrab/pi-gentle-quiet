@@ -23,7 +23,7 @@ same; only how it is drawn changes.
 - **Flat Todos and Agents cards** in a simple outline, using your theme's colors, headed like the Status card: the title bold, then a blank row.
 - **A subagent's live thread in one click.** Each row of the Agents card whose subagent is still at work
   (running, queued or waiting) ends with `↗`; a click on that row opens a pop-up over Pi focused on it: agent,
-  status, model and elapsed time, then what it does in this conversation's own look: its whole prompt in dim,
+  status, model and elapsed time, then what it does in this conversation's own look: its whole prompt on the background of your sent messages,
   thinking folded to one "Thinking..." row as in the main conversation, text as Markdown, and each tool call as the quiet rows above (`$ npm test`, then
   `└ + 12 lines · 1.4s`, `└ ✗ exit 1 · boom` with its last output line, or `└ running…` until it ends), long rows wrapped instead of cut; web calls keep
   pi-web-access's row behind the status dot (lit, without blinking), memory calls the memory row
@@ -77,7 +77,9 @@ same; only how it is drawn changes.
   numbers (in the new file), then `+` on added lines and `−` on removed ones, which stand where they were with no number, each changed row tinted across the
   pop-up with the theme's diff color (its added/removed color blended over the background, or its success/error
   background on themes without truecolor) under the code's own highlighting; it opens at the first change, `n`/`N` or `]`/`[`
-  for the next or previous one, `+n −n` in the footer; Markdown shows as its source there, rendered only in TREE. A branch
+  for the next or previous one, `+n −n` in the footer; a file longer than the pop-up gets an overview ruler at its right edge, as VS Code's beside
+  its scrollbar: a green `█` where lines were added, a red `█` where they were removed, `▌` where both, and a dim `│` where the view is; Markdown shows as its source there, rendered
+  only in TREE, and Pi's screen behind stays as it is. A branch
   lists its diff with HEAD, and its files open with that branch's changes); **PROF** gentle-pi's profiles with the selected profile's roster, and the plan
   usage, edited in place like gentle-pi's `/gentle:profiles` screen, through its own profile functions: a click on a profile
   selects it, a click on an agent's or the orchestrator's model picks one of Pi's models in a small pop-up by the row, a click
@@ -97,7 +99,7 @@ same; only how it is drawn changes.
   the agent saved and recalled in this session (a click opens one read-only in the preview pop-up); **TREE** the project tree (`⌂ <name>`) with git badges and `[ ↗ ]`, which opens your editor (a click
   on a file opens a read-only preview over Pi: `Esc`/`q` or a click outside it closes it, `↑↓` `PgUp/PgDn` `Home/End` or the
   wheel scroll, long lines wrap under their code, `e` opens the file in your editor; a Markdown file shows rendered, `m` toggles its
-  source, and dims the screen behind the pop-up); **PR** the repository's open pull requests from one `gh api graphql` call (in a fork's clone, where gh reads the
+  source, and dims the screen behind the pop-up, in TREE only); **PR** the repository's open pull requests from one `gh api graphql` call (in a fork's clone, where gh reads the
   upstream, only the ones you opened there), drawn as their stack (a PR
   based on another sits under it), each with the one thing it waits on (✗ conflicts, ✗ CI, ✗ changes,
   ⚠ N threads, ⧗ CI, ◌ draft, ⧗ review, ✓ threads resolved when every review thread was resolved, ✓ ready), after a CI chip counting the passed checks (✓ CI 10/10,

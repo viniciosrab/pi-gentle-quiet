@@ -311,3 +311,40 @@ test("e still opens the editor and Esc closes, in the changes view", async () =>
 	assert.equal(esc.calls.done.length, 1);
 	assert.equal(esc.calls.edits, 0);
 });
+
+// The cell just before the right stroke of each body row: the overview ruler, as VS Code's beside its scrollbar.
+const rulerCells = (out, count) => out.slice(4, 4 + count).map((row) => row.at(-2));
+
+test("a file longer than the view gets an overview ruler at the right edge: every change marked where it sits in the file", async () => {
+	const target = file("long.ts", "x\n");
+	const { component, text, draw } = await opened(target, { diff: Promise.resolve(LONG) }, { rows: 30 });
+	// 61 rows over the 18 rows of the view: row i stands for rows [i*61/18, (i+1)*61/18) of the file.
+	// −L30 is row 29 (cell 8), +X30 row 30 (cell 9), −L50 row 50 (cell 15); the view, rows 27-44, is cells 7-12.
+	const cells = () => rulerCells(text(80), 18).join("");
+	assert.equal(cells(), "       │██│││  █  ");
+	const raw = draw(80);
+	assert.ok(painted(raw[4 + 8], "toolDiffRemoved", "█") && painted(raw[4 + 9], "toolDiffAdded", "█") && painted(raw[4 + 15], "toolDiffRemoved", "█"), "removed red, added green");
+	assert.ok(painted(raw[4 + 7], "dim", "│") && painted(raw[4 + 12], "dim", "│"), "the rows in view marked dim");
+	assert.ok(text(80).slice(4, 22).every((row) => row.at(-3) === " "), "a blank column keeps the code off the ruler");
+	component.handleInput("g");
+	assert.equal(cells(), "││││││  ██     █  ", "the view mark follows the scroll; the change marks stay");
+	assert.ok(text(80).slice(1, -1).every((row) => row.length === text(80)[1].length), "every row between the strokes as wide as the others");
+});
+
+test("a ruler cell that stands for both an added and a removed row is split: removed on the added color", async () => {
+	const diff = [...header("m.ts"), "@@ -1,7 +1,7 @@", "-a", "+b", " c", " d", " e", " f", " g", " h", ""].join("\n");
+	const { draw, text } = await opened(file("m.ts", "x\n"), { diff: Promise.resolve(diff) }, { rows: 12, with: truecolor });
+	const out = text(70);
+	assert.equal(out[4].at(-2), "▌");
+	assert.ok(draw(70)[4].includes(`\x1b[48;2;100;200;40m${fgOf("toolDiffRemoved")}▌`), "the removed half over the full added color");
+	const plainTheme = await opened(file("m.ts", "x\n"), { diff: Promise.resolve(diff) }, { rows: 12 });
+	assert.equal(plainTheme.text(70)[4].at(-2), "▌");
+	assert.ok(painted(plainTheme.draw(70)[4], "toolDiffRemoved", "▌"), "without a theme background, still marked");
+});
+
+test("a file that fits the view, and the plain preview, have no ruler", async () => {
+	const short = await opened(file("a.ts", "x\n"), { diff: Promise.resolve(SMALL) }, { rows: 30 });
+	assert.ok(short.text(70).slice(4, 12).every((row) => row.endsWith(" ▕")), "the whole file is in view: nothing to point at");
+	const plainView = await opened(file("b.ts", Array.from({ length: 80 }, (_, i) => `line ${i}`).join("\n")), undefined, { rows: 20 });
+	assert.ok(plainView.text(70).slice(4, -3).every((row) => row.endsWith(" ▕")), "no changes: no ruler");
+});
