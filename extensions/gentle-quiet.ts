@@ -2903,6 +2903,8 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	};
 	// Gentle Shell's usage bar: "claude 5h 󰪢 62% · week 󰪟 31%". Every window gets the
 	// same meter as ctx.
+	// The side column's Context card shows every window whatever the status line's settings (allWindows).
+	const allWindows = currentUsage(ctx).windows;
 	const plan = config.statusLine.usage ? currentUsage(ctx) : { name: "", windows: [] };
 	if (!config.statusLine.usageWeek) plan.windows = plan.windows.filter((window) => window.label !== "week");
 	const usageText = (all) => {
@@ -2937,7 +2939,8 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	return { sep, project, branchText, location, tokens, plan, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
+	const spent = { sent: totals.input + totals.cacheRead + totals.cacheWrite, output: totals.output };
+	return { sep, project, branchText, location, tokens, spent, plan, allWindows, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
 }
 
 // Statuses sit on the left after the location, Perm first (the model closes the Working row
@@ -2979,9 +2982,9 @@ function statusLineRows(t, footerData, width, options) {
 // In the side column the status line is two cards on top, Gentle Shell's Status and Context cards in this
 // style. Status: the location under a label column, then a blank row and the statuses, one per row (an
 // empty section is left out). Context: "56k / 200k tokens" with the ctx gauge on the right, a bar across
-// the card in the gauge's color, the tokens spent with the cost on the right, and the plan windows on one
-// row, as the status line draws them; a row whose data is missing is left out. A row too long for the
-// card is cut, never wrapped. No model: it closes the Working row.
+// the card in the gauge's color, then the tokens spent ("in 43k · out 200") with, on the right, the plan windows ("plan 5h 38% ·
+// wk 31%") or the cost when there is no plan usage; a row whose data is missing is left out. A row too long
+// for the card is cut, never wrapped. No model: it closes the Working row.
 function statusCardRows(t, footerData, width, options) {
 	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
 	const inner = outlined ? width - BOX_CHROME : width - 1;
@@ -3015,14 +3018,21 @@ function statusCardRows(t, footerData, width, options) {
 	const figures = `${fg(t, "text", window ? `${used} / ${window}` : used)} ${fg(t, "muted", "tokens")}`;
 	const filled = percent === null ? 0 : Math.round((Math.max(0, Math.min(100, percent)) / 100) * inner);
 	const bar = percent === null ? "" : [filled && fg(t, gaugeTone(percent), "■".repeat(filled)), filled < inner && fg(t, "dim", "□".repeat(inner - filled))].filter(Boolean).join("");
-	const spent = p.tokens(true);
+	// "in 43k · out 200": every token sent, the cache's included, then the output. The status line's tokens and
+	// usage settings shorten the line under the editor, not this row.
+	const { sent, output } = p.spent;
+	const spent = !(sent || output) ? "" : `${fg(t, "muted", "in")} ${fg(t, "text", formatTokens(sent))} ${fg(t, "muted", "·")} ${fg(t, "muted", "out")} ${fg(t, "text", formatTokens(output))}`;
 	const cost = p.costText && `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}`;
-	// No plan windows here: in the side column they live in the PROF tab.
+	// On a plan its windows take the cost's place: the calls cost nothing more, the plan's windows are what
+	// they spend. A window near its limit warns as the gauge does.
+	const planWindow = ({ label, percent }) => `${fg(t, "muted", label === "week" ? "wk" : label)} ${fg(t, percent >= 80 ? gaugeTone(percent) : "text", `${Math.round(percent)}%`)}`;
+	const plan = p.allWindows.length ? `${fg(t, "muted", "plan")} ${p.allWindows.map(planWindow).join(` ${fg(t, "muted", "·")} `)}` : "";
+	const spend = plan || cost;
 	const context = [
 		...title("Context"),
 		spread(figures, percentText),
 		bar,
-		(spent || cost) && spread(spent, cost),
+		(spent || spend) && spread(spent, spend),
 	].filter((line, index) => index < 2 || line);
 	return [...draw(status), ...draw(context)];
 }
