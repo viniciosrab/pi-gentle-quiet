@@ -1262,3 +1262,39 @@ test("a web call Pi has not drawn in the main view yet still gets the dot and it
 	assert.ok(body.some((row) => /^● .*source.check.*is pi fast/.test(row)), body.join("\n"));
 	assert.ok(body.includes("  └ 2 sources agree"), body.join("\n"));
 });
+
+test("the prompt sits on the sent message's background, as the main conversation draws it: userMessageBg across the row, userMessageText", () => {
+	const roles = { userMessageText: 201, dim: 202 };
+	const bgTheme = {
+		fg: (name, text) => `\x1b[38;5;${roles[name] ?? 203}m${text}\x1b[39m`,
+		bg: (name, text) => `\x1b[48;5;${name === "userMessageBg" ? 236 : 1}m${text}\x1b[49m`,
+		bold: theme.bold,
+	};
+	const raw = sessionLines([{ kind: "user", text: "Implement T34\n\nRead the spec first.", version: 1 }], bgTheme, 40, stubTool);
+	assert.deepEqual(raw.map((row) => plain(row).trimEnd()), ["› Implement T34", "", "  Read the spec first."]);
+	for (const row of raw) {
+		assert.ok(row.startsWith("\x1b[48;5;236m") && row.endsWith("\x1b[49m"), `on userMessageBg: ${JSON.stringify(row)}`);
+		assert.equal(plain(row).length, 40, "the background across the whole row, the blank one too");
+	}
+	assert.ok(raw[0].includes("\x1b[38;5;201m› Implement T34") && raw[2].includes("\x1b[38;5;201m  Read the spec first."), "in userMessageText, not dim");
+	assert.ok(!raw.some((row) => row.includes("\x1b[38;5;202m")), "nothing dim");
+	const later = sessionLines([{ kind: "user", text: "Now fix it.", version: 1 }, { kind: "text", text: "Done.", version: 1 }], bgTheme, 40, stubTool);
+	assert.ok(later[0].startsWith("\x1b[48;5;236m") && !later.at(-1).includes("\x1b[48;5;236m"), "every user message, and only those");
+	// A long prompt: each wrapped row on the background, in userMessageText, as wide as the popup.
+	const words = Array.from({ length: 20 }, (_, i) => `word${i + 1}`).join(" ");
+	const wrapped = sessionLines([{ kind: "user", text: words, version: 1 }], bgTheme, 30, stubTool);
+	assert.ok(wrapped.length > 2, "the prompt wraps");
+	for (const row of wrapped) {
+		assert.ok(row.startsWith("\x1b[48;5;236m\x1b[38;5;201m") && row.endsWith("\x1b[49m"), `wrapped row on userMessageBg in userMessageText: ${JSON.stringify(row)}`);
+		assert.equal(plain(row).length, 30);
+	}
+	assert.match(plain(wrapped[1]), /^ {2}word/, "wrapped rows two columns in");
+});
+
+test("a theme whose bg throws draws the prompt dim, as without a background", () => {
+	const failing = { ...theme, bg: () => { throw new Error("no such role"); } };
+	let raw;
+	assert.doesNotThrow(() => { raw = sessionLines([{ kind: "user", text: "Implement T34\nRead the spec first.", version: 1 }], failing, 40, stubTool); });
+	assert.deepEqual(raw.map((row) => plain(row)), ["› Implement T34", "  Read the spec first."]);
+	assert.ok(raw.every((row) => painted(row, "dim")), "every row dim");
+});

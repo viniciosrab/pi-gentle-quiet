@@ -353,7 +353,7 @@ export function threadLines(thread, theme, width, lib) {
 }
 
 // A subagent's own session (./run-data.ts SessionLog), drawn as the main conversation draws its messages: each
-// user message whole and dim, wrapped (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
+// user message whole on the sent message's background, wrapped (the first is the task's prompt), thinking as one "Thinking..." row, text as Markdown, each tool
 // call by `drawTool(item, theme, width)` (gentle-quiet's quiet rows), a blank row between them. Every row starts at
 // the pop-up's own edge, the header's column: the conversation's one-column margin is taken off the tool rows.
 
@@ -377,11 +377,21 @@ function markdownRows(text, width) {
 	return String(text).split("\n").flatMap((line) => (line ? wrap(line, width) : [""]));
 }
 
-// The prompt whole, dim: "› " before its first row, every other row two columns in, so it reads as one block.
+// The prompt whole: "› " before its first row, every other row two columns in, so it reads as one block. As the
+// main conversation draws a sent message: userMessageText on userMessageBg across the whole row; dim where the
+// theme has no background.
 function promptRows(theme, text, width) {
 	const room = Math.max(1, width - 2);
 	const lines = String(text).replace(/^\s*\n|\s+$/g, "").split("\n");
-	return lines.flatMap((line, index) => (line.trim() ? wrap(line.trimEnd(), room) : [""]).map((part, at) => paint(theme, "dim", `${index === 0 && at === 0 ? "› " : part ? "  " : ""}${part}`)));
+	const rows = lines.flatMap((line, index) => (line.trim() ? wrap(line.trimEnd(), room) : [""]).map((part, at) => `${index === 0 && at === 0 ? "› " : part ? "  " : ""}${part}`));
+	if (typeof theme?.bg === "function") {
+		try {
+			return rows.map((row) => theme.bg("userMessageBg", `${paint(theme, "userMessageText", row)}${" ".repeat(Math.max(0, width - visibleWidth(row)))}`));
+		} catch {
+			// a theme without the role: dim below
+		}
+	}
+	return rows.map((row) => paint(theme, "dim", row));
 }
 
 function sessionItem(item, theme, width, drawTool) {

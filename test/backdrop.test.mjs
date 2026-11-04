@@ -135,3 +135,27 @@ test("without a theme the base lines go near-black too; an error in the backdrop
 	});
 	assert.deepEqual(under(broken, at), BASE.slice(at), "the original lines, rendering not broken");
 });
+
+test("a Markdown file opened from the GIT tab with its changes leaves the base lines as they are: only TREE dims", async () => {
+	const tui = new StubTUI();
+	let component;
+	const ctx = {
+		hasUI: true,
+		ui: {
+			custom: (factory) => {
+				component = factory(tui, theme, {}, () => {});
+				tui.overlayStack.push({ component });
+				return new Promise(() => {});
+			},
+		},
+	};
+	const diff = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1,2 +1,2 @@", " # Title", "-old", "+new", ""].join("\n");
+	assert.equal(openPreview(ctx, { file: file("README.md", "# Title\nnew\n"), relPath: "README.md", onEdit: () => {}, changes: { diff: Promise.resolve(diff) } }), true);
+	await component.ready;
+	assert.match(plain(component.render(70)[1]), /Read-only — Markdown · changes/);
+	const rows = component.render(70).length;
+	assert.deepEqual(under(tui, rows), BASE.slice(rows), "no dim behind the changes view");
+	tui.overlayStack.length = 0;
+	const fromTree = await open(tui, "README.md");
+	assert.ok(under(tui, fromTree.render(70).length).some((line) => line.startsWith("\x1b[38;2;31;31;31m")), "the same file from TREE still dims");
+});

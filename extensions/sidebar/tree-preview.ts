@@ -9,7 +9,8 @@
 // A Markdown file is shown rendered, as Pi renders assistant messages (pi-tui's Markdown with Pi's Markdown
 // theme) but with code blocks framed instead of fenced and "•" bullets, without line numbers; m toggles it with the numbered source ("m source" / "m rendered" in the
 // footer). Where this Pi cannot render Markdown, the source is shown and there is no m.
-// While a Markdown file's preview is open (either view), Pi's screen behind it is drawn dim (BACKDROP, below).
+// While a Markdown file's preview is open from TREE (either view), Pi's screen behind it is drawn dim (BACKDROP, below);
+// from the GIT tab it is not.
 //
 // Given text instead of a file (a memory from the MEM tab, ./mem.ts) shows the same way: "Read-only — <label>",
 // its title on the path row, the body rendered as Markdown (m for its source), and no e, as there is no file.
@@ -18,7 +19,10 @@
 // "Read-only — <language> · changes", every row of the file with a gutter before its number, "+" on added rows
 // and "-" on removed ones, which stand where they were removed from with no number, both painted in the theme's
 // toolDiffAdded / toolDiffRemoved. It opens at the first change; n/N (or ] and [) jump to the next or previous
-// change, and the footer shows "+12 −3". A Markdown file is its source there, never rendered (no m). When git
+// change, and the footer shows "+12 −3". A Markdown file is its source there, never rendered (no m). When the
+// file is longer than the view, the last column before the right stroke is an overview ruler, as VS Code's beside
+// its scrollbar: each of its rows stands for an equal slice of the file, a green █ where that slice adds lines, a
+// red █ where it removes them, ▌ red on green where it does both, and a dim │ where the view is. When git
 // gives no diff (no change, a binary file, a failure) it is the plain preview.
 //
 // At most previewLimits.maxBytes are read. A NUL byte in the first 8 KB makes it a binary file, drawn as one
@@ -356,7 +360,8 @@ function patchBackdrop(tui) {
 class FilePreview {
 	constructor({ file, relPath, tui, theme, done, onEdit, loading, label, changes = false }) {
 		Object.assign(this, { file, relPath, tui, theme, done, onEdit, label, changes });
-		if (file !== undefined && languageOf(file) === "Markdown") this[BACKDROP] = true;
+		// Only TREE's preview dims Pi: a Markdown file's changes from the GIT tab keep Pi's screen as it is.
+		if (file !== undefined && !changes && languageOf(file) === "Markdown") this[BACKDROP] = true;
 		try {
 			patchBackdrop(tui);
 		} catch {
@@ -555,13 +560,14 @@ class FilePreview {
 	render(width) {
 		const inner = Math.max(1, width - 4);
 		// A row between the side strokes; a { text, tint } row has the tint behind it from stroke to stroke, set again
-		// after every escape inside it so a reset in the highlighted code does not end it.
-		const fit = (row) => {
+		// after every escape inside it so a reset in the highlighted code does not end it. `ruler`, one cell, takes the
+		// last column before the right stroke, outside the tint.
+		const fit = (row, ruler) => {
 			const line = typeof row === "string" ? row : row.text;
 			const cut = visibleWidth(line) > inner ? truncateToWidth(line, inner, "…") : line;
-			let middle = ` ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} `;
+			let middle = ` ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))}${ruler === undefined ? " " : ""}`;
 			if (row?.tint) middle = `${row.tint.open}${middle.replace(/\x1b\[([0-9;:]*)m/g, (sgr, params) => (endsBackground(params) ? sgr + row.tint.open : sgr))}\x1b[49m`;
-			return `${this.paint("border", EDGE.left)}${middle}${this.paint("border", EDGE.right)}`;
+			return `${this.paint("border", EDGE.left)}${middle}${ruler ?? ""}${this.paint("border", EDGE.right)}`;
 		};
 		// Plain text cut before it is painted, so the color reaches the "…".
 		const text = (role, plain, bold = false) => {
@@ -571,18 +577,20 @@ class FilePreview {
 		const content = this.content;
 		const cut = content?.cut ? ` · first ${sizeLabel(content.cut)}` : "";
 		const body = [];
+		let ruler = []; // the overview ruler's cell for each body row, when the file is longer than the view
 		let range = []; // the footer after "Esc close · e edit", as [role, text] parts
 		if (!content) body.push(text("dim", "Reading…"));
 		else if (content.error) body.push(text("warning", `${this.file === undefined ? "Cannot read" : "Cannot read the file"}: ${content.error}`));
 		else if (content.binary) body.push(text("muted", "Binary file — press e to open it in the editor"));
 		else if (content.empty) body.push(text("muted", this.file === undefined ? "(empty)" : "(empty file)"));
 		else {
+			const diff = content.rows;
 			const rows = this.markdownRows(inner);
-			const wrap = rows ? undefined : this.wrapped(inner);
+			// A diff's code keeps one column apart from the ruler's.
+			const wrap = rows ? undefined : this.wrapped(diff ? inner - 1 : inner);
 			const total = this.total();
 			this.top = Math.max(0, Math.min(this.top, total - this.page()));
 			const to = Math.min(total, this.top + this.page());
-			const diff = content.rows;
 			const { digits } = wrap ?? {};
 			const SIGN = { "+": ["toolDiffAdded", "+"], "-": ["toolDiffRemoved", "−"] };
 			const tints = diff ? this.tints() : {};
@@ -604,6 +612,7 @@ class FilePreview {
 				const text = `${number(first ? row.number : undefined, digits)} ${role && first ? this.paint(role, mark) : " "} ${shown}`;
 				body.push(role && tints[row.sign] ? { text, tint: tints[row.sign] } : text);
 			}
+			if (diff && wrap && total > to - this.top) ruler = this.ruler(wrap, total, to - this.top, to, tints);
 			const toggle = this.canRender ? ` · m ${rows ? "source" : "rendered"}` : "";
 			const changes = diff ? [["dim", " · n/N change · "], ["toolDiffAdded", `+${content.added}`], ["dim", " "], ["toolDiffRemoved", `−${content.removed}`]] : [];
 			const keys = " · ↑↓ PgUp/PgDn Home/End";
@@ -619,11 +628,41 @@ class FilePreview {
 			fit(text("toolTitle", `Read-only — ${this.label ?? languageOf(this.file)}${content?.rows ? " · changes" : ""}`, true)),
 			fit(text("muted", `${this.relPath}${cut}`)),
 			fit(""),
-			...body.map(fit),
+			...body.map((row, index) => fit(row, ruler[index])),
 			fit(""), // the footer apart from the file
 			fit([["dim", `Esc close${this.onEdit ? " · e edit" : ""}`], ...range].map(([role, part]) => (part ? this.paint(role, part) : "")).join("")),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
+	}
+
+	// The overview ruler's `height` cells for a diff of `total` wrapped rows whose view is [top, to): cell i stands
+	// for rows [i·total/height, (i+1)·total/height). A green █ where they add, a red █ where they remove, ▌ red on
+	// the full added color where they do both (on its tint where the theme has no truecolor one), a dim │ in view.
+	ruler(wrap, total, height, to, tints) {
+		const diff = this.content.rows;
+		const theme = this.theme;
+		let both;
+		try {
+			const rgb = (theme.getColorMode?.() ?? "truecolor") === "truecolor" ? themeRgb(theme, "toolDiffAdded") : undefined;
+			both = rgb ? `\x1b[48;2;${rgb.join(";")}m` : tints["+"]?.open;
+		} catch {
+			both = undefined;
+		}
+		return Array.from({ length: height }, (_, cell) => {
+			const from = Math.floor((cell * total) / height);
+			const end = Math.max(from + 1, Math.floor(((cell + 1) * total) / height));
+			let added = false;
+			let removed = false;
+			for (let at = from; at < end; at++) {
+				const sign = diff[wrap.rows[at]?.index]?.sign;
+				if (sign === "+") added = true;
+				else if (sign === "-") removed = true;
+			}
+			if (added && removed) return both ? `${both}${this.paint("toolDiffRemoved", "▌")}\x1b[49m` : this.paint("toolDiffRemoved", "▌");
+			if (added) return this.paint("toolDiffAdded", "█");
+			if (removed) return this.paint("toolDiffRemoved", "█");
+			return from < to && end > this.top ? this.paint("dim", "│") : " ";
+		});
 	}
 
 	invalidate() {}
