@@ -2904,9 +2904,10 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	// Gentle Shell's usage bar: "claude 5h 󰪢 62% · week 󰪟 31%". Every window gets the
 	// same meter as ctx.
 	// The side column's Context card shows every window whatever the status line's settings (allWindows).
-	const allWindows = currentUsage(ctx).windows;
-	const plan = config.statusLine.usage ? currentUsage(ctx) : { name: "", windows: [] };
-	if (!config.statusLine.usageWeek) plan.windows = plan.windows.filter((window) => window.label !== "week");
+	const reading = currentUsage(ctx);
+	const allWindows = reading.windows;
+	const shown = config.statusLine.usage ? reading.windows : [];
+	const plan = { name: config.statusLine.usage ? reading.name : "", windows: config.statusLine.usageWeek ? [...shown] : shown.filter((window) => window.label !== "week") };
 	const usageText = (all) => {
 		const [first, ...rest] = plan.windows;
 		if (!first) return "";
@@ -2984,16 +2985,24 @@ function statusLineRows(t, footerData, width, options) {
 // empty section is left out). Context: "56k / 200k tokens" with the ctx gauge on the right, a bar across
 // the card in the gauge's color, then the tokens spent ("in 43k · out 200") with, on the right, the plan windows ("plan 5h 38% ·
 // wk 31%") or the cost when there is no plan usage; a row whose data is missing is left out. A row too long
-// for the card is cut, never wrapped. No model: it closes the Working row.
+// for the card is cut, never wrapped; on the tokens spent row the left part goes first, so the plan or the
+// cost stays whole unless it alone does not fit. No model: it closes the Working row.
 function statusCardRows(t, footerData, width, options) {
 	const outlined = config.blocks.border && width - BOX_CHROME >= BOX_MIN_INNER;
 	const inner = outlined ? width - BOX_CHROME : width - 1;
 	const p = statusParts(t, footerData, options);
 	const cut = (row) => (visibleWidth(row) <= inner ? row : truncateToWidth(row, inner, "…"));
-	// Left and right parts of a row, the right one flush with the card's edge.
-	const spread = (left, right) => {
+	// Left and right parts of a row, the right one flush with the card's edge. Short of room, with keepRight
+	// the left part is cut so the right one stays whole.
+	const spread = (left, right, keepRight = false) => {
 		const gap = inner - visibleWidth(left) - visibleWidth(right);
-		return gap >= 2 ? `${left}${" ".repeat(gap)}${right}` : cut([left, right].filter(Boolean).join("  "));
+		if (gap >= 2) return `${left}${" ".repeat(gap)}${right}`;
+		const room = inner - visibleWidth(right) - 2;
+		if (keepRight && left && right && room >= 1) {
+			const shortened = truncateToWidth(left, room, "…");
+			return `${shortened}${" ".repeat(inner - visibleWidth(shortened) - visibleWidth(right))}${right}`;
+		}
+		return cut([left, right].filter(Boolean).join("  "));
 	};
 	const title = (text) => [fg(t, "toolTitle", bold(t, text)), ""];
 	const draw = (card) => (outlined ? boxed(card, width, t) : card.map((line) => ` ${line}`));
@@ -3032,7 +3041,7 @@ function statusCardRows(t, footerData, width, options) {
 		...title("Context"),
 		spread(figures, percentText),
 		bar,
-		(spent || spend) && spread(spent, spend),
+		(spent || spend) && spread(spent, spend, true),
 	].filter((line, index) => index < 2 || line);
 	return [...draw(status), ...draw(context)];
 }
