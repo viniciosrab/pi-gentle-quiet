@@ -67,13 +67,13 @@ test("the Status card keeps Project, Branch and the statuses; the context moves 
 	assert.deepEqual(context.slice(0, 2), ["Context", ""], "a title row like the other cards");
 });
 
-test("the Context card: tokens in use and the percent, a bar across the card, tokens spent and the cost", async () => {
+test("the Context card: tokens in use and the percent, a bar across the card, then the cost", async () => {
 	const { cards, raw } = await wide({ session: { entries: spent } });
 	const [, context] = cards();
-	assert.match(context[2], /^56k \/ 200k tokens +28%$/u, "ctx's numbers and the percent on the right, no gauge ring (the bar under it is the gauge)");
+	assert.match(context[2], /^56k \/ 200k tokens +28%$/u, "ctx's numbers and the percent on the right, no gauge ring (the bar under it is the gauge); no cache state after one call");
 	assert.equal([...context[2]].length, 55, "the inner width of the column's cards");
 	assert.equal(context[3], `${"■".repeat(15)}${"□".repeat(40)}`, "28% of 55 cells");
-	assert.match(context[4], /^in 43k · out 200 +cost \$1\.75$/, "every token sent (cache included), then the output");
+	assert.match(context[4], /^ +cost \$1\.75$/, "no tokens spent, the cost flush with the card's end");
 	assert.equal([...context[4]].length, 55);
 	assert.equal(context.length, 5);
 	const rows = raw();
@@ -81,45 +81,78 @@ test("the Context card: tokens in use and the percent, a bar across the card, to
 	assert.ok(painted(bar, "accent", "■"), "the filled part in the gauge's color");
 	assert.ok(painted(bar, "dim", "□"));
 	assert.ok(rows.some((row) => painted(row, "muted", "cost")), "a muted label before the cost");
+	assert.ok(!rows.some((row) => /\bin \d|\bout \d/.test(plain(row))), "no in / out tokens anywhere in the card");
 });
 
-test("the bar warns like the gauge", async () => {
-	const { raw } = await wide({ session: { usage: { percent: 85, tokens: 170_000, contextWindow: 200_000 } } });
-	assert.ok(raw().some((row) => painted(row, "warning", "■")));
+// Two calls: the first writes the cache, the second reads it back (hit) or writes it again (miss).
+const calls = (second) => [
+	{ type: "message", message: { role: "assistant", usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 40000, cost: { total: 0.5 } } } },
+	{ type: "message", message: { role: "assistant", usage: { output: 200, cost: { total: 0.5 }, ...second } } },
+];
+
+test("after the first call the tokens row says cache ok while the last call read most of its prompt from the cache", async () => {
+	const { cards, raw } = await wide({ session: { entries: calls({ input: 1000, cacheRead: 40000, cacheWrite: 0 }) } });
+	const row = cards()[1][2];
+	assert.match(row, /^56k \/ 200k tokens · cache ok +28%$/u, "after the tokens, the percent still alone on the right");
+	assert.equal([...row].length, 55);
+	const painted_ = raw().find((line) => plain(line).includes("cache ok"));
+	assert.ok(painted(painted_, "muted", "cache"), "a muted label");
+	assert.ok(painted(painted_, "text", "ok"), "ok in text");
+});
+
+test("cache low in the warning color when the last call read less than half its prompt from the cache", async () => {
+	const { cards, raw } = await wide({ session: { entries: calls({ input: 1000, cacheRead: 1000, cacheWrite: 40000 }) } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens · cache low +28%$/u);
+	assert.ok(painted(raw().find((line) => plain(line).includes("cache low")), "warning", "low"));
+});
+
+test("no cache state when the provider never cached anything", async () => {
+	const none = { input: 40000, cacheRead: 0, cacheWrite: 0 };
+	const entries = [0, 1].map(() => ({ type: "message", message: { role: "assistant", usage: { ...none, output: 200, cost: { total: 0.5 } } } }));
+	const { cards } = await wide({ session: { entries } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens +28%$/u);
 });
 
 const onPlan = (options = {}) => wide({ ...options, session: { entries: spent, model: { id: "claude-opus-5-5", provider: "claude-bridge", reasoning: true } } });
 
-test("on a plan the Context card's last row shows the plan windows in place of the cost", async () => {
+test("on a plan the Context card's last row shows the first window with its reset, the others on the right", async () => {
 	const { cards, emit, raw } = await onPlan();
-	await emit("after_provider_response", { status: 200, headers: planHeaders });
+	const headers = {
+		...planHeaders,
+		"anthropic-ratelimit-unified-5h-utilization": "0.05",
+		"anthropic-ratelimit-unified-5h-reset": String(now() + 7800),
+		"anthropic-ratelimit-unified-7d-utilization": "0.10",
+		"anthropic-ratelimit-unified-7d-reset": String(now() + 86400 * 4),
+	};
+	await emit("after_provider_response", { status: 200, headers });
 	const [status, context] = cards();
 	assert.equal(status.length, 5, "nothing of the plan in Status");
-	assert.match(context[4], /^in 43k · out 200 +plan 5h 38% · wk 31%$/, "the tokens spent, then the plan windows on the right");
+	assert.match(context[4], /^5h 5% · resets 2h10m +week 10% · 4d$/, "the 5h window and its reset on the left, the week and its reset flush right");
 	assert.equal([...context[4]].length, 55);
 	assert.equal(context.length, 5, "no row added");
 	assert.ok(!context.some((row) => /cost/.test(row)), "the cost gives its place to the plan");
-	const row = raw().find((line) => plain(line).includes("plan 5h"));
-	assert.ok(painted(row, "muted", "plan"), "a muted label, as cost's");
-	assert.ok(painted(row, "text", "38%"));
+	const row = raw().find((line) => plain(line).includes("resets"));
+	assert.ok(painted(row, "muted", "5h") && painted(row, "muted", "week"), "muted labels");
+	assert.ok(painted(row, "muted", "resets"));
+	assert.ok(painted(row, "text", "5%") && painted(row, "text", "10%"));
 });
 
-test("when the row is too long for the card the plan windows stay whole and the tokens spent are cut with … first", async () => {
-	// The column's width is fixed: four windows and a large count make the row longer than the card. A provider
-	// of its own, so the Claude readings of the tests above do not win over this one.
+test("when the row is too long for the card the other windows stay whole and the first window is cut with … first", async () => {
+	// The column's width is fixed: four windows make the row longer than the card. A provider of its own, so the
+	// Claude readings of the tests above do not win over this one.
 	const entries = [{ type: "message", message: { role: "assistant", usage: { input: 12_000_000, output: 48_000, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } } } }];
 	const { cards, emit } = await wide({ session: { entries, model: { id: "claude-opus-5-5", provider: "status-card-long-plan", reasoning: true } } });
 	const codex = { "x-codex-primary-used-percent": "100", "x-codex-primary-window-minutes": "300", "x-codex-secondary-used-percent": "100", "x-codex-secondary-window-minutes": "10080" };
-	await emit("after_provider_response", { status: 200, headers: { ...planHeaders, ...codex } });
+	await emit("after_provider_response", { status: 200, headers: { ...planHeaders, "anthropic-ratelimit-unified-5h-reset": String(now() + 7800), ...codex } });
 	const row = cards()[1][4];
-	assert.equal(row, "in 12M · out…  plan 5h 38% · wk 31% · 5h 100% · wk 100%");
+	assert.equal(row, "5h 38% · resets 2…  week 31% · 3d · 5h 100% · week 100%");
 	assert.equal([...row].length, 55, "the inner width of the column's cards");
 });
 
 test("a plan window near its limit warns like the gauge", async () => {
 	const { emit, raw } = await onPlan();
 	await emit("after_provider_response", { status: 200, headers: { ...planHeaders, "anthropic-ratelimit-unified-5h-utilization": "0.85", "anthropic-ratelimit-unified-7d-utilization": "0.96" } });
-	const row = raw().find((line) => plain(line).includes("plan 5h"));
+	const row = raw().find((line) => plain(line).includes("resets"));
 	assert.ok(painted(row, "warning", "85%"));
 	assert.ok(painted(row, "error", "96%"));
 });
@@ -127,12 +160,12 @@ test("a plan window near its limit warns like the gauge", async () => {
 test("the status line's tokens, usage and weekly usage settings leave the Context card's row whole", async () => {
 	const { cards, emit } = await onPlan({ config: { statusLine: { tokens: "off", usage: false, usageWeek: false, cost: false } } });
 	await emit("after_provider_response", { status: 200, headers: planHeaders });
-	assert.match(cards()[1][4], /^in 43k · out 200 +plan 5h 38% · wk 31%$/);
+	assert.match(cards()[1][4], /^5h 38% · resets 2h +week 31% · 3d$/);
 });
 
-test("with no plan usage and the cost setting off the row keeps the tokens spent alone", async () => {
+test("with no plan usage and the cost setting off the last row is left out", async () => {
 	const { cards } = await wide({ config: { statusLine: { cost: false } }, session: { entries: spent } });
-	assert.equal(cards()[1][4], "in 43k · out 200");
+	assert.equal(cards()[1].length, 4, "title, blank, the tokens row and the bar");
 });
 
 test("labels keep the status line's muted role and sections are split by blank rows only", async () => {
