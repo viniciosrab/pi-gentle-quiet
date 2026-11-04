@@ -104,6 +104,18 @@ test("on a plan the Context card's last row shows the plan windows in place of t
 	assert.ok(painted(row, "text", "38%"));
 });
 
+test("when the row is too long for the card the plan windows stay whole and the tokens spent are cut with … first", async () => {
+	// The column's width is fixed: four windows and a large count make the row longer than the card. A provider
+	// of its own, so the Claude readings of the tests above do not win over this one.
+	const entries = [{ type: "message", message: { role: "assistant", usage: { input: 12_000_000, output: 48_000, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } } } }];
+	const { cards, emit } = await wide({ session: { entries, model: { id: "claude-opus-5-5", provider: "status-card-long-plan", reasoning: true } } });
+	const codex = { "x-codex-primary-used-percent": "100", "x-codex-primary-window-minutes": "300", "x-codex-secondary-used-percent": "100", "x-codex-secondary-window-minutes": "10080" };
+	await emit("after_provider_response", { status: 200, headers: { ...planHeaders, ...codex } });
+	const row = cards()[1][4];
+	assert.equal(row, "in 12M · out…  plan 5h 38% · wk 31% · 5h 100% · wk 100%");
+	assert.equal([...row].length, 55, "the inner width of the column's cards");
+});
+
 test("a plan window near its limit warns like the gauge", async () => {
 	const { emit, raw } = await onPlan();
 	await emit("after_provider_response", { status: 200, headers: { ...planHeaders, "anthropic-ratelimit-unified-5h-utilization": "0.85", "anthropic-ratelimit-unified-7d-utilization": "0.96" } });
