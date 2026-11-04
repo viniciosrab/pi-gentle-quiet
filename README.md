@@ -142,7 +142,8 @@ same; only how it is drawn changes.
   turning Gentle Shell back on.
 - **Gentle Shell's image paste.** `ctrl+v` with an image in the clipboard puts an `[Image#1]` chip in the
   draft instead of a temp-file path. The chip is listed above the prompt with its size, and its
-  thumbnail when Pi is idle in a terminal that draws images. On submit, it goes to the model as an image.
+  thumbnail when Pi is idle in a terminal that draws images and the side column is not shown (Pi drops the column on a
+  row that carries an image, which would cut holes in its borders). On submit, it goes to the model as an image.
 
 ## Install
 

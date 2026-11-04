@@ -854,7 +854,9 @@ function attachImagePaste(editor, tui) {
 
 // The chips still in the draft, above the prompt at Pi's margin: " [Image#1] png · 1280×720 · 84 KB",
 // with the thumbnail under it while idle in a terminal with an image protocol (Kitty re-sends the whole
-// image whenever content above it moves, so while the agent streams the labels stand alone).
+// image whenever content above it moves, so while the agent streams the labels stand alone). Beside the side
+// column the labels stand alone too: Pi drops the column's cells on a row that carries an image (pi-tui's
+// compositeTuiLine returns an image line as it is), which cut holes in the column's card borders.
 function imagesWidget(t) {
 	const previews = new Map();
 	return {
@@ -863,7 +865,7 @@ function imagesWidget(t) {
 			const shown = imagePaste.attachments.referenced(liveEditor?.getText?.() ?? "");
 			for (const id of previews.keys()) if (!shown.some((attachment) => attachment.id === id)) previews.delete(id);
 			if (shown.length === 0) return [];
-			const draw = typeof PiTui.Image === "function" && !!PiTui.getCapabilities?.()?.images && !!liveCtx?.isIdle?.();
+			const draw = typeof PiTui.Image === "function" && !!PiTui.getCapabilities?.()?.images && !!liveCtx?.isIdle?.() && !sidebar.active;
 			const warning = acceptsImages(liveCtx?.model) ? "" : fg(t, "warning", " · not sent: the current model does not accept images");
 			const rows = [];
 			for (const attachment of shown) {

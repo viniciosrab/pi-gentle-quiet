@@ -199,3 +199,28 @@ test("without gentle-pi's image files Pi's own paste stays in place", async () =
 		writeLib();
 	}
 });
+
+// Pi composes the side column into each row of the screen, but drops it on a row that carries an image (pi-tui's
+// compositeTuiLine returns an image line as it is): a thumbnail beside the column cut a hole in its card borders.
+test("with the side column shown the chips stand alone, without thumbnails; without it the thumbnails come back", async () => {
+	globalThis.testImageProtocol = "kitty";
+	try {
+		const { editor, widgets, ctx, footer } = await session();
+		editor.onPasteImage();
+		await flush();
+		ctx.isIdle = () => true;
+		const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
+		const native = { type: "vstack", entries: [] };
+		const root = { render: () => [], [NODE]: () => native };
+		const tui = { terminal: { columns: 180, rows: 40 }, mode: "fullscreen", layoutRoot: root, requestRender() {} };
+		const component = footer()?.(tui, theme, { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
+		assert.equal(root[NODE]().type, "hstack", "the side column is on");
+		assert.deepEqual(lines(widget(widgets)), [" [Image#1] png · 4 B"], "no image row beside the column");
+		tui.terminal.columns = 60; // too narrow for the column: Pi's own layout again
+		root[NODE]();
+		assert.deepEqual(lines(widget(widgets)), [" [Image#1] png · 4 B", " <image image/png 40x6>", " "]);
+		component?.dispose?.();
+	} finally {
+		delete globalThis.testImageProtocol;
+	}
+});
