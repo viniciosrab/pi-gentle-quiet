@@ -212,13 +212,20 @@ test("with the side column shown the chips stand alone, without thumbnails; with
 		const NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
 		const native = { type: "vstack", entries: [] };
 		const root = { render: () => [], [NODE]: () => native };
-		const tui = { terminal: { columns: 180, rows: 40 }, mode: "fullscreen", layoutRoot: root, requestRender() {} };
+		// Too narrow for the column at first: Pi's own layout.
+		const tui = { terminal: { columns: 60, rows: 40 }, mode: "fullscreen", layoutRoot: root, requestRender() {} };
 		const component = footer()?.(tui, theme, { getGitBranch: () => "main", getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
+		// One widget, as Pi keeps it, through each layout: its thumbnail already drawn when the column opens.
+		const shown = widget(widgets);
+		const thumbnail = [" [Image#1] png · 4 B", " <image image/png 40x6>", " "];
+		assert.equal(root[NODE]().type, "vstack");
+		assert.deepEqual(lines(shown), thumbnail, "no column: the thumbnail under the chip");
+		tui.terminal.columns = 180;
 		assert.equal(root[NODE]().type, "hstack", "the side column is on");
-		assert.deepEqual(lines(widget(widgets)), [" [Image#1] png · 4 B"], "no image row beside the column");
-		tui.terminal.columns = 60; // too narrow for the column: Pi's own layout again
-		root[NODE]();
-		assert.deepEqual(lines(widget(widgets)), [" [Image#1] png · 4 B", " <image image/png 40x6>", " "]);
+		assert.deepEqual(lines(shown), [" [Image#1] png · 4 B"], "no image row beside the column");
+		tui.terminal.columns = 60;
+		assert.equal(root[NODE]().type, "vstack", "Pi's own layout again");
+		assert.deepEqual(lines(shown), thumbnail, "the thumbnail comes back");
 		component?.dispose?.();
 	} finally {
 		delete globalThis.testImageProtocol;
