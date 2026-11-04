@@ -40,7 +40,8 @@ same; only how it is drawn changes.
   model under a label column, then an **MCP** row with the MCP servers online out of those installed
   (`MCP   3/3`, in the warning color while one is offline), then a blank row and the statuses, one per row. **Context** has the tokens in
   use with the percent (`56k / 200k tokens   28%`), a bar across the card in the gauge's color,
-  and the tokens spent with the cost (the plan usage is in the PROF tab). **Music** follows them while
+  and the tokens spent (`in 43k · out 200`, every token sent with the cache, then the output) with, on the right, your plan usage (`plan 5h 38% · wk 31%`, a window from 80% in the
+  gauge's warning colors) or, with no plan usage, the cost; the PROF tab has each window with its reset. **Music** follows them while
   [cliamp](https://github.com/bjarneo/cliamp) is playing: the category playing (`󰲸 Lofi · 120 tracks ▾`), the
   artist and the track on one row (`HoliznaCC0 · Shimmer ( LoFi , Chill )`, cut with `…` when it does not fit),
   cliamp's seek bar (`━━●───`; a click jumps to that point of the track), the time and the controls: shuffle
