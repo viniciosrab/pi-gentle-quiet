@@ -3,9 +3,10 @@
 // around a title row, a muted subtitle, then the body and the footer "Esc close · ↑↓ PgUp/PgDn Home/End · following".
 // The body comes from a source that the pop-up asks again every `interval` ms (500 by default) while it is open; a
 // change redraws it. It follows the end while the user has not scrolled up; ↑↓ a row, PgUp/PgDn a page, Home/End
-// the ends, the wheel three rows; End or f follows again, as does scrolling back down to the end. Esc or q closes
-// it, and so does a click anywhere outside it (that click does nothing else). Its height stays the same while the
-// body grows, so it does not jump as the work goes on.
+// the ends, the wheel three rows; End or f follows again, as does scrolling back down to the end. A body longer than
+// the view has a scrollbar before the right stroke (./scrollbar.ts), drawn a column narrower, to drag or click;
+// dragging it to the end follows again too. Esc or q closes it, and so does a click anywhere outside it (that click
+// does nothing else). Its height stays the same while the body grows, so it does not jump as the work goes on.
 //
 // A subagent's pop-up reads gentle-pi's presence file for the session (./run-data.ts): the title is gentle-pi's
 // task header (agent · status · model · elapsed), the subtitle the task's label, the body its thread drawn with
@@ -23,6 +24,7 @@ import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import * as PiTui from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { readActivity, readTail, SessionLog } from "./run-data.ts";
+import { Scrollbar } from "./scrollbar.ts";
 import { previewWidthFor } from "./tree-preview.ts";
 
 const CHROME = 7; // top, title, subtitle, blank row, blank row over the footer, footer, bottom
@@ -71,7 +73,8 @@ function closeOnOutsidePress(tui, popup) {
 	if (typeof original !== "function") return () => {};
 	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
 	const wrapped = function (event) {
-		const routed = original.call(this, event);
+		// The pointer leaving the pop-up ends its scrollbar's hover: Pi sends it nothing then.
+		const routed = popup.scrollbar ? popup.scrollbar.routed(() => original.call(this, event), () => popup.redraw()) : original.call(this, event);
 		if (routed?.hit || event?.type !== "press" || popup.closed) return routed;
 		try {
 			const top = tui.getTopmostVisibleOverlay?.();
@@ -108,6 +111,8 @@ class LivePopup {
 		this.closed = false;
 		this.view = undefined;
 		this.drawn = undefined; // { view, width, rows } of the last body drawn
+		this.scrollbar = new Scrollbar();
+		this.barFor = undefined; // { view, inner, page, bar }: whether the body needs the scrollbar
 		this.refresh(false);
 		this.timer = setInterval(() => this.refresh(), interval ?? INTERVAL_MS);
 		this.timer.unref?.();
@@ -156,6 +161,15 @@ class LivePopup {
 		return this.drawn.rows;
 	}
 
+	// Whether the body does not fit at `inner` columns: drawn one column narrower, as it is beside the scrollbar
+	// (narrower only adds rows). Asked again only when the view, the width or the page changes.
+	needsBar(inner) {
+		const page = this.page();
+		const known = this.barFor;
+		if (known?.view !== this.view || known.inner !== inner || known.page !== page) this.barFor = { view: this.view, inner, page, bar: this.rows(inner - 1).length > page };
+		return this.barFor.bar;
+	}
+
 	last() {
 		return Math.max(0, (this.drawn?.rows.length ?? 0) - this.page());
 	}
@@ -169,6 +183,7 @@ class LivePopup {
 	}
 
 	followEnd() {
+		this.scrollbar.stop(); // following moves the view at the next render: the glide must not fight it
 		this.follow = true;
 		this.redraw();
 		return true;
@@ -178,6 +193,7 @@ class LivePopup {
 		if (this.closed) return;
 		this.closed = true;
 		clearInterval(this.timer);
+		this.scrollbar.stop();
 		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
@@ -194,6 +210,8 @@ class LivePopup {
 	}
 
 	handleMouse(event) {
+		const bar = this.scrollbar.handleMouse(event, this.top, (top) => this.scrollTo(top), () => this.top);
+		if (bar) return bar;
 		if (event?.type !== "wheel" || !event.wheelDelta) return undefined;
 		this.scrollTo(this.top + (event.wheelDelta > 0 ? WHEEL_LINES : -WHEEL_LINES));
 		return { handled: true, render: true };
@@ -201,9 +219,12 @@ class LivePopup {
 
 	render(width) {
 		const inner = Math.max(1, width - 4);
-		const fit = (row) => {
-			const cut = visibleWidth(row) > inner ? truncateToWidth(row, inner, "…") : row;
-			return `${paint(this.theme, "border", EDGE.left)} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${paint(this.theme, "border", EDGE.right)}`;
+		// A row between the side strokes; `cell`, the scrollbar's, takes the column before the right stroke, a blank
+		// column apart from the row.
+		const fit = (row, cell) => {
+			const room = cell === undefined ? inner : inner - 1;
+			const cut = visibleWidth(row) > room ? truncateToWidth(row, room, "…") : row;
+			return `${paint(this.theme, "border", EDGE.left)} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))}${cell ?? " "}${paint(this.theme, "border", EDGE.right)}`;
 		};
 		// Plain text cut before it is painted, so the color reaches the "…".
 		const text = (role, plain, strong = false) => {
@@ -212,12 +233,15 @@ class LivePopup {
 		};
 		const page = this.page();
 		let body;
+		let bar = [];
 		let footer = "Esc close";
 		try {
-			const rows = this.rows(inner);
+			const rows = this.rows(this.view && this.needsBar(inner) ? inner - 1 : inner);
 			if (this.follow) this.top = this.last();
 			this.top = Math.max(0, Math.min(this.top, this.last()));
 			body = this.view ? rows.slice(this.top, this.top + page) : [text("dim", "Reading…")];
+			// Under top, title, subtitle and the blank row.
+			bar = (this.view && this.scrollbar.place({ column: width - 2, trackTop: 4, height: page, total: rows.length, top: this.top }, this.theme)) || [];
 			footer += ` · ↑↓ PgUp/PgDn Home/End · ${this.follow ? "following" : "f follow"}`;
 		} catch {
 			body = [text("warning", "Cannot draw this thread")];
@@ -228,7 +252,7 @@ class LivePopup {
 			fit(text("toolTitle", this.view?.title ?? "", true)),
 			fit(text("muted", this.view?.subtitle ?? "")),
 			fit(""),
-			...body.map(fit),
+			...body.map((row, index) => fit(row, bar[index])),
 			fit(""), // the footer apart from the thread
 			fit(text("dim", footer)),
 			paint(this.theme, "border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
@@ -241,6 +265,7 @@ class LivePopup {
 	dispose() {
 		this.closed = true;
 		clearInterval(this.timer);
+		this.scrollbar.stop();
 		this.unwrapMouse();
 	}
 }

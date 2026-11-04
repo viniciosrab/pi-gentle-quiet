@@ -192,7 +192,7 @@ test("the popup draws the task header, its label, the dropped line and the threa
 	assert.match(out.at(-1), /^🭼▁+🭿$/u);
 	assert.match(out[1], /^▏ gentle-ai-worker · running · claude-bridge\/claude-opus-5-5 · 7\ds +▕$/);
 	assert.match(out[2], /^▏ subagent popup from Agents card +▕$/);
-	const body = out.slice(4, -2).map((row) => row.slice(2, -2).trimEnd());
+	const body = out.slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd());
 	const start = body.indexOf("… 3 earlier items not kept");
 	assert.ok(start >= 0, "the dropped items line");
 	assert.deepEqual(body.slice(start, start + 12), [
@@ -222,7 +222,7 @@ test("without gentle-pi's renderer the thread is drawn by the fallback, the same
 	const { text } = popup({ lib: null });
 	const out = text(80);
 	assert.match(out[1], /^▏ gentle-ai-worker · running · claude-bridge\/claude-opus-5-5 · 1m1\ds +▕$/);
-	const body = out.map((row) => row.slice(2, -2).trimEnd());
+	const body = out.map((row) => [...row].slice(2, -2).join("").trimEnd());
 	for (const row of ["Thinking", "  I'm going to begin by reading the spec.", "Tool · bash · Complete", "  Output", "    f461ca4 style(sidebar)", "Tool · read · Running"]) assert.ok(body.includes(row), row);
 	assert.deepEqual(fallbackThreadItem({ kind: "tool", name: "x", output: "", running: false, isError: true }, theme, 40).map(plain), ["Tool · x · Error"]);
 	assert.deepEqual(fallbackThreadItem({ kind: "weird" }, theme, 40), []);
@@ -233,7 +233,7 @@ const LONG = [{ summary: summary("w1", "gentle-ai-worker", "long job", "running"
 
 test("the popup follows the end; scrolling up stops following, End or f resumes", () => {
 	const { component, text } = popup({ tasks: LONG });
-	const shown = () => text(80).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	const shown = () => text(80).slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd()).filter(Boolean);
 	const lastLine = () => shown().filter((row) => row.startsWith("  line")).at(-1);
 	assert.equal(shown().at(-1), "  line 30", "the end of the thread");
 	assert.match(text(80).at(-2), /following/);
@@ -259,7 +259,7 @@ test("the popup follows the end; scrolling up stops following, End or f resumes"
 
 test("the popup re-reads the file and redraws: it keeps following the end, or keeps its place when scrolled up", () => {
 	const { component, text, update, calls } = popup({ tasks: LONG });
-	const shown = () => text(80).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	const shown = () => text(80).slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd()).filter(Boolean);
 	update([{ ...LONG[0], thread: thread(longThread(34)) }]);
 	const before = calls.renders.length;
 	component.refresh();
@@ -597,7 +597,7 @@ function jobPopup({ job, log = "first\nsecond\n", rows = 30 } = {}) {
 	const opened = openJobPopup(fake.ctx, { file, id: job.id, job: () => current, interval: 60_000 });
 	const component = opened ? fake.component() : undefined;
 	const text = (width = 80) => component.render(width).map(plain);
-	const body = (width = 80) => text(width).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	const body = (width = 80) => text(width).slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd()).filter(Boolean);
 	return { ...fake, opened, component, file, text, body, set: (next) => (current = next) };
 }
 
@@ -967,7 +967,7 @@ function sessionPopup({ finder, record, tasks = TASKS, drawTool = stubTool, rows
 	const fake = fakeCtx(rows);
 	const opened = openAgentPopup(fake.ctx, { file: record ? undefined : file, taskId: "w1", lib: realLib, interval: 60_000, finder, record, drawTool });
 	const component = opened ? fake.component() : undefined;
-	const body = () => component.render(80).map(plain).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()).filter(Boolean);
+	const body = () => component.render(80).map(plain).slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd()).filter(Boolean);
 	return { ...fake, opened, component, body, file };
 }
 
@@ -1079,7 +1079,7 @@ test("a running subagent's popup draws its session's tool calls with the main vi
 	const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 	const out = opened[0].factory(popupTui, theme, {}, () => {}).render(80).map(plain);
 	assert.match(out[1], /gentle-ai-worker · running/);
-	const body = out.slice(4, -2).map((row) => row.slice(2, -2).trimEnd());
+	const body = out.slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd());
 	const text = (value, extra = {}) => ({ content: [{ type: "text", text: value }], ...extra });
 	const expected = [
 		...mainRows(tool, "bash", { command: "git status --short" }, text(" M a.ts\n M b.ts"), { id: "toolu_main1", durationMs: 1200 }),
@@ -1191,7 +1191,7 @@ async function t35Popup(sessionId, p, calls) {
 		await settle(); // gentle-pi's renderer loads once
 		const popupTui = { terminal: { rows: 80, columns: 120 }, requestRender() {} };
 		const out = card.opened.at(-1).factory(popupTui, theme, {}, () => {}).render(80);
-		return { painted: out, body: out.map(plain).slice(4, -2).map((row) => row.slice(2, -2).trimEnd()) };
+		return { painted: out, body: out.map(plain).slice(4, -2).map((row) => [...row].slice(2, -2).join("").trimEnd()) };
 	};
 	return { ...card, draw };
 }

@@ -9,11 +9,13 @@
 // click on a track plays it; f toggles its ♥ (in Favorites an un-favorited track stays until the list is opened
 // again); Esc, ← or h go back to the categories. ↑↓ or k/j and PgUp/PgDn move on
 // both levels; q, Esc on the categories, or a click anywhere outside the pop-up (that click does nothing else)
-// closes it without playing.
+// closes it without playing. A level with more rows than fit has a scrollbar before the right stroke
+// (./scrollbar.ts): dragging or clicking it scrolls that list and leaves the cursor where it is.
 // @ts-nocheck
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { PICKER_MAX_WIDTH, pressed } from "./prof-picker.ts";
+import { Scrollbar } from "./scrollbar.ts";
 
 const MAX_CHOICES = 16; // the Favorites and cliamp's 15 categories
 const CHROME = 4; // top, title, footer, bottom
@@ -36,7 +38,8 @@ function closeOnOutsidePress(tui, picker) {
 	if (typeof original !== "function") return () => {};
 	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
 	const wrapped = function (event) {
-		const routed = original.call(this, event);
+		// The pointer leaving the pop-up ends its scrollbar's hover: Pi sends it nothing then.
+		const routed = picker.scrollbar ? picker.scrollbar.routed(() => original.call(this, event), () => picker.redraw()) : original.call(this, event);
 		if (routed?.hit || event?.type !== "press" || picker.closed) return routed;
 		try {
 			const top = tui.getTopmostVisibleOverlay?.();
@@ -67,6 +70,7 @@ class Picker {
 		this.inside = undefined; // { playlist, cursor, top } while a list's tracks show
 		this.tracks = new Map(); // "provider/id" -> tracks, null when they could not be read, undefined while asked
 		this.closed = false;
+		this.scrollbar = new Scrollbar();
 		this.unwrapMouse = closeOnOutsidePress(tui, this);
 		this.move(playlists.findIndex((playlist) => this.playing(playlist)));
 		const opened = playlists.find((playlist) => playlist.provider === "cliamp" && playlist.id === open);
@@ -141,6 +145,13 @@ class Picker {
 		this.redraw();
 	}
 
+	// The scrollbar moves the level's view only: the cursor stays on its row.
+	scrollTo(top) {
+		const view = this.inside ?? this.outer;
+		view.top = Math.max(0, Math.min(top, this.list().length - this.page()));
+		this.redraw();
+	}
+
 	// The track playing when this is the category playing, else the first.
 	firstTrack() {
 		const tracks = this.list();
@@ -149,6 +160,7 @@ class Picker {
 	}
 
 	enter(playlist) {
+		this.scrollbar.stop(); // another list: the glide was the last one's
 		this.inside = { playlist, cursor: 0, top: 0 };
 		if (this.tracks.has(key(playlist))) return this.firstTrack();
 		this.tracks.set(key(playlist), undefined);
@@ -180,6 +192,7 @@ class Picker {
 	}
 
 	back() {
+		this.scrollbar.stop();
 		this.inside = undefined;
 		this.redraw();
 	}
@@ -187,6 +200,7 @@ class Picker {
 	close() {
 		if (this.closed) return;
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
@@ -216,6 +230,8 @@ class Picker {
 
 	handleMouse(event) {
 		const view = this.inside ?? this.outer;
+		const bar = this.scrollbar.handleMouse(event, view.top, (top) => this.scrollTo(top), () => view.top);
+		if (bar) return bar;
 		if (event?.type === "wheel" && event.wheelDelta) {
 			this.move(view.cursor + (event.wheelDelta > 0 ? 1 : -1));
 			return { handled: true, render: true };
@@ -230,9 +246,13 @@ class Picker {
 		const inner = Math.max(1, width - 4);
 		const cut = (plain, room) => (visibleWidth(plain) > room ? truncateToWidth(plain, Math.max(1, room), "…") : plain);
 		const text = (role, plain, bold = false, room = inner) => this.paint(role, bold ? this.bold(cut(plain, room)) : cut(plain, room));
-		const fit = (row) => `${this.paint("border", EDGE.left)} ${row}${" ".repeat(Math.max(0, inner - visibleWidth(row)))} ${this.paint("border", EDGE.right)}`;
+		// `cell`, the scrollbar's, takes the column before the right stroke.
+		const fit = (row, cell) => `${this.paint("border", EDGE.left)} ${row}${" ".repeat(Math.max(0, inner - visibleWidth(row)))}${cell ?? " "}${this.paint("border", EDGE.right)}`;
 		const view = this.inside ?? this.outer;
 		const list = this.list();
+		// Under top and title.
+		const bar = this.scrollbar.place({ column: width - 2, trackTop: 2, height: this.page(), total: list.length, top: view.top }, this.theme) ?? [];
+		const room = bar.length ? inner - 1 : inner; // a blank column apart from the scrollbar
 		const rows = [];
 		for (let index = view.top; index < Math.min(list.length, view.top + this.page()); index++) {
 			const mark = index === view.cursor ? "▸" : " ";
@@ -240,7 +260,7 @@ class Picker {
 				const playlist = list[index];
 				const current = this.playing(playlist);
 				const heart = playlist.provider === "local" ? `${this.paint("error", LOVED)} ` : "";
-				const label = cut(`${current ? "● " : ""}${playlist.name} · ${tracks(this.count(playlist))}`, inner - 2 - (heart ? 2 : 0));
+				const label = cut(`${current ? "● " : ""}${playlist.name} · ${tracks(this.count(playlist))}`, room - 2 - (heart ? 2 : 0));
 				const role = index === view.cursor ? "accent" : current ? "text" : "muted";
 				const paintRole = (plain) => this.paint(role, index === view.cursor ? this.bold(plain) : plain);
 				rows.push(`${paintRole(mark)} ${heart}${paintRole(label)}`);
@@ -252,8 +272,8 @@ class Picker {
 			const head = `${track.path && track.path === this.currentPath ? "● " : ""}${track.title || "Unknown track"}`;
 			const label = track.artist ? `${head} · ${track.artist}` : head;
 			const body =
-				index === view.cursor || visibleWidth(label) > inner - 4
-					? text(index === view.cursor ? "accent" : "text", label, index === view.cursor, inner - 4)
+				index === view.cursor || visibleWidth(label) > room - 4
+					? text(index === view.cursor ? "accent" : "text", label, index === view.cursor, room - 4)
 					: `${this.paint("text", head)}${track.artist ? `${this.paint("dim", " · ")}${this.paint("muted", track.artist)}` : ""}`;
 			rows.push(`${index === view.cursor ? this.paint("accent", mark) : mark} ${loved ? this.paint("error", LOVED) : this.paint("dim", UNLOVED)} ${body}`);
 		}
@@ -265,7 +285,7 @@ class Picker {
 		return [
 			this.paint("border", `${EDGE.topLeft}${EDGE.top.repeat(inner + 2)}${EDGE.topRight}`),
 			fit(text("toolTitle", `cliamp · ${this.inside ? this.inside.playlist.name : "Playlists"}`, true)),
-			...rows.map(fit),
+			...rows.map((row, index) => fit(row, bar[index])),
 			fit(text("dim", this.inside ? `Esc ← back · f ${LOVED} · ↑↓ · enter play${more}` : `Esc close · ↑↓ · enter pick${more}`)),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
@@ -275,6 +295,7 @@ class Picker {
 
 	dispose() {
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 	}
 }

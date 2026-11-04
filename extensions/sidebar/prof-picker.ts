@@ -3,10 +3,12 @@
 // (./tree-preview.ts), around "Model · <agent> · <profile>", a filter row, the choices (the current one marked
 // ●, the cursor ▸ in accent bold) and "Esc close · ↑↓ · enter pick". Typing filters the list, Backspace
 // undoes it; ↑↓ PgUp/PgDn move, Enter or a click on a choice picks it; Esc, or a click anywhere outside the
-// pop-up (that click does nothing else), closes it without picking.
+// pop-up (that click does nothing else), closes it without picking. More choices than rows get a scrollbar before
+// the right stroke (./scrollbar.ts): dragging or clicking it scrolls the list and leaves the cursor where it is.
 // @ts-nocheck
 
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Scrollbar } from "./scrollbar.ts";
 
 export const PICKER_MAX_WIDTH = 55;
 const MAX_CHOICES = 12;
@@ -34,7 +36,8 @@ function closeOnOutsidePress(tui, picker) {
 	if (typeof original !== "function") return () => {};
 	const own = Object.hasOwn(tui, "dispatchMouseToOverlay");
 	const wrapped = function (event) {
-		const routed = original.call(this, event);
+		// The pointer leaving the pop-up ends its scrollbar's hover: Pi sends it nothing then.
+		const routed = picker.scrollbar ? picker.scrollbar.routed(() => original.call(this, event), () => picker.redraw()) : original.call(this, event);
 		if (routed?.hit || event?.type !== "press" || picker.closed) return routed;
 		try {
 			const top = tui.getTopmostVisibleOverlay?.();
@@ -65,6 +68,7 @@ class Picker {
 		this.cursor = Math.max(0, choices.indexOf(current));
 		this.top = 0;
 		this.closed = false;
+		this.scrollbar = new Scrollbar();
 		this.unwrapMouse = closeOnOutsidePress(tui, this);
 	}
 
@@ -112,7 +116,14 @@ class Picker {
 		this.redraw();
 	}
 
+	// The scrollbar moves the view only: the cursor stays on its choice.
+	scrollTo(top) {
+		this.top = Math.max(0, Math.min(top, this.shown().length - this.page()));
+		this.redraw();
+	}
+
 	filter(query) {
+		this.scrollbar.stop(); // another list: the glide was the last one's
 		this.query = query;
 		this.cursor = 0;
 		this.top = 0;
@@ -122,6 +133,7 @@ class Picker {
 	close() {
 		if (this.closed) return;
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 		this.done(undefined);
 		this.redraw(true); // repaint every cell behind the closed overlay
@@ -145,6 +157,8 @@ class Picker {
 	}
 
 	handleMouse(event) {
+		const bar = this.scrollbar.handleMouse(event, this.top, (top) => this.scrollTo(top), () => this.top);
+		if (bar) return bar;
 		if (event?.type === "wheel" && event.wheelDelta) {
 			this.move(this.cursor + (event.wheelDelta > 0 ? 1 : -1));
 			return { handled: true, render: true };
@@ -158,18 +172,22 @@ class Picker {
 
 	render(width) {
 		const inner = Math.max(1, width - 4);
-		const text = (role, plain, bold = false) => {
-			const cut = visibleWidth(plain) > inner ? truncateToWidth(plain, inner, "…") : plain;
+		const text = (role, plain, bold = false, room = inner) => {
+			const cut = visibleWidth(plain) > room ? truncateToWidth(plain, room, "…") : plain;
 			return this.paint(role, bold ? this.bold(cut) : cut);
 		};
-		const fit = (row) => `${this.paint("border", EDGE.left)} ${row}${" ".repeat(Math.max(0, inner - visibleWidth(row)))} ${this.paint("border", EDGE.right)}`;
+		// `cell`, the scrollbar's, takes the column before the right stroke.
+		const fit = (row, cell) => `${this.paint("border", EDGE.left)} ${row}${" ".repeat(Math.max(0, inner - visibleWidth(row)))}${cell ?? " "}${this.paint("border", EDGE.right)}`;
 		const shown = this.shown();
+		// Under top, title and the filter row.
+		const bar = this.scrollbar.place({ column: width - 2, trackTop: 3, height: this.page(), total: shown.length, top: this.top }, this.theme) ?? [];
+		const room = bar.length ? inner - 1 : inner; // a blank column apart from the scrollbar
 		const rows = [];
 		for (let index = this.top; index < Math.min(shown.length, this.top + this.page()); index++) {
 			const choice = shown[index];
 			const mark = choice === this.current ? "● " : "";
 			const label = `${index === this.cursor ? "▸" : " "} ${mark}${choice}`;
-			rows.push(index === this.cursor ? text("accent", label, true) : text(choice === this.current ? "text" : "muted", label));
+			rows.push(index === this.cursor ? text("accent", label, true, room) : text(choice === this.current ? "text" : "muted", label, false, room));
 		}
 		if (!shown.length) rows.push(text("dim", "  no model matches"));
 		const more = shown.length > this.page() ? ` · ${this.cursor + 1}/${shown.length}` : "";
@@ -177,7 +195,7 @@ class Picker {
 			this.paint("border", `${EDGE.topLeft}${EDGE.top.repeat(inner + 2)}${EDGE.topRight}`),
 			fit(text("toolTitle", this.title, true)),
 			fit(this.query ? text("text", `filter: ${this.query}▏`) : text("dim", "type to filter")),
-			...rows.map(fit),
+			...rows.map((row, index) => fit(row, bar[index])),
 			fit(text("dim", `Esc close · ↑↓ · enter pick${more}`)),
 			this.paint("border", `${EDGE.bottomLeft}${EDGE.bottom.repeat(inner + 2)}${EDGE.bottomRight}`),
 		];
@@ -187,6 +205,7 @@ class Picker {
 
 	dispose() {
 		this.closed = true;
+		this.scrollbar.stop();
 		this.unwrapMouse();
 	}
 }
