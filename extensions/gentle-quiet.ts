@@ -2200,11 +2200,53 @@ async function loadJobsCard() {
 	if (!files.every((file) => existsSync(file))) return undefined;
 	try {
 		const [state, widget] = await Promise.all(files.map((file) => import(pathToFileURL(file).href)));
-		if (typeof state.JOBS_SIDEBAR_EVENT !== "string" || typeof state.isJobsSidebarSnapshot !== "function" || typeof state.jobsCollapseKey !== "function" || typeof widget.renderJobsCard !== "function") return undefined;
-		return { ...state, renderJobsCard: widget.renderJobsCard };
+		if (typeof state.JOBS_SIDEBAR_EVENT !== "string" || typeof state.isJobsSidebarSnapshot !== "function" || typeof state.jobsCollapseKey !== "function") return undefined;
+		const renderJobsCard = typeof widget.renderJobsCard === "function" ? widget.renderJobsCard : await jobsCardFromParts(widget);
+		return renderJobsCard ? { ...state, renderJobsCard } : undefined;
 	} catch {
 		return undefined; // gentle-pi moved or changed: the status line count rather than a broken card
 	}
+}
+
+// gentle-pi 4.6.0 dropped renderJobsCard for its rail's `▾ JOBS` section (renderJobsSection), a different shape.
+// The card is put back together the way gentle-pi 4.5 drew it: widgetJobs' list as a panel card (lib/shell-card.ts),
+// one row per job (glyph, label, elapsed right-aligned), with the collapse control on the title.
+async function jobsCardFromParts(widget) {
+	const files = ["shell-card.ts", "background-jobs-tools.ts"].map((name) => path.join(GENTLE_PI_LIB, name));
+	if (typeof widget.widgetJobs !== "function" || !files.every((file) => existsSync(file))) return undefined;
+	const [card, tools] = await Promise.all(files.map((file) => import(pathToFileURL(file).href)));
+	const tone = card.CARD_TONE?.INFO;
+	if (typeof card.renderCard !== "function" || typeof card.panelInnerWidth !== "function" || tone === undefined || typeof tools.formatJobDuration !== "function") return undefined;
+	const glyph = widget.JOBS_GLYPH ?? tools.JOB_GLYPH ?? "⧗";
+	const mark = (job) => {
+		if (job.status === "stopped") return ["–", "dim"];
+		if (job.status === "failed") return ["✗", "error"];
+		if (job.status === "exited") return job.exitCode === 0 ? ["✓", "success"] : ["✗", "error"];
+		return [glyph, "accent"];
+	};
+	const counts = (jobs) => {
+		const running = jobs.filter((job) => job.status === undefined).length;
+		const finished = jobs.length - running;
+		return [running && `${running} running`, finished && `${finished} finished`].filter(Boolean).join(" · ");
+	};
+	const clean = (text) => String(text).replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ");
+	return (jobs, t, width, now, options) => {
+		const shown = widget.widgetJobs(jobs, now);
+		if (shown.length === 0) return [];
+		const inner = card.panelInnerWidth(t, width, tone);
+		const body = (options.collapsed ? shown.slice(0, 1) : shown).map((job) => {
+			const [icon, role] = mark(job);
+			const elapsed = tools.formatJobDuration(Math.max(0, (job.status === undefined ? now : job.endedAt ?? now) - job.startedAt));
+			const label = truncateToWidth(clean(job.label), Math.max(1, inner - visibleWidth(elapsed) - 3), "…");
+			const head = `${t.fg(role, icon)}  ${t.fg("text", label)}`;
+			return `${head}${t.fg("dim", " ".repeat(Math.max(1, inner - visibleWidth(head) - visibleWidth(elapsed))) + elapsed)}`;
+		});
+		if (options.collapsed && shown.length > 1) body.push(t.fg("dim", `… ${shown.length - 1} more`));
+		const control = `${options.collapsed ? "▸" : "▾"} ${width >= 28 ? (options.collapsed ? "Expand" : "Collapse") : ""}`.trimEnd();
+		const title = options.collapseControl ? `Jobs ${t.fg("accent", control)}` : "Jobs";
+		const hint = options.collapsed && options.collapseKey ? `${options.collapseKey} expand` : undefined;
+		return card.renderCard({ title, subtitle: counts(shown), body, tone, glyph }, t, width, { expanded: true, hint, panel: true });
+	};
 }
 
 // gentle-pi draws its hourglass on the title and on every running job. The title gets the configured still
