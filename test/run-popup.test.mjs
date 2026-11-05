@@ -398,7 +398,8 @@ test("a click outside the popup closes it and reaches nothing under it; inside i
 
 const presenceRoot = presenceDir(agentDir);
 // gentle-pi's Agents card as gentle-agents draws it: title, one row per task with its metadata right-aligned
-// in the same column, then "… N more". Its own clicks only act on the title row.
+// in the same column, then "… N more". Its own clicks (4.6) count rows of these lines: the title row
+// collapses the card and any row below it opens the /gentle:agents list.
 const CARD = [
 	"   ❀ Agents ▾ Collapse  1 active · 1 queued · 1 done",
 	"   ◐  gentle-ai-worker   subagent popup from Agents card    claude-opus-5-5 · high · 12k · 1m12s",
@@ -412,7 +413,11 @@ async function agentsCard(sessionId, { tasks = TASKS, custom, card: drawn = CARD
 	const opened = [];
 	const loaded = await load({ mode: "tui", session: { id: sessionId }, custom: custom !== undefined ? custom : ((factory, options) => (opened.push({ factory, options }), new Promise(() => {}))) });
 	const seen = [];
-	loaded.ui.setWidget("gentle-agents", () => ({ render: () => drawn, handleMouse: (event) => (seen.push(event), { handled: true, from: "gentle-pi" }) }));
+	const own = (event) => {
+		if (event.button !== "left" || event.type !== "click" || event.y < 0 || event.y >= drawn.length) return { handled: true, from: "gentle-pi" };
+		return { handled: true, from: "gentle-pi", action: event.y === 0 ? "collapse" : "list" };
+	};
+	loaded.ui.setWidget("gentle-agents", () => ({ render: () => drawn, handleMouse: (event) => (seen.push(event), own(event)) }));
 	const tui = { terminal: { rows: 30, columns: 120 }, requestRender() {} };
 	const card = loaded.widgets["gentle-agents"](tui, theme);
 	// The first draw asks for the presence file, read on a timer after it; a draw again once it is read, so the
@@ -461,11 +466,30 @@ test("a left click on a ↗ row opens the popup for that task and is not passed 
 	mouse("click", 4);
 	assert.equal(opened.length, 2, "the queued row opens its own popup");
 	assert.match(plain(opened[1].factory(tui, theme, {}, () => {}).render(80)[1]), /gentle-ai-explore · queued/);
-	assert.equal(mouse("click", 1)?.from, "gentle-pi", "the title row still collapses the card");
-	assert.equal(mouse("click", 5)?.from, "gentle-pi", "a finished row");
+	assert.equal(mouse("click", 1)?.action, "collapse", "the title row still collapses the card, on gentle-pi's own title row");
+	assert.equal(seen.at(-1).y, 0);
 	assert.equal(mouse("click", 3, "right")?.from, "gentle-pi", "another button");
 	assert.equal(mouse("wheel", 3)?.from, "gentle-pi");
 	assert.equal(opened.length, 2);
+	assert.deepEqual(sent, []);
+});
+
+test("a click on the Agents card's outline or blank row opens nothing; a row without ↗ opens gentle-pi's list", async () => {
+	const { rows, mouse, seen, opened, sent } = await agentsCard("card-edges");
+	const out = rows();
+	const bottom = out.length - 1;
+	assert.match(out[bottom], /^└─+┘$/);
+	for (const y of [0, 2, bottom]) {
+		for (const type of ["press", "release", "click"]) assert.equal(mouse(type, y)?.handled, true, `row ${y} ${type}`);
+	}
+	assert.deepEqual(seen.filter((event) => event.type === "click"), [], "gentle-pi took none of those clicks");
+	assert.deepEqual(sent, [], "no list");
+	assert.equal(opened.length, 0, "no popup");
+	mouse("click", 5);
+	assert.deepEqual(sent, [["/gentle:agents", { expandPromptTemplates: true }]], "a finished row opens the list");
+	mouse("click", 6);
+	assert.equal(sent.length, 2, "so does … 1 more");
+	assert.equal(opened.length, 0);
 });
 
 test("a click on a ↗ row whose task has left the file opens gentle-pi's list instead", async () => {

@@ -646,10 +646,12 @@ function blockComponent(component, options, t, key) {
 				return (width) => {
 					if (sidebar.active && !inline) return [];
 					if (hits) scheduleRuns();
-					return drawBlock(target, width, options, t, { spaced: true, agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
+					// The Agents card keeps where gentle-pi drew its title, to pass a click on the title there.
+					const source = marked ? { render: (w) => { const lines = target.render(w); marked.rawTitle = rawTitleRow(lines); return lines; } } : target;
+					return drawBlock(source, width, options, t, { spaced: true, agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
 				};
 			}
-			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? target.handleMouse?.(event, ...rest);
+			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? agentsMouse(event, marked, (passed) => target.handleMouse?.(passed, ...rest));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -2458,10 +2460,16 @@ function agentRows(texts) {
 }
 
 // A card's rows with the ↗ on each row `match` names (from their plain texts), and `hits` filled with their row
-// (past `offset` rows of outline) and id. The title row (0) never gets one.
-function markRuns(rows, room, t, { hits, match }, offset) {
+// (past `offset` rows of outline) and id. The title row (0) never gets one. `marked.title` keeps the title's row and
+// `marked.list` the rows that show a task (or "… N more") without a ↗, for clicks that miss the ↗ (agentsMouse).
+const MORE_ROW = /^\s*… \d+ more/u;
+function markRuns(rows, room, t, marked, offset) {
+	const { hits, match } = marked;
 	hits.clear();
-	const ids = match(rows.map((row) => row.replace(SGR, "")));
+	const texts = rows.map((row) => row.replace(SGR, ""));
+	const ids = match(texts);
+	marked.title = rows.length ? offset : undefined;
+	marked.list = new Set(texts.flatMap((text, index) => (index > 0 && ids?.[index] === undefined && (activeRowStatus(text) || finishedRowStatus(text) || MORE_ROW.test(text)) ? [index + offset] : [])));
 	if (!ids) return rows;
 	return rows.map((row, index) => {
 		const id = ids[index];
@@ -2470,6 +2478,29 @@ function markRuns(rows, room, t, { hits, match }, offset) {
 		return withRunMark(row, room, t);
 	});
 }
+
+// gentle-pi's own row of the card's title in the lines it drew: the first that names Agents, else the first
+// that is not blank.
+function rawTitleRow(lines) {
+	const texts = lines.map((line) => String(line).replace(SGR, ""));
+	const named = texts.findIndex((text) => /\bAgents\b/u.test(text));
+	return named >= 0 ? named : Math.max(0, texts.findIndex((text) => text.trim()));
+}
+
+// The Agents card's mouse past its ↗ rows. gentle-pi counts rows in the lines it drew, which this card redraws
+// with an outline, a blank row under the title and none of its padding, so a row is never passed on as is: the
+// title goes to gentle-pi's title row (it collapses the card), a left click on a task row without ↗ opens
+// gentle-pi's list, and one on the outline or a blank row does nothing. Other events reach gentle-pi on no row.
+function agentsMouse(event, marked, pass) {
+	if (event?.y === marked.title) return pass({ ...event, y: marked.rawTitle ?? 0 });
+	if (event?.button === "left" && ["press", "release", "click"].includes(event.type)) {
+		if (event.type === "click" && marked.list?.has(event.y)) openAgentsList();
+		return { handled: true };
+	}
+	return pass({ ...event, y: -1 });
+}
+
+const openAgentsList = () => piApi?.sendUserMessage?.("/gentle:agents", { expandPromptTemplates: true });
 
 // The ↗ one space past the row's end, or in its last column when the row fills the card: never wider.
 function withRunMark(row, room, t) {
@@ -2503,7 +2534,7 @@ function openRun(id) {
 		} catch {
 			// gentle-pi's list below
 		}
-		piApi?.sendUserMessage?.("/gentle:agents", { expandPromptTemplates: true });
+		openAgentsList();
 	};
 	if (runLib || !runLibLoading) open();
 	else runLibLoading.then(open, open);

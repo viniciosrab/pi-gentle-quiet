@@ -496,12 +496,13 @@ test("clicks elsewhere in the column are not sent to the cards", async () => {
 });
 
 // An Agents card like gentle-agents': it keeps its own collapsed state and only a left click on its
-// header row (`headerRow`, 0 or 1 with the theme's card style) toggles it, as ctrl+shift+a does.
+// header row (`headerRow`, 0 or 1 with the theme's card style, a padding row above it) toggles it, as
+// ctrl+shift+a does.
 async function collapsibleAgents(headerRow) {
 	const loaded = await wide();
 	let collapsed = false;
 	loaded.ui.setWidget("gentle-agents", () => ({
-		render: (width) => panel(`Agents ${collapsed ? "▸ Expand" : "▾ Collapse"}  2 active`, ...(collapsed ? ["◐ gentle-ai-worker", "… 1 more"] : ["◐ gentle-ai-worker", "✓ gentle-ai-explore"]))(width),
+		render: (width) => [...(headerRow ? ["".padEnd(width)] : []), ...panel(`Agents ${collapsed ? "▸ Expand" : "▾ Collapse"}  2 active`, ...(collapsed ? ["◐ gentle-ai-worker", "… 1 more"] : ["◐ gentle-ai-worker", "✓ gentle-ai-explore"]))(width)],
 		handleMouse(event) {
 			if (event.type !== "click" || event.button !== "left" || event.y !== headerRow) return undefined;
 			collapsed = !collapsed;
@@ -519,13 +520,17 @@ test("with the column open, clicking the Agents title above the editor still col
 	for (const headerRow of [0, 1]) {
 		const { mouse, agents, root, collapsed } = await collapsibleAgents(headerRow);
 		assert.equal(root[NODE]().type, "hstack");
-		assert.equal(mouse("click", headerRow)?.handled, true, `header row ${headerRow}`);
+		// The title is the card's second row, under its outline, wherever gentle-pi drew its own.
+		assert.match(plain(agents.render(60)[1]), /^│ ◈ Agents ▾ Collapse/);
+		assert.equal(mouse("click", 1)?.handled, true, `header row ${headerRow}`);
 		assert.equal(collapsed(), true);
 		const out = agents.render(60).map(plain);
 		assert.match(out[1], /^│ ◈ Agents ▸ Expand {2}2 active/);
 		assert.ok(!out.some((row) => row.includes("gentle-ai-explore")), "only the first agent stays");
-		assert.equal(mouse("click", headerRow)?.handled, true);
+		assert.equal(mouse("click", 1)?.handled, true);
 		assert.match(plain(agents.render(60)[1]), /^│ ◈ Agents ▾ Collapse/);
+		assert.equal(mouse("click", 0)?.handled, true, "the outline above it");
+		assert.match(plain(agents.render(60)[1]), /▾ Collapse/, "left the card as it was");
 	}
 });
 
