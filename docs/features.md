@@ -42,7 +42,7 @@ its thumb or click its track, as Pi's own, whose thumb also grows under the poin
 first tool call, or when its session cannot be read, the pop-up shows gentle-pi's thread from its presence file,
 drawn with gentle-pi's own renderer as the `alt+k` window draws it. A finished subagent's row (`✓`, `✗`, `–`)
 ends with `↗` too when its task record names its session, and opens the same pop-up, marked finished, failed or cancelled.
-Without gentle-pi's files the click opens its `/gentle:agents` list instead.
+Without gentle-pi's files the click opens its `/gentle:agents` list instead, as does a click on a task row without `↗` or on `… N more`; the card's title collapses it, and its outline and blank rows take no click.
 
 ## Side column on wide terminals
 
@@ -141,7 +141,7 @@ drag a tab sideways in the bar and drop it at a new place; the order is saved th
 With **Blocks** → Tree icons: nerd in `/gentle-quiet` (emoji by default),
 the TREE tab draws its file and folder icons as Neo-tree draws them in LazyVim (what `omarchy-launch-editor`
 opens): the glyph [mini.icons](https://github.com/nvim-mini/mini.icons) picks for the file
-([MIT](fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
+([MIT](../fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
 Nerd Font at its own size, painted with your Pi theme's colors. No extra font to install.
 `fonts/build-nerd-icons.py` regenerates the mapping from mini.icons in a headless Neovim.
 
