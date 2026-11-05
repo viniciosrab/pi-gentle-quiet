@@ -427,7 +427,7 @@ async function agentsCard(sessionId, { tasks = TASKS, custom, card: drawn = CARD
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 	const rows = () => card.render(100).map(plain);
-	const mouse = (type, y, button = "left") => card.handleMouse({ type, button, x: 10, y, width: 100, height: 8, screenX: 10, screenY: y });
+	const mouse = (type, y, button = "left", { x = 10 } = {}) => card.handleMouse({ type, button, x, y, width: 100, height: 8, screenX: x, screenY: y });
 	return { ...loaded, card, rows, mouse, seen, opened, tui };
 }
 
@@ -490,6 +490,20 @@ test("a click on the Agents card's outline or blank row opens nothing; a row wit
 	mouse("click", 6);
 	assert.equal(sent.length, 2, "so does … 1 more");
 	assert.equal(opened.length, 0);
+});
+
+test("a left click on the Agents card's side outline opens nothing and does not collapse it, on any row", async () => {
+	const { mouse, seen, opened, sent } = await agentsCard("card-sides");
+	for (const x of [0, 99]) {
+		for (const y of [1, 3, 5]) {
+			for (const type of ["press", "release", "click"]) assert.equal(mouse(type, y, "left", { x })?.handled, true, `column ${x} row ${y} ${type}`);
+		}
+	}
+	assert.equal(opened.length, 0, "no popup");
+	assert.deepEqual(sent, [], "no list");
+	assert.deepEqual(seen, [], "gentle-pi saw none of it");
+	mouse("click", 3, "left", { x: 1 });
+	assert.equal(opened.length, 1, "the column inside the outline still opens the popup");
 });
 
 test("a click on a ↗ row whose task has left the file opens gentle-pi's list instead", async () => {

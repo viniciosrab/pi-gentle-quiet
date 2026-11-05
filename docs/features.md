@@ -42,7 +42,7 @@ its thumb or click its track, as Pi's own, whose thumb also grows under the poin
 first tool call, or when its session cannot be read, the pop-up shows gentle-pi's thread from its presence file,
 drawn with gentle-pi's own renderer as the `alt+k` window draws it. A finished subagent's row (`✓`, `✗`, `–`)
 ends with `↗` too when its task record names its session, and opens the same pop-up, marked finished, failed or cancelled.
-Without gentle-pi's files the click opens its `/gentle:agents` list instead.
+Without gentle-pi's files the click opens its `/gentle:agents` list instead, as does a click on a task row without `↗` or on `… N more`; the card's title collapses it, and its outline and blank rows take no click.
 
 ## Side column on wide terminals
 

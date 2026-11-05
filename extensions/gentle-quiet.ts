@@ -651,7 +651,7 @@ function blockComponent(component, options, t, key) {
 					return drawBlock(source, width, options, t, { spaced: true, agents: key === "gentle-agents", hang: key === "gentle-todo", runs: marked });
 				};
 			}
-			if (prop === "handleMouse" && hits) return (event, ...rest) => runClick(event, hits, openRun) ?? agentsMouse(event, marked, (passed) => target.handleMouse?.(passed, ...rest));
+			if (prop === "handleMouse" && hits) return (event, ...rest) => (onSideOutline(event, marked) ? { handled: true } : runClick(event, hits, openRun) ?? agentsMouse(event, marked, (passed) => target.handleMouse?.(passed, ...rest)));
 			const value = Reflect.get(target, prop, target);
 			return typeof value === "function" ? value.bind(target) : value;
 		},
@@ -2460,8 +2460,9 @@ function agentRows(texts) {
 }
 
 // A card's rows with the ↗ on each row `match` names (from their plain texts), and `hits` filled with their row
-// (past `offset` rows of outline) and id. The title row (0) never gets one. `marked.title` keeps the title's row and
-// `marked.list` the rows that show a task (or "… N more") without a ↗, for clicks that miss the ↗ (agentsMouse).
+// (past `offset` rows of outline) and id. The title row (0) never gets one. `marked.title` keeps the title's row,
+// `marked.list` the rows that show a task (or "… N more") without a ↗, for clicks that miss the ↗ (agentsMouse),
+// and `marked.outline` the boxed card's full width (none unboxed), for clicks on its sides (onSideOutline).
 const MORE_ROW = /^\s*… \d+ more/u;
 function markRuns(rows, room, t, marked, offset) {
 	const { hits, match } = marked;
@@ -2469,6 +2470,7 @@ function markRuns(rows, room, t, marked, offset) {
 	const texts = rows.map((row) => row.replace(SGR, ""));
 	const ids = match(texts);
 	marked.title = rows.length ? offset : undefined;
+	marked.outline = offset ? room + BOX_CHROME : undefined;
 	marked.list = new Set(texts.flatMap((text, index) => (index > 0 && ids?.[index] === undefined && (activeRowStatus(text) || finishedRowStatus(text) || MORE_ROW.test(text)) ? [index + offset] : [])));
 	if (!ids) return rows;
 	return rows.map((row, index) => {
@@ -2498,6 +2500,13 @@ function agentsMouse(event, marked, pass) {
 		return { handled: true };
 	}
 	return pass({ ...event, y: -1 });
+}
+
+// A left press, release or click on the boxed card's left or right outline column: it opens nothing and does not
+// collapse the card. The card's own drawn width, not the event's, which may be the terminal's.
+function onSideOutline(event, marked) {
+	if (!marked.outline || event?.button !== "left" || !["press", "release", "click"].includes(event.type)) return false;
+	return event.x <= 0 || event.x >= marked.outline - 1;
 }
 
 const openAgentsList = () => piApi?.sendUserMessage?.("/gentle:agents", { expandPromptTemplates: true });
