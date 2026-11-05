@@ -141,7 +141,7 @@ drag a tab sideways in the bar and drop it at a new place; the order is saved th
 With **Blocks** → Tree icons: nerd in `/gentle-quiet` (emoji by default),
 the TREE tab draws its file and folder icons as Neo-tree draws them in LazyVim (what `omarchy-launch-editor`
 opens): the glyph [mini.icons](https://github.com/nvim-mini/mini.icons) picks for the file
-([MIT](fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
+([MIT](../fonts/LICENSE-mini-icons)), by file name then extension, and Neo-tree's own folders, in your terminal's
 Nerd Font at its own size, painted with your Pi theme's colors. No extra font to install.
 `fonts/build-nerd-icons.py` regenerates the mapping from mini.icons in a headless Neovim.
 
