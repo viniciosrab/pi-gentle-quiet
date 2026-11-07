@@ -166,7 +166,7 @@ first with their elapsed time; finished jobs stay 60 seconds with ✓, ✗ or �
 `ctrl+shift+j` to collapse it. Only running jobs spin; the title keeps a still icon (`⧗`, in
 **Icons**). Without the side column the status line keeps `⠋ N jobs`. A running job's row ends with `↗`:
 a click on it opens the same live pop-up as a subagent's, with the job's label and id, running or finished with
-its exit code, the elapsed time, and the tail of its output as it is written (like `tail -f`; the log gentle-pi
+its exit code, the elapsed time, and the tail of its output as it is written, long lines wrapped (like `tail -f`; the log gentle-pi
 keeps for the job, found among the files Pi holds open on Linux). Elsewhere, or when that log cannot be found,
 the click opens gentle-pi's `/gentle:jobs` list.
 

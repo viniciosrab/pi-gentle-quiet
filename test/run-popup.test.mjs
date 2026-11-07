@@ -675,9 +675,15 @@ test("the job popup follows the log as it grows, scrolls, and shows finished wit
 	assert.equal(component.closed, true);
 });
 
-test("a long log line is cut to the popup's width; an empty log says so", () => {
-	const { text } = jobPopup({ job: { id: "job-1", label: "x", startedAt: now }, log: `${"y".repeat(300)}\n` });
-	assert.match(text(80)[4], /^▏ y+… ▕$/);
+test("a long log line wraps to the popup's width instead of being cut; an empty log says so", () => {
+	const words = Array.from({ length: 30 }, (_, i) => `word${i}`).join(" ");
+	const { body } = jobPopup({ job: { id: "job-1", label: "x", startedAt: now }, log: `${words}\n${"y".repeat(200)}\nend\n` });
+	const rows = body(80);
+	assert.ok(!rows.some((row) => row.includes("…")), "nothing cut with …");
+	assert.ok(rows.every((row) => [...row].length <= 76), "every row inside the popup's inner width");
+	assert.equal(rows.join(" ").replace(/ +/g, " ").trim(), `${words} ${rows.filter((row) => /^y+$/.test(row)).join(" ")} end`, "every word of the long line, in order, then the rest of the log");
+	assert.equal(rows.filter((row) => /^y+$/.test(row)).join(""), "y".repeat(200), "a line with no spaces breaks at the width");
+	assert.equal(rows.at(-1), "end");
 	const empty = jobPopup({ job: { id: "job-1", label: "x", startedAt: now }, log: "" });
 	assert.deepEqual(empty.body(), ["(no output yet)"]);
 });
