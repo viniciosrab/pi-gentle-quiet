@@ -106,6 +106,35 @@ test("cache low in the warning color when the last call read less than half its 
 	assert.ok(painted(raw().find((line) => plain(line).includes("cache low")), "warning", "low"));
 });
 
+// The same two calls with Pi's timestamps, the second `gap` milliseconds after the first.
+const timed = (second, gap, first = {}) => calls(second).map((entry, index) => ({ ...entry, message: { ...entry.message, timestamp: 1_700_000_000_000 + index * gap, usage: { ...entry.message.usage, ...(index ? {} : first) } } }));
+const rewrote = { input: 1000, cacheRead: 0, cacheWrite: 40000 };
+
+test("cache expired, muted, when the last call read nothing from the cache more than 5 minutes after the one before", async () => {
+	const { cards, raw } = await wide({ session: { entries: timed(rewrote, 6 * 60_000) } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens · cache expired +28%$/u);
+	const row = raw().find((line) => plain(line).includes("cache expired"));
+	assert.ok(painted(row, "muted", "expired"), "idle time, not a broken prompt: no warning color");
+});
+
+test("cache low, not expired, when the last call read nothing from the cache within 5 minutes of the one before", async () => {
+	const { cards } = await wide({ session: { entries: timed(rewrote, 4 * 60_000) } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens · cache low +28%$/u);
+});
+
+test("cache low, not expired, when the last call read part of its prompt from the cache after a long pause", async () => {
+	const { cards } = await wide({ session: { entries: timed({ input: 1000, cacheRead: 1000, cacheWrite: 40000 }, 6 * 60_000) } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens · cache low +28%$/u, "something was still cached, so the cache did not expire");
+});
+
+test("a 1-hour cache write keeps the cache from expiring until an hour has passed", async () => {
+	const long = { cacheWrite1h: 40000 };
+	const { cards } = await wide({ session: { entries: timed(rewrote, 30 * 60_000, long) } });
+	assert.match(cards()[1][2], /^56k \/ 200k tokens · cache low +28%$/u, "30 minutes is inside the 1-hour cache");
+	const later = await wide({ session: { entries: timed(rewrote, 61 * 60_000, long) } });
+	assert.match(later.cards()[1][2], /^56k \/ 200k tokens · cache expired +28%$/u);
+});
+
 test("no cache state when the provider never cached anything", async () => {
 	const none = { input: 40000, cacheRead: 0, cacheWrite: 0 };
 	const entries = [0, 1].map(() => ({ type: "message", message: { role: "assistant", usage: { ...none, output: 200, cost: { total: 0.5 } } } }));

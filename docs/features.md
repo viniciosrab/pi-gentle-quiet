@@ -51,8 +51,9 @@ holds the status line as two cards that always stay on top. **Status** has the p
 model under a label column, then an **MCP** row with the MCP servers online out of those installed
 (`MCP   3/3`, in the warning color while one is offline), then a blank row and the statuses, one per row. **Context** has the tokens in
 use with the last call's cache and the percent (`56k / 200k tokens · cache ok   5%`: `cache ok` while the
-last call read at least half its prompt from the cache, `cache low` in the warning color when it did not, left
-out on the first call and with a provider that never caches), a bar across the card in the gauge's color, and
+last call read at least half its prompt from the cache, `cache expired` (muted) when it read none of it more
+than 5 minutes after the call before (an hour after a 1-hour cache write), `cache low` in the warning color
+when it read less than half otherwise, left out on the first call and with a provider that never caches), a bar across the card in the gauge's color, and
 your plan usage (`5h 5% · resets 2h10m` on the left, `week 10% · 4d` flush right, a window from 80% in the
 gauge's warning colors) or, with no plan usage, the cost, kept whole when the row is too long (the first window
 is cut with `…` first); the PROF tab has each window with its reset. **Music** follows them while
