@@ -17,7 +17,7 @@
 // hands in, in the conversation's quiet rows. A finished task's record opens the same body under its final status.
 //
 // A job's pop-up shows "label · id", its status ("running · 12s", "finished · exit 1 · 1m02s") and the tail of
-// its log, like tail -f: the last 256 KiB, without escape sequences, each line cut to the width.
+// its log, like tail -f: the last 256 KiB, without escape sequences, each line wrapped to the width.
 // @ts-nocheck
 
 import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
@@ -584,7 +584,7 @@ export function jobSource({ file, id, job, read = readTail, now = Date.now }) {
 			title: `${known?.label || id} · ${id}`,
 			subtitle: known ? jobStatus(known, now()) : "",
 			key: `${shown.stamp}`,
-			lines: (width, theme) => (shown.lines.length ? shown.lines.map((line) => (visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line)) : [paint(theme, "dim", "(no output yet)")]),
+			lines: (width, theme) => (shown.lines.length ? shown.lines.flatMap((line) => (visibleWidth(line) > width ? wrap(line, width) : [line])) : [paint(theme, "dim", "(no output yet)")]),
 		};
 	};
 }
