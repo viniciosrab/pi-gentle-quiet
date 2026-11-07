@@ -2780,8 +2780,10 @@ function sessionTotals(ctx) {
 	const entries = ctx?.sessionManager?.getEntries?.() ?? [];
 	if (entries.length === totalsCache.count && totalsCache.entries === entries.at(-1) && totalsCache.estimate === config.statusLine.estimateCost) return totalsCache.totals;
 	// cacheWarm: a call before the last one read or wrote the cache, so the last call's hit rate says whether it was reused.
-	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined, cacheWarm: false };
+	// cacheExpired: the last call read nothing from the cache and came longer after the call before than the cache lives.
+	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: undefined, cacheWarm: false, cacheExpired: false };
 	let cachedBefore = false;
+	let previous;
 	const add = (usage) => {
 		if (!usage) return;
 		totals.input += usage.input || 0;
@@ -2799,7 +2801,10 @@ function sessionTotals(ctx) {
 			const prompt = (message.usage.input || 0) + (message.usage.cacheRead || 0) + (message.usage.cacheWrite || 0);
 			totals.cacheHit = prompt > 0 ? ((message.usage.cacheRead || 0) / prompt) * 100 : undefined;
 			totals.cacheWarm = cachedBefore;
+			const lives = previous?.usage.cacheWrite1h ? CACHE_LONG_TTL_MS : CACHE_TTL_MS;
+			totals.cacheExpired = cachedBefore && !message.usage.cacheRead && message.timestamp - previous?.timestamp > lives;
 			cachedBefore ||= Boolean(message.usage.cacheRead || message.usage.cacheWrite);
+			previous = message;
 		} else if (entry?.type === "message" && message?.role === "toolResult") add(message.usage);
 		else if (entry?.type === "branch_summary" || entry?.type === "compaction") add(entry.usage);
 	}
@@ -2930,6 +2935,9 @@ function footerTotals(ctx) {
 }
 
 const CACHE_OK_PERCENT = 50;
+// How long a prompt cache lives after its last use: 5 minutes, or an hour when the call before wrote the 1-hour cache.
+const CACHE_TTL_MS = 5 * 60_000;
+const CACHE_LONG_TTL_MS = 60 * 60_000;
 
 // Pi's token format: 950, 1.2k, 50k, 2.0M, 33M.
 function formatTokens(count) {
@@ -3028,9 +3036,10 @@ function statusParts(t, footerData, { jobs = true } = {}) {
 	const statusText = statusItems.join(sep);
 	const secondRow = [...statuses, mcpPlain].filter(Boolean);
 	const context = { percent, used, window: window ? formatTokens(window) : "", percentText };
-	// The last call's cache: "ok" when it read at least half its prompt from the cache, "low" when it did not. Left
-	// out on the first call (nothing to reuse yet) and with a provider that never caches.
-	const cache = totals.cacheWarm && totals.cacheHit !== undefined ? (totals.cacheHit >= CACHE_OK_PERCENT ? "ok" : "low") : "";
+	// The last call's cache: "ok" when it read at least half its prompt from the cache, "expired" when it read none of
+	// it after a pause longer than the cache lives, "low" otherwise. Left out on the first call (nothing to reuse yet)
+	// and with a provider that never caches.
+	const cache = totals.cacheWarm && totals.cacheHit !== undefined ? (totals.cacheHit >= CACHE_OK_PERCENT ? "ok" : totals.cacheExpired ? "expired" : "low") : "";
 	return { sep, project, branchText, location, tokens, cache, plan, allWindows, usageText, context, contextValue, contextText, costText, statusText, statusItems, ownItems, secondRow, mcp, servers };
 }
 
@@ -3131,7 +3140,7 @@ function statusCardRows(t, footerData, width, options) {
 	const planLeft = firstWindow ? windowText(firstWindow, "resets") : "";
 	const planRight = otherWindows.map((other) => windowText(other)).join(` ${fg(t, "muted", "·")} `);
 	const cost = !firstWindow && p.costText ? `${fg(t, "muted", "cost")} ${fg(t, "text", p.costText)}` : "";
-	const cacheText = p.cache && ` ${fg(t, "muted", "·")} ${fg(t, "muted", "cache")} ${fg(t, p.cache === "ok" ? "text" : "warning", p.cache)}`;
+	const cacheText = p.cache && ` ${fg(t, "muted", "·")} ${fg(t, "muted", "cache")} ${fg(t, { ok: "text", expired: "muted" }[p.cache] ?? "warning", p.cache)}`;
 	const context = [
 		...title("Context"),
 		spread(`${figures}${cacheText}`, percentText, true),
