@@ -16,11 +16,17 @@ export const JOBS_SIDEBAR_EVENT = "gentle-ai:jobs-sidebar";
 export const JOBS_STATUS_KEY = "gentle-jobs";
 export function jobsCollapseKey(env = process.env, bindings = {}) {
 	const value = env.GENTLE_PI_JOBS_KEY?.trim();
-	if (value === undefined) return "ctrl+shift+j";
+	if (value === undefined) return Object.hasOwn(bindings, "jobs.collapse") ? bindings["jobs.collapse"] ?? undefined : "ctrl+shift+j";
 	return value === "" || value.toLowerCase() === "off" ? undefined : value;
 }
 export function isJobsSidebarSnapshot(value) {
 	return Array.isArray(value?.jobs) && value.jobs.every((job) => typeof job?.id === "string" && typeof job.startedAt === "number");
+}
+`);
+// gentle-pi's keymaps.json reader (lib/keymaps.ts); a test sets the saved keys in globalThis.savedKeymaps.
+writeFileSync(path.join(lib, "keymaps.ts"), `
+export function loadKeymaps(env = process.env) {
+	return { bindings: globalThis.savedKeymaps ?? {}, path: "keymaps.json", malformed: false };
 }
 `);
 writeFileSync(path.join(lib, "jobs-widget.ts"), `
@@ -129,4 +135,18 @@ test("with gentle-pi's rail section only, ctrl+shift+j still collapses the card 
 	assert.ok(collapsed.some((row) => row.includes("… 1 more")));
 	await shortcuts["ctrl+shift+j"].handler(ctx);
 	assert.ok(rows().some((row) => row.includes("npm run build")));
+});
+
+test("a key saved in gentle-pi's keymaps.json collapses the Jobs card instead of ctrl+shift+j", async () => {
+	shellOff();
+	globalThis.savedKeymaps = { "jobs.collapse": "ctrl+alt+j" };
+	try {
+		const { publish, rows, shortcuts, ctx } = await wide();
+		publish([build, tests]);
+		assert.equal(shortcuts["ctrl+shift+j"], undefined);
+		await shortcuts["ctrl+alt+j"].handler(ctx);
+		assert.match(rows()[1], /Jobs ▸ Expand/u);
+	} finally {
+		delete globalThis.savedKeymaps;
+	}
 });

@@ -15,9 +15,9 @@ export class CommandPalette {
 	render() { return []; }
 	invalidate() {}
 }
-export function commandsKey(env = process.env) {
+export function commandsKey(env = process.env, bindings = {}) {
 	const value = env.GENTLE_PI_COMMANDS_KEY?.trim();
-	if (value === undefined) return "alt+k";
+	if (value === undefined) return Object.hasOwn(bindings, "commands") ? bindings.commands ?? undefined : "alt+k";
 	return value === "" || value.toLowerCase() === "off" ? undefined : value;
 }
 `);
@@ -25,6 +25,13 @@ writeFileSync(path.join(lib, "command-palette-catalog.ts"), `
 export function buildCommandPaletteGroups(registered) {
 	const items = registered.filter((command) => command.name.startsWith("gentle:")).map((command) => ({ command: command.name, label: command.name === "gentle:yolo" ? "🚀 YOLO 🔥 session permission" : command.name }));
 	return items.length ? [{ title: "Configuration", items }] : [];
+}
+`);
+
+// gentle-pi's keymaps.json reader (lib/keymaps.ts); a test sets the saved keys in globalThis.savedKeymaps.
+writeFileSync(path.join(lib, "keymaps.ts"), `
+export function loadKeymaps(env = process.env) {
+	return { bindings: globalThis.savedKeymaps ?? {}, path: "keymaps.json", malformed: false };
 }
 `);
 
@@ -107,6 +114,33 @@ test("GENTLE_PI_COMMANDS_KEY moves or turns off the shortcut, like in Gentle She
 		assert.deepEqual(Object.keys(off.shortcuts), []);
 	} finally {
 		delete process.env.GENTLE_PI_COMMANDS_KEY;
+	}
+});
+
+test("a key saved in gentle-pi's keymaps.json moves the shortcut, and the environment variable still wins", async () => {
+	shellOff();
+	globalThis.savedKeymaps = { commands: "ctrl+alt+m" };
+	try {
+		const saved = await load({ mode: "tui", session: { commands } });
+		assert.deepEqual(Object.keys(saved.shortcuts), ["ctrl+alt+m"]);
+		process.env.GENTLE_PI_COMMANDS_KEY = "ctrl+alt+p";
+		const env = await load({ mode: "tui", session: { commands } });
+		assert.deepEqual(Object.keys(env.shortcuts), ["ctrl+alt+p"]);
+	} finally {
+		delete globalThis.savedKeymaps;
+		delete process.env.GENTLE_PI_COMMANDS_KEY;
+	}
+});
+
+test("without gentle-pi's keymaps.json reader the default key stays", async () => {
+	shellOff();
+	rmSync(path.join(lib, "keymaps.ts"));
+	globalThis.savedKeymaps = { commands: "ctrl+alt+m" };
+	try {
+		const loaded = await load({ mode: "tui", session: { commands } });
+		assert.deepEqual(Object.keys(loaded.shortcuts), ["alt+k"]);
+	} finally {
+		delete globalThis.savedKeymaps;
 	}
 });
 
