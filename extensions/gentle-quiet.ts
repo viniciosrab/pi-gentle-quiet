@@ -2136,6 +2136,20 @@ async function loadEngramChrome() {
 // The palette is gentle-pi's own component (lib/command-palette.ts); Gentle Shell only binds a key to
 // it. With Gentle Shell turned off in settings.json (the recommended setup) the same menu is bound
 // here, so no Gentle Shell visuals come back. While Gentle Shell is on it keeps the key.
+// The keys saved in gentle-pi's keymaps.json (/gentle:customize, the palette): gentle-pi's key functions read them
+// after the environment variable and before the default. {} when gentle-pi has no reader or it fails.
+async function savedKeymaps() {
+	const file = path.join(GENTLE_PI_LIB, "keymaps.ts");
+	if (!existsSync(file)) return {};
+	try {
+		const keymaps = await import(pathToFileURL(file).href);
+		const bindings = keymaps.loadKeymaps?.(process.env)?.bindings;
+		return bindings && typeof bindings === "object" ? bindings : {};
+	} catch {
+		return {};
+	}
+}
+
 async function loadPalette() {
 	const files = ["command-palette.ts", "command-palette-catalog.ts"].map((name) => path.join(GENTLE_PI_LIB, name));
 	if (!files.every((file) => existsSync(file))) return undefined;
@@ -2308,7 +2322,7 @@ async function registerJobsCard(pi) {
 	railBlocks.delete(JOBS_CARD);
 	jobsCard = undefined;
 	if (!lib) return;
-	const card = { list: [], session: undefined, collapsed: false, key: lib.jobsCollapseKey(process.env), drawn: false };
+	const card = { list: [], session: undefined, collapsed: false, key: lib.jobsCollapseKey(process.env, await savedKeymaps()), drawn: false };
 	const toggle = () => {
 		card.collapsed = !card.collapsed;
 		sidebar.tui?.requestRender?.();
@@ -2552,7 +2566,7 @@ function openRun(id) {
 async function registerPalette(pi) {
 	if (typeof pi.registerShortcut !== "function" || !gentleShellOff()) return;
 	const palette = await loadPalette();
-	const key = palette?.commandsKey?.(process.env);
+	const key = palette?.commandsKey?.(process.env, await savedKeymaps());
 	if (!key) return;
 	pi.registerShortcut(key, { description: "Open the Gentle command palette", handler: (ctx) => openPalette(pi, palette, ctx) });
 }
