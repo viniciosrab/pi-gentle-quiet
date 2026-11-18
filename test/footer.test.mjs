@@ -58,6 +58,45 @@ test("with the banner shown, the /yolo notification is shown too", async () => {
 	writeConfig({});
 });
 
+// gentle-pi announces the startup profile from its own session_start, which Pi runs before this
+// extension's: only Pi's InteractiveMode, patched at load time, sees that notification.
+const PROFILE_NOTICE = 'el Gentleman started with profile "Max".\nThis session now runs on claude-bridge/claude-opus-5-5 · high.';
+
+test("gentle-pi's startup profile notification is hidden, even when sent before the session starts", async () => {
+	writeConfig({});
+	const { InteractiveMode, extensionNotices } = await import("@earendil-works/pi-coding-agent");
+	const { ui, notices } = await load();
+	extensionNotices.length = 0;
+	const mode = new InteractiveMode();
+	mode.showExtensionNotify(PROFILE_NOTICE, "info");
+	mode.showExtensionNotify("Saved", "info");
+	assert.deepEqual(extensionNotices, [["Saved", "info"]]);
+	ui.notify(PROFILE_NOTICE, "info");
+	assert.deepEqual(notices, [], "hidden through the patched UI too");
+});
+
+test("with the profile notice shown, gentle-pi's startup profile notification is shown", async () => {
+	writeConfig({ profileNotice: true });
+	const { InteractiveMode, extensionNotices } = await import("@earendil-works/pi-coding-agent");
+	const { ui, notices } = await load();
+	extensionNotices.length = 0;
+	new InteractiveMode().showExtensionNotify(PROFILE_NOTICE, "info");
+	assert.deepEqual(extensionNotices, [[PROFILE_NOTICE, "info"]]);
+	ui.notify(PROFILE_NOTICE, "info");
+	assert.deepEqual(notices, [[PROFILE_NOTICE, "info"]]);
+	writeConfig({});
+});
+
+test("/gentle-quiet toggles the startup profile notice in the Footer section and saves it", async () => {
+	writeConfig({});
+	const { select, seen } = picker(/^Footer statuses ›$/, /^Profile notice/);
+	const { commands, ctx } = await load({ select });
+	await commands["gentle-quiet"].handler("", ctx);
+	assert.ok(seen[1].items.includes("Profile notice: hidden"));
+	assert.equal(readConfig().profileNotice, true);
+	writeConfig({});
+});
+
 test("statuses of other extensions pass through unchanged", async () => {
 	const { ui, status } = await load();
 	ui.setStatus("other", "keep me");

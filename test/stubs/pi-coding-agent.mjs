@@ -100,3 +100,11 @@ export class CustomMessageComponent {
 		return event;
 	}
 }
+
+// Pi's interactive mode: extension notifications reach the chat through showExtensionNotify.
+export const extensionNotices = [];
+export class InteractiveMode {
+	showExtensionNotify(message, type) {
+		extensionNotices.push([message, type]);
+	}
+}
