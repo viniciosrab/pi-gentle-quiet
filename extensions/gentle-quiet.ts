@@ -68,6 +68,8 @@ const DEFAULTS = {
 	memory: { show: true, label: "mem", showProject: false },
 	permissions: { show: true, label: "Perm", hideWhenNormal: false },
 	yoloBanner: false,
+	// gentle-pi's "el Gentleman started with profile …" notification at session start.
+	profileNotice: false,
 	// Icons of the rewritten tool rows and blocks, one per group; "" for none.
 	// memory: outline brain U+100000 from ~/.local/share/fonts/GentleBrain.ttf (an outlined
 	// nf-fae-brain; the terminal falls back to it), drawn in the theme color like any text.
@@ -154,6 +156,7 @@ function merge(user = {}) {
 		memory: { ...DEFAULTS.memory, ...user.memory },
 		permissions: { ...DEFAULTS.permissions, ...user.permissions },
 		yoloBanner: user.yoloBanner ?? DEFAULTS.yoloBanner,
+		profileNotice: user.profileNotice ?? DEFAULTS.profileNotice,
 		// memoryCards.icon was the single shared icon of earlier versions; it now seeds the memory icon.
 		icons: { ...DEFAULTS.icons, ...(typeof user.memoryCards?.icon === "string" ? { memory: user.memoryCards.icon } : {}), ...user.icons },
 		tools: toneMode({ ...DEFAULTS.tools, ...user.tools }),
@@ -678,6 +681,13 @@ function rewriteWidget(key, content) {
 
 const trackedWidget = (key) => key === KEYS.yolo || BLOCK_WIDGETS.has(key);
 
+/** gentle-pi notifications this config hides: the /yolo toggle's (with the banner) and the startup profile's. */
+function hiddenNotice(current = DEFAULTS, message) {
+	if (typeof message !== "string") return false;
+	if (!(current ?? DEFAULTS).yoloBanner && message.startsWith("🚀 YOLO ON")) return true;
+	return !(current ?? DEFAULTS).profileNotice && message.startsWith("el Gentleman started with profile ");
+}
+
 function patch(ctx) {
 	const ui = ctx?.ui;
 	if (!ui) return;
@@ -696,11 +706,10 @@ function patch(ctx) {
 			if (content === undefined) railBlocks.delete(key);
 			setWidget(key, rewriteWidget(key, content), ...rest);
 		};
-		// The /yolo toggle also announces itself with a notification; hide it with the banner.
 		if (typeof ui.notify === "function") {
 			const notify = ui.notify.bind(ui);
 			ui.notify = (message, ...rest) => {
-				if (!config.yoloBanner && typeof message === "string" && message.startsWith("🚀 YOLO ON")) return;
+				if (hiddenNotice(config, message)) return;
 				return notify(message, ...rest);
 			};
 		}
@@ -935,6 +944,19 @@ const ownFraming = {
 	ToolExecutionComponent: (component) => component.hideComponent || (component.hasRendererDefinition?.() && component.getRenderShell?.() === "self"),
 	CustomMessageComponent: (component) => !!component.customComponent,
 };
+// gentle-pi announces the startup profile from its session_start, which Pi runs before this extension's
+// (packages load before ~/.pi/agent/extensions), so the ui.notify patch comes too late for it: Pi's
+// InteractiveMode, which shows every extension notification, filters it from the moment this module loads.
+const NOTIFY_PATCHED = Symbol.for("gentle-quiet.notify");
+const interactiveProto = PiCodingAgent.InteractiveMode?.prototype;
+if (typeof interactiveProto?.showExtensionNotify === "function" && !interactiveProto[NOTIFY_PATCHED]) {
+	const { showExtensionNotify } = interactiveProto;
+	interactiveProto.showExtensionNotify = function (message, type) {
+		if (hiddenNotice(globalThis[CURRENT_CONFIG]?.(), message)) return;
+		return showExtensionNotify.call(this, message, type);
+	};
+	interactiveProto[NOTIFY_PATCHED] = true;
+}
 for (const [name, framed] of Object.entries(ownFraming)) {
 	const proto = PiCodingAgent[name]?.prototype;
 	if (typeof proto?.render !== "function" || proto[BOX_MARGIN_PATCHED]) continue;
@@ -1062,6 +1084,7 @@ function menuSections(ctx) {
 			[`Permission label: ${shown(config.permissions.label)}`, async () => { config.permissions.label = await editLabel(ctx, "Permission label", config.permissions.label); }, "The word shown before the permission status."],
 			[`Permission when normal: ${config.permissions.hideWhenNormal ? "hidden" : "shown"}`, () => { config.permissions.hideWhenNormal = !config.permissions.hideWhenNormal; }, `${config.permissions.hideWhenNormal ? "The permission status shows only when the mode is not Normal." : "The permission status always shows, Normal mode included."}`],
 			[`YOLO banner: ${config.yoloBanner ? "shown" : "hidden"}`, () => { config.yoloBanner = !config.yoloBanner; }, "gentle-pi's YOLO banner above the editor and its /yolo notification."],
+			[`Profile notice: ${config.profileNotice ? "shown" : "hidden"}`, () => { config.profileNotice = !config.profileNotice; }, "gentle-pi's notification at session start: el Gentleman started with profile … and the model the session runs on."],
 		]],
 		["Tool rows", "Tools", () => [
 			[`Tool rows: ${config.tools.restyle ? "quiet" : "original"} (new calls)`, () => { config.tools.restyle = !config.tools.restyle; }, `${config.tools.restyle ? "gentle-pi and memory tool calls drawn as compact rows." : "gentle-pi and memory tool calls as their packages draw them."} Applies to new calls.`],

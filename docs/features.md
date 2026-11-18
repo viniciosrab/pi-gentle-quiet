@@ -206,7 +206,7 @@ it; a dim line under the list says what the selected option controls. Changes ap
 | Tab | Options |
 |---|---|
 | **Status** | Status line (gentle or Pi's own footer); Status line changes, usage, weekly usage, MCP, permission, context tokens and cost (on/off); Status line tokens (cache, all, off); Estimated cost (unpriced providers); Subscription (the current provider, shown as `sub`) |
-| **Footer** | Memory in footer, Memory label, Memory project name; Permission in footer, Permission label, Permission when normal (shown/hidden); YOLO banner |
+| **Footer** | Memory in footer, Memory label, Memory project name; Permission in footer, Permission label, Permission when normal (shown/hidden); YOLO banner; Profile notice (gentle-pi's `el Gentleman started with profile …` notification at session start, hidden by default) |
 | **Tools** | Tool rows (quiet/original); Tool row margin; Tool call tones (claude, theme, soft); Quiet tools; Expand hint (last, all, never); Quiet preview lines (0, 1, 3, 5); Codemode output lines (0, 3, 5, 10); Codemode detail (summary, failures, all) |
 | **Blocks** | Todos/Agents blocks (minimal/original); Todos/Agents border; Side column; Side column from (120, 140, 160, 180 columns); Tree icons (emoji/nerd); Tree hidden items (show/hide); Tab order; Subagent results (minimal/original, after a restart) |
 | **Icons** | Memory, Todo, Agents, Jobs, RDD, Other gentle tools and Branch icon |
