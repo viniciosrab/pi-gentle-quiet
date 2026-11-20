@@ -105,17 +105,12 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 async function column(t, reply, { overlay = true } = {}) {
 	const calls = [];
 	const saved = musicDeps.run;
-	const store = { favoritePaths: musicDeps.favoritePaths, toggleFavorite: musicDeps.toggleFavorite, spawn: musicDeps.spawn, readPid: musicDeps.readPid, processName: musicDeps.processName, kill: musicDeps.kill };
+	const store = { favoritePaths: musicDeps.favoritePaths, toggleFavorite: musicDeps.toggleFavorite, readPid: musicDeps.readPid, processName: musicDeps.processName, kill: musicDeps.kill };
 	musicDeps.run = async (args) => (calls.push(args), reply(args));
 	// favorites.toml is never touched here: its reads and toggles are recorded and answered by the player.
 	musicDeps.favoritePaths = async () => (calls.push(READ_FAVORITES), reply.favoritePaths ? reply.favoritePaths() : new Set());
 	musicDeps.toggleFavorite = async (item) => (calls.push(["toggle", item]), reply.toggle ? reply.toggle(item) : true);
-	// No process is started or signalled here either: spawn, the pid file, /proc and kill are recorded.
-	musicDeps.spawn = (command, args, options) => {
-		calls.push(["spawn", command, args, options]);
-		reply.spawned?.();
-		return { on() {}, unref: () => calls.push(["unref"]) };
-	};
+	// No process is signalled here either: the pid file, /proc and kill are recorded.
 	musicDeps.readPid = async () => (calls.push(["pid"]), reply.pid?.());
 	musicDeps.processName = async (pid) => (calls.push(["comm", pid]), reply.comm?.(pid));
 	musicDeps.kill = (pid, signal) => (calls.push(["kill", pid, signal]), reply.killed?.());
@@ -681,21 +676,19 @@ test("Favorites counts favorites.toml's tracks, follows a toggle at once, and sa
 	assert.ok(again().some((row) => /Favorites · 1 track\b/.test(row) && !/1 tracks/.test(row)), again().join("\n"));
 });
 
-// cliamp installed with no player running, as a stopped() player: `--version` answers when `installed`, the
-// status once the spawned daemon is up (never when it `starts` false); its pid file holds `pid`, whose
-// /proc/<pid>/comm is `comm`; SIGTERM stops it.
-function stopped({ installed = true, starts = true, pid = 4242, comm = "cliamp" } = {}) {
+// cliamp installed with no player running, as a stopped() player: `--version` answers, the status only while
+// it runs; its pid file holds `pid`, whose /proc/<pid>/comm is `comm`; SIGTERM stops it.
+function stopped({ pid = 4242, comm = "cliamp" } = {}) {
 	const music = player();
 	const on = { running: false };
 	const reply = (args) => {
-		if (args[0] === "--version") return installed ? "cliamp version v2.3.0\n" : undefined;
+		if (args[0] === "--version") return "cliamp version v2.3.0\n";
 		if (args[0] === "status" && !on.running) return undefined;
 		return music.reply(args);
 	};
 	Object.assign(reply, {
 		favoritePaths: music.reply.favoritePaths,
 		toggle: music.reply.toggle,
-		spawned: () => starts && setTimeout(() => (on.running = true), 30),
 		pid: () => pid,
 		comm: (asked) => (asked === pid ? comm : undefined),
 		killed: () => (on.running = false),
@@ -712,60 +705,19 @@ const until = async (check, ms = 1000) => {
 	for (const end = Date.now() + ms; Date.now() < end && !check(); ) await new Promise((resolve) => setTimeout(resolve, 10));
 	return check();
 };
-const START = "│ ▶ Start cliamp";
+const noCard = (rows) => !rows().some((row) => row.includes("Music") || row.includes("Start cliamp"));
 
-test("with cliamp installed and no player the card offers to start it; nothing starts by itself", async (t) => {
+test("with cliamp installed and no player there is no card, and nothing starts it", async (t) => {
 	quick(t);
-	const { rows, raw, calls } = await column(t, stopped().reply);
+	const { rows, calls } = await column(t, stopped().reply);
 	await settle();
-	const out = rows().map((row) => row.replace(/ +│$/, ""));
-	assert.equal(out[1], "│ Music ▾", out.join("\n"));
-	assert.equal(out[3], START);
-	assert.ok(painted(raw()[3], "accent", "▶ Start cliamp"));
-	assert.equal(calls.filter((args) => args[0] === "--version").length, 1, "installed is asked once");
-	assert.deepEqual(calls.find((args) => args[0] === "--version"), ["--version"]);
+	assert.ok(noCard(rows), rows().join("\n"));
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	rows();
-	assert.ok(!calls.some((args) => args[0] === "spawn"), "never started without a click");
+	assert.ok(!calls.some((args) => args[0] === "--version" || args[0] === "--daemon"), "never started, never asked");
 });
 
-test("without cliamp installed there is no card and nothing to start", async (t) => {
-	const { rows, calls } = await column(t, stopped({ installed: false }).reply);
-	await settle();
-	assert.ok(!rows().some((row) => row.includes("Music") || row.includes("Start cliamp")));
-	assert.ok(!calls.some((args) => args[0] === "spawn"));
-});
-
-test("a click on Start runs cliamp --daemon detached, shows Starting…, then the card and the playlist picker", async (t) => {
-	quick(t);
-	const { rows, raw, mouse, calls, popup } = await column(t, stopped().reply);
-	await settle();
-	const y = rows().findIndex((row) => row.startsWith(START));
-	assert.equal(mouse("click", y, 3)?.handled, true);
-	assert.deepEqual(calls.filter((args) => args[0] === "spawn" || args[0] === "unref"), [["spawn", "cliamp", ["--daemon"], { detached: true, stdio: "ignore" }], ["unref"]]);
-	const at = rows().findIndex((row) => row.includes("Starting…"));
-	assert.ok(at > 0, rows().join("\n"));
-	assert.ok(painted(raw()[at], "dim", "Starting…"));
-	assert.equal(mouse("click", at, 3)?.handled, undefined, "a click while starting does nothing");
-	assert.equal(calls.filter((args) => args[0] === "spawn").length, 1);
-	assert.ok(await until(() => popup.custom.length === 1), "the picker opens once the player answers");
-	assert.ok(rows().some((row) => row.startsWith("│ HoliznaCC0 · Shimmer")), rows().join("\n"));
-	const picker = popup.component();
-	assert.ok(plain(picker.render(50)[1]).includes("cliamp · Playlists"), "the categories");
-});
-
-test("a player that never answers says so for a few seconds, then offers Start again", async (t) => {
-	quick(t);
-	const { rows, raw, mouse, popup } = await column(t, stopped({ starts: false }).reply);
-	await settle();
-	mouse("click", rows().findIndex((row) => row.startsWith(START)), 3);
-	assert.ok(await until(() => rows().some((row) => row.includes("cliamp did not start"))), rows().join("\n"));
-	assert.ok(painted(raw().find((row) => plain(row).includes("did not start")), "dim", "cliamp did not start"));
-	assert.ok(await until(() => rows().some((row) => row.startsWith(START))), "Start again");
-	assert.equal(popup.custom.length, 0);
-});
-
-test("⏻ stops the player with SIGTERM to the cliamp in its pid file, then offers Start", async (t) => {
+test("⏻ stops the player with SIGTERM to the cliamp in its pid file, then the card is gone", async (t) => {
 	quick(t);
 	const music = stopped();
 	music.on.running = true;
@@ -776,7 +728,7 @@ test("⏻ stops the player with SIGTERM to the cliamp in its pid file, then offe
 	assert.ok(y > 0 && out[y].replace(/ +│$/, "").endsWith(`${NEXT}  ${POWER}`), out.join("\n"));
 	const before = calls.length;
 	assert.equal(mouse("click", y, [...out[y]].indexOf(POWER))?.handled, true);
-	assert.ok(await until(() => rows().some((row) => row.startsWith(START))), rows().join("\n"));
+	assert.ok(await until(() => noCard(rows)), rows().join("\n"));
 	assert.deepEqual(calls.slice(before).filter((args) => ["pid", "comm", "kill"].includes(args[0])), [["pid"], ["comm", 4242], ["kill", 4242, "SIGTERM"]]);
 	assert.ok(!calls.some((args) => args[0] === "stop" || args[0] === "remote" && args[2] === "quit"), "no IPC quit: cliamp v2.3 has none");
 });
@@ -871,14 +823,9 @@ test("folded, previous, play/pause and next run their command and flash; the bar
 	assert.ok(!calls.slice(opened).some((args) => ["prev", "toggle", "next"].includes(args[0])));
 });
 
-test("folded with no player: the title, then Start cliamp", async (t) => {
+test("folded with no player: no card either", async (t) => {
 	quick(t);
-	const { rows, mouse, calls } = await compactColumn(t, stopped().reply, true);
+	const { rows } = await compactColumn(t, stopped().reply, true);
 	await settle();
-	const out = trimmed(rows());
-	assert.equal(out[1], "│ Music ▸", out.join("\n"));
-	assert.equal(out[2], START);
-	assert.equal(mouse("click", 2, 3)?.handled, true);
-	assert.deepEqual(calls.find((args) => args[0] === "spawn"), ["spawn", "cliamp", ["--daemon"], { detached: true, stdio: "ignore" }]);
-	assert.ok(trimmed(rows()).some((row) => row === "│ Starting…"), rows().join("\n"));
+	assert.ok(noCard(rows), rows().join("\n"));
 });
