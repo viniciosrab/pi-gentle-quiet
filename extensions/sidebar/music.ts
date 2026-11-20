@@ -5,15 +5,10 @@
 //
 // Folded (gentle-quiet's config.sidebar.musicCompact, toggled by a click on the card's title), rows(inner,
 // { compact: true }) is two rows: the track, or a notice, cut with … to leave room for previous, play/pause and
-// next on its right (the same hit areas and flash), then the seek bar. The Start row and its notices stay as they
-// are; the category, the time, shuffle, repeat, the ♥ and ⏻ wait for the card to open again.
+// next on its right (the same hit areas and flash), then the seek bar. The category, the time, shuffle, repeat,
+// the ♥ and ⏻ wait for the card to open again.
 //
-// With cliamp installed (`cliamp --version`, asked once) and no player answering, the card is one row, "▶ Start
-// cliamp"; without cliamp it is left out. Nothing starts by itself: a click runs `cliamp --daemon`, cliamp with
-// no window of its own, detached from Pi (its own session, no stdio), so it keeps playing after Pi closes. The
-// card says "Starting…" and reads the status every musicTiming.startPollMs up to musicTiming.startMs; once the
-// player answers the card is drawn and the playlist picker opens, else it says "cliamp did not start" for a few
-// seconds. The ⏻ after next stops the player: cliamp v2.3 has no quit over its socket (only MPRIS's Quit), so it
+// With no player answering the card is left out; it never starts cliamp. The ⏻ after next stops the player: cliamp v2.3 has no quit over its socket (only MPRIS's Quit), so it
 // is SIGTERM, which cliamp handles by saving where it was and leaving, sent to the pid in cliamp.sock.pid only
 // when /proc/<pid>/comm says that process is cliamp (a stale pid file is never signalled).
 //
@@ -44,7 +39,7 @@
 // the status is read and, when the player is not playing, `cliamp play` runs. A failure changes nothing.
 // @ts-nocheck
 
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -54,7 +49,7 @@ import { LOVED, UNLOVED, openMusicPicker } from "./music-picker.ts";
 /**
  * How cliamp is asked: its stdout, or undefined when it fails (not installed, no player); and its favorites:
  * their paths (undefined when they cannot be read) and a toggle (true added, false removed, rejects with the
- * reason); and the player's process: spawn (node's), the pid in cliamp.sock.pid, a process's name (its
+ * reason); and the player's process: the pid in cliamp.sock.pid, a process's name (its
  * /proc/<pid>/comm, undefined when there is no such process) and kill. Tests swap them.
  */
 export const musicDeps = {
@@ -64,7 +59,6 @@ export const musicDeps = {
 		}),
 	favoritePaths: () => readFavoritePaths(),
 	toggleFavorite: (track) => toggleFavorite(track),
-	spawn: (command, args, options) => spawn(command, args, options),
 	readPid: async () => {
 		try {
 			const pid = Number.parseInt(await fs.promises.readFile(path.join(cliampDir(), "cliamp.sock.pid"), "utf8"), 10);
@@ -203,9 +197,7 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 		asked: false,
 		lines: undefined, // where the category, the track and the artist rows are
 		loved: new Set(), // the paths in favorites.toml
-		notice: undefined, // { text, until }: why the last ♥ or ⏻ did not work, or that cliamp did not start
-		installed: undefined, // whether `cliamp --version` answered; undefined until asked
-		starting: false, // a `cliamp --daemon` started from here, not answering yet
+		notice: undefined, // { text, until }: why the last ♥ or ⏻ did not work
 		stopping: false, // a SIGTERM sent from here, the player still answering
 		lovedAt: 0, // bumped by each Favorites read and each flip: a read older than a flip is dropped
 	};
@@ -232,7 +224,6 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 				state.status = next;
 				state.at = Date.now();
 				if (next) askPlaylists();
-				else askInstalled();
 				if (changed || next?.state === "playing") requestRender();
 			});
 	};
@@ -309,36 +300,6 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 			}
 		}
 		return false;
-	};
-
-	// Whether cliamp is installed, asked once, only once no player has answered.
-	const askInstalled = () => {
-		if (state.installed !== undefined || state.askingInstalled) return;
-		state.askingInstalled = true;
-		ask(["--version"]).then((text) => {
-			state.installed = typeof text === "string" && /cliamp/i.test(text);
-			if (state.installed) requestRender();
-		});
-	};
-
-	// `cliamp --daemon`, cliamp with no window, detached from Pi so it outlives it; then the card and the picker.
-	const start = async (at) => {
-		state.starting = true;
-		state.notice = undefined;
-		requestRender();
-		try {
-			const child = musicDeps.spawn("cliamp", ["--daemon"], { detached: true, stdio: "ignore" });
-			child?.on?.("error", () => undefined); // a cliamp gone since --version: the wait below says so
-			child?.unref?.();
-		} catch {
-			// as above
-		}
-		const up = await waitFor(Boolean);
-		state.starting = false;
-		if (!up) return say("cliamp did not start");
-		requestRender();
-		await askPlaylists();
-		if (state.status && state.playlists?.length) openPicker(at);
 	};
 
 	// SIGTERM to the cliamp in cliamp.sock.pid, once /proc says that pid is cliamp; then waits for it to be gone.
@@ -430,17 +391,7 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 			state.lines = undefined;
 			const cut = (text) => (visibleWidth(text) <= inner ? text : truncateToWidth(text, inner, "…"));
 			if (state.stopping) return [paint("dim", "Stopping…")];
-			if (!status) {
-				// No player: once a read said so, the Start row when cliamp is installed.
-				if (!state.at) return [];
-				askInstalled();
-				if (state.starting) return [paint("dim", "Starting…")];
-				if (state.notice && Date.now() < state.notice.until) return [paint("dim", cut(state.notice.text))];
-				state.notice = undefined;
-				if (!state.installed) return [];
-				state.lines = { start: 0 };
-				return [paint("accent", cut("▶ Start cliamp"))];
-			}
+			if (!status) return []; // no player: no card
 			const rows = [];
 			// The artist, then the title, on one row: cut with … at the end, never a second row.
 			const title = status.title || (status.state === "stopped" ? "Stopped" : "Unknown track");
@@ -518,11 +469,7 @@ export function createMusic({ paint, requestRender, ctx = () => undefined }) {
 		click(line, x, at) {
 			const status = state.status;
 			const lines = state.lines;
-			if (!status) {
-				if (lines?.start !== line || state.starting) return false;
-				void start(at).catch(() => undefined);
-				return true;
-			}
+			if (!status) return false;
 			// The controls first: folded, they share the track's row.
 			const controls = state.controls;
 			const hit = controls && line === controls.line ? controls.hits.find((candidate) => x >= candidate.from - 1 && x <= candidate.to) : undefined;

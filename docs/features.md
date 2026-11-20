@@ -74,10 +74,8 @@ with its track count (`1 track`, `2 tracks`); `↑↓` (or `k`/`j`) and `Enter`,
 each with its heart, where `Enter` or a click plays a track, `f` toggles its heart and `Esc`, `←` or `h` go
 back. A list longer than the pop-up has a scrollbar at its right edge to drag or click (its thumb grows under the pointer, as Pi's); it glides the list to where the pointer puts it, instead of jumping, and
 leaves the cursor where it is. A click on the artist and track row opens the tracks of the category playing.
-`q` or a click outside closes the pop-up. With cliamp installed and no player running the card is one row,
-`▶ Start cliamp`: a click starts `cliamp --daemon`, cliamp with no window of its own, detached from Pi, then
-draws the card and opens the categories; it keeps playing after Pi closes. Nothing starts it by itself, and
-without cliamp installed the card is left out. cliamp is one player per user, so every Pi window shows and
+`q` or a click outside closes the pop-up. With no player running the card is left out; Pi never starts
+cliamp. cliamp is one player per user, so every Pi window shows and
 controls the same one. A click on the card's title (`Music ▾`) folds it to `Music ▸`: just the track with
 previous, play/pause and next on its row, and the seek bar; another click opens it again, and the choice is
 kept in `gentle-quiet.json`. Jobs and Todos scroll under them. The Todos card grows with

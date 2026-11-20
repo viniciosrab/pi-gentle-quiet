@@ -2299,9 +2299,8 @@ function jobsGlyphs(rows) {
 	});
 }
 
-// MAIN's Music card (./sidebar/music.ts): the cliamp player under Status and Context; with no player answering,
-// a "▶ Start cliamp" row when cliamp is installed, else left out. A click on Start starts cliamp headless, one on
-// its ♥, previous, play/pause, next or ⏻ control runs it, one on its category, track or artist
+// MAIN's Music card (./sidebar/music.ts): the cliamp player under Status and Context; with no player answering
+// it is left out. A click on its ♥, previous, play/pause, next or ⏻ control runs it, one on its category, track or artist
 // row opens the picker over Pi (liveCtx's ui.custom, placed by the click's screen cell). A click on its title,
 // "Music ▾", folds it to "Music ▸": the track with previous, play/pause and next, and the bar, with no blank row
 // under the title; config.sidebar.musicCompact keeps the choice. Its rows start under the title (and the blank
