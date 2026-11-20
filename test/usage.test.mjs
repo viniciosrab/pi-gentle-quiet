@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { configFile, load, painted, picker, plain, readConfig, theme, writeConfig } from "./helpers.mjs";
 
@@ -117,9 +117,9 @@ test("Status line usage can be turned off in the menu and is saved", async () =>
 });
 
 // Subagents are separate Pi processes: each one shares its readings through this file.
-const usageFile = path.join(path.dirname(configFile), "gentle-quiet-usage.json");
+const usageFile = path.join(path.dirname(configFile), "gentle-quiet", "usage.json");
 const readUsageFile = () => JSON.parse(readFileSync(usageFile, "utf8"));
-const writeUsageFile = (value) => writeFileSync(usageFile, JSON.stringify(value));
+const writeUsageFile = (value) => (mkdirSync(path.dirname(usageFile), { recursive: true }), writeFileSync(usageFile, JSON.stringify(value)));
 
 // claude-accounts gives each Pi process its Claude account through this variable; the file keys a
 // Claude reading by a fingerprint of it, never the token itself.
