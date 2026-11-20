@@ -61,6 +61,25 @@ const AGENT_DIR = (() => {
 	}
 })();
 const CONFIG_FILE = path.join(AGENT_DIR, "gentle-quiet.json");
+// What the extension writes on its own (usage readings, tree memory) lives in its own folder; the
+// settings above stay next to Pi's.
+const STATE_DIR = path.join(AGENT_DIR, "gentle-quiet");
+
+/** Older versions kept the state files in the agent dir itself: move them into STATE_DIR once. A file
+ *  already there is never overwritten, and another Pi window moving it first is not an error. */
+function moveLegacyState() {
+	for (const [legacy, name] of [["gentle-quiet-usage.json", "usage.json"], ["gentle-quiet-tree.json", "tree.json"]]) {
+		const from = path.join(AGENT_DIR, legacy);
+		const to = path.join(STATE_DIR, name);
+		try {
+			if (!existsSync(from) || existsSync(to)) continue;
+			mkdirSync(STATE_DIR, { recursive: true });
+			renameSync(from, to);
+		} catch {
+			// best effort: a file left behind only loses old readings or open folders
+		}
+	}
+}
 const ENGRAM_CHROME = path.join(AGENT_DIR, "npm/node_modules/gentle-engram/memory-tool-chrome.js");
 const GENTLE_PI_LIB = path.join(AGENT_DIR, "npm/node_modules/gentle-pi/lib");
 
@@ -3337,7 +3356,7 @@ const usageKey = (provider, name, account) => (name === "claude" ? `${provider}#
 
 // Every subagent is its own Pi process, so its readings never reach this one's events. Each process
 // shares its readings through this file and takes the newer ones it finds there (`at`, ms).
-const USAGE_FILE = path.join(AGENT_DIR, "gentle-quiet-usage.json");
+const USAGE_FILE = path.join(STATE_DIR, "usage.json");
 const USAGE_POLL_MS = 2000;
 let usageFileStamp; // mtime of the file as last read
 let usageTimer;
@@ -3373,7 +3392,7 @@ function syncUsage() {
 
 function shareUsage(key, usage) {
 	try {
-		mkdirSync(AGENT_DIR, { recursive: true });
+		mkdirSync(STATE_DIR, { recursive: true });
 		const tmp = `${USAGE_FILE}.${process.pid}.tmp`;
 		writeFileSync(tmp, JSON.stringify({ ...readUsageFile(), [key]: usage }));
 		renameSync(tmp, USAGE_FILE);
@@ -4162,6 +4181,7 @@ function jobNoticeRenderer(message, options = {}, t) {
 }
 
 export default async function (pi) {
+	moveLegacyState();
 	config = loadConfig();
 	const chrome = await loadEngramChrome();
 	engramChrome = chrome;

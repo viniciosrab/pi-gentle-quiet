@@ -11,6 +11,9 @@ import { launchDeps, launchEditor } from "../extensions/sidebar/tree-launch.ts";
 import { flattenTree, parseGitStatus, parseIgnored, scanTree } from "../extensions/sidebar/tree-scan.ts";
 import { nerdIcon } from "../extensions/sidebar/nerd-icons.ts";
 
+// Where the tree keeps the folders left open: <agentDir>/gentle-quiet/tree.json.
+const memoryFile = (agentDir) => path.join(agentDir, "gentle-quiet", "tree.json");
+
 // A project on disk: `files` are relative paths, a trailing "/" makes an empty folder.
 function project(files, name = "demo-app") {
 	const root = path.join(mkdtempSync(path.join(os.tmpdir(), "gq-tree-")), name);
@@ -45,7 +48,8 @@ function boxed(rows, width) {
 // tests that draw an open src start from this one.
 function srcOpen(cwd) {
 	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
-	writeFileSync(path.join(agentDir, "gentle-quiet-tree.json"), JSON.stringify({ [cwd]: { expanded: ["src"], at: 1 } }));
+	mkdirSync(path.join(agentDir, "gentle-quiet"), { recursive: true });
+	writeFileSync(memoryFile(agentDir), JSON.stringify({ [cwd]: { expanded: ["src"], at: 1 } }));
 	return agentDir;
 }
 
@@ -398,8 +402,7 @@ test("a click on a folder toggles it and asks for a redraw", async (t) => {
 	assert.match(rows()[line("src")], /📁 src/);
 });
 
-// The folders a click opens or closes are saved per project in <agentDir>/gentle-quiet-tree.json.
-const memoryFile = (agentDir) => path.join(agentDir, "gentle-quiet-tree.json");
+// The folders a click opens or closes are saved per project in <agentDir>/gentle-quiet/tree.json.
 const savedFolders = (agentDir) => {
 	try {
 		return JSON.parse(readFileSync(memoryFile(agentDir), "utf8"));
@@ -450,6 +453,7 @@ test("right click's close-all is remembered too, and a project never seen opens 
 
 test("an unreadable or broken memory file leaves the default (every folder closed), and the tree still works", async (t) => {
 	const agentDir = mkdtempSync(path.join(os.tmpdir(), "gq-agent-"));
+	mkdirSync(path.join(agentDir, "gentle-quiet"));
 	writeFileSync(memoryFile(agentDir), "{ not json");
 	const { tab, rows } = await opened({ cwd: project(FILES), git: STATUS(""), agentDir });
 	t.after(() => tab.dispose());
